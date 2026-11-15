@@ -8,7 +8,11 @@ export interface ToolDefinition {
 }
 
 export interface SentinelHook {
-  evaluateToolCall: (name: string, args: Record<string, unknown>) => {
+  evaluateToolCall: (
+    name: string,
+    args: Record<string, unknown>,
+    context?: { approval_level?: string; botId?: string }
+  ) => {
     isDangerous: boolean;
     reason?: string;
   };
@@ -125,8 +129,11 @@ export async function* runAgentLoop(
 
       yield { type: 'tool:call_start', toolName: call.name, input: call.args, bot_id: context.botId, session_id: context.sessionId };
 
-      // 5. Sentinel 确定性安全拦截门禁
-      const check = sentinel.evaluateToolCall(call.name, call.args);
+      // 5. Sentinel 确定性安全拦截门禁 (支持 Bot 差异化审批级别)
+      const check = sentinel.evaluateToolCall(call.name, call.args, {
+        approval_level: context.profile?.approval_level,
+        botId: context.botId
+      });
       if (check.isDangerous) {
         const approvalId = `appr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const approvalReq: ApprovalRequest = {

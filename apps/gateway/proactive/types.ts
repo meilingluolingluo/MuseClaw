@@ -27,6 +27,7 @@ export interface RoutineRun {
   summary?: string;
   output?: string;
   approvalRequired: boolean;
+  quiet?: boolean;                // 静默标记 (NOTHING NEW: 正常运行无异常，抑制外部 IM 骚扰推送)
   sessionId?: string;
 }
 

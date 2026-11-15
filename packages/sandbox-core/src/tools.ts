@@ -1,5 +1,7 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { ToolDefinition } from './loop.js';
 
 const execAsync = promisify(exec);
@@ -23,8 +25,9 @@ function getSanitizedEnv(): NodeJS.ProcessEnv {
 /**
  * 基础内置工具集（可扩展）
  */
-export function createDefaultTools(options?: { browserWorkerUrl?: string }): ToolDefinition[] {
+export function createDefaultTools(options?: { browserWorkerUrl?: string; artifactsDir?: string }): ToolDefinition[] {
   const browserWorkerUrl = options?.browserWorkerUrl || 'http://127.0.0.1:8790';
+  const artifactsDir = options?.artifactsDir || path.resolve(process.cwd(), 'apps/gateway/data/artifacts');
 
   return [
     {
@@ -78,6 +81,39 @@ export function createDefaultTools(options?: { browserWorkerUrl?: string }): Too
           // 降级本地抓取
         }
         return { status: 'navigated', url };
+      }
+    },
+    {
+      name: 'save_artifact',
+      description: '将任务产出物（如报告、配置、导出的代码、数据总结等）保存为正式交付工件，供用户下载查阅',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: { type: 'string', description: '产出物文件名，如 report.md 或 data.json' },
+          content: { type: 'string', description: '产出物的文本内容' },
+          title: { type: 'string', description: '产出物中文标题，如 "服务器周度健康巡检报告"' }
+        },
+        required: ['filename', 'content']
+      },
+      execute: async (args) => {
+        const filename = path.basename(String(args.filename || 'artifact.txt'));
+        const content = String(args.content || '');
+        const title = String(args.title || filename);
+
+        if (!fs.existsSync(artifactsDir)) {
+          fs.mkdirSync(artifactsDir, { recursive: true });
+        }
+        const filePath = path.join(artifactsDir, filename);
+        fs.writeFileSync(filePath, content, 'utf-8');
+        console.log(`[Tool:save_artifact] 交付工件已保存: ${filename} (${Buffer.byteLength(content, 'utf-8')} 字节)`);
+
+        return {
+          success: true,
+          title,
+          filename,
+          sizeBytes: Buffer.byteLength(content, 'utf-8'),
+          url: `/api/artifacts/${encodeURIComponent(filename)}`
+        };
       }
     }
   ];

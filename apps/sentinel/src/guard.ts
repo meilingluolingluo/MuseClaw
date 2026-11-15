@@ -1,6 +1,11 @@
 import type { ApprovalRequest } from '@museclaw/protocol';
 import type { SentinelHook } from '@museclaw/sandbox-core/src/loop.js';
 
+export interface PolicyContext {
+  approval_level?: 'ask' | 'auto_edits' | 'full';
+  botId?: string;
+}
+
 export class SentinelPolicyManager implements SentinelHook {
   private pendingApprovals = new Map<
     string,
@@ -10,18 +15,16 @@ export class SentinelPolicyManager implements SentinelHook {
     }
   >();
 
-  // 1. 规则预检：判断是否属于高危破坏性操作
-  public evaluateToolCall(name: string, args: Record<string, unknown>): { isDangerous: boolean; reason?: string } {
-    const dangerousPatterns = ['delete', 'drop', 'remove', 'rm', 'kill', 'send_external_email', 'pay'];
+  // 1. 规则预检：判断是否属于高危破坏性操作 (支持差异化审批分级)
+  public evaluateToolCall(
+    name: string,
+    args: Record<string, unknown>,
+    context?: PolicyContext
+  ): { isDangerous: boolean; reason?: string } {
+    const level = context?.approval_level || 'ask';
     const toolLower = name.toLowerCase();
 
-    // 命中危险动作命名
-    const isNameDangerous = dangerousPatterns.some((pattern) => toolLower.includes(pattern));
-    if (isNameDangerous) {
-      return { isDangerous: true, reason: `工具名称命中了高危操作关键词 [${name}]` };
-    }
-
-    // 检查 bash/shell 工具内部的具体命令行参数
+    // 无论任何级别，绝对拦截底层元数据外泄、系统私钥与物理破坏命令
     if (toolLower === 'bash' || toolLower === 'execute_shell' || toolLower === 'terminal') {
       const cmd = String(args.command || args.cmd || '');
       const hasBadCmd = ['rm -rf', 'drop ', 'truncate ', 'mkfs', 'dd if='].some((p) => cmd.includes(p));
@@ -50,6 +53,26 @@ export class SentinelPolicyManager implements SentinelHook {
       if (url.includes('169.254.169.254') || url.includes('metadata.google.internal')) {
         return { isDangerous: true, reason: `浏览器工具尝试访问云元数据服务: ${url}` };
       }
+    }
+
+    // Full 模式：除上述死线外，其余普通工具不强制拦截
+    if (level === 'full') {
+      return { isDangerous: false };
+    }
+
+    // Auto-Edits 模式：文档编辑与产出类动作免批放行，仅拦截删除与支付类
+    if (level === 'auto_edits') {
+      const editTools = ['write', 'edit', 'save_artifact', 'create_file', 'append'];
+      if (editTools.some((p) => toolLower.includes(p))) {
+        return { isDangerous: false };
+      }
+    }
+
+    // 默认 Ask 严格模式：命中了高危操作关键词一律拦截
+    const dangerousPatterns = ['delete', 'drop', 'remove', 'rm', 'kill', 'send_external_email', 'pay'];
+    const isNameDangerous = dangerousPatterns.some((pattern) => toolLower.includes(pattern));
+    if (isNameDangerous) {
+      return { isDangerous: true, reason: `工具名称命中了高危操作关键词 [${name}]` };
     }
 
     return { isDangerous: false };

@@ -288,6 +288,10 @@ export class ProactiveManager {
       run.output = output || '任务顺利执行完毕。';
       run.summary = run.output.slice(0, 300);
 
+      // 静默判定 (Quiet When Green)：输出包含 NOTHING NEW / 【无异常】/ 【正常】 且未触发过审批
+      const isQuietPattern = /nothing new|【无异常】|【正常】|"quiet":\s*true/i.test(run.output);
+      run.quiet = isQuietPattern && !run.approvalRequired;
+
       if (session && this.options.sessionStore) {
         if (!session.messages) session.messages = [];
         session.messages.push({ role: 'user', content: fullPrompt });

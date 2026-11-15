@@ -10,7 +10,8 @@ import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
 import { ProactiveManager } from '../proactive/index.ts';
 import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager } from '../bots/index.ts';
-import type { RouteResult, Session } from '@museclaw/protocol';
+import { McpClientManager } from '../mcp/client.ts';
+import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +37,15 @@ function loadEnv() {
 loadEnv();
 
 const sentinel = new SentinelPolicyManager();
-const tools = createDefaultTools();
+const baseTools = createDefaultTools();
+const mcpManager = new McpClientManager();
+let tools = [...baseTools];
+
+function refreshTools() {
+  tools = [...baseTools, ...mcpManager.getToolDefinitions()];
+  return tools;
+}
+
 const callLLM = createDeepSeekCaller();
 
 // 1. 初始化如流 (Infoflow) 通道配置
@@ -166,6 +175,12 @@ const proactive = new ProactiveManager({
     session.messages.push({ role: 'user', content: `[触发源: ${run.triggerSource}] 执行例行任务: ${run.routineName}` });
     session.messages.push({ role: 'assistant', content: output });
 
+    // 静默抑制 (Quiet When Green)：正常无异常时静默沉淀历史，不向飞书/如流骚扰推送
+    if (run.quiet) {
+      console.log(`[Proactive] 任务 [${run.routineName}] 运行正常 (NOTHING NEW)，静默沉淀，已抑制外部通知。`);
+      return;
+    }
+
     // 推送巡检简报到飞书
     const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
     if (alertTarget) {
@@ -263,6 +278,161 @@ export function startGatewayServer(port = 8799) {
       botMemory.saveMemory(id, memory);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, bot_id: id, memory }));
+    }
+
+    // B3. 对外独立 Bot API (Headless Bot API: POST /api/bots/:id/chat)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/chat$/)) {
+      const botId = url.pathname.split('/')[3];
+      const bot = botRegistry.get(botId);
+      if (!bot || !bot.enabled) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `Bot [${botId}] not found or disabled` }));
+      }
+
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { message, session_id } = JSON.parse(body || '{}');
+      if (!message) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "message" is required' }));
+      }
+
+      const targetSessionId = session_id || `api_${botId}_${Date.now()}`;
+      const session = sessionStore.create(targetSessionId, bot.id, `[API] ${message.slice(0, 16)}`);
+
+      const botWithMemory: AgentProfile = {
+        ...bot,
+        memory: botMemory.getMemory(bot.id)
+      };
+
+      const loop = runAgentLoop(
+        bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
+        message,
+        refreshTools(),
+        sentinel,
+        callLLM,
+        { sessionId: session.id, userId: 'external_api', botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+      );
+
+      let output = '';
+      let needsApproval = false;
+      let pendingApprovalReq: ApprovalRequest | null = null;
+
+      for await (const event of loop) {
+        if (event.type === 'stream:text-delta') {
+          output += event.text;
+        }
+        if (event.type === 'sentinel:approval_needed') {
+          needsApproval = true;
+          pendingApprovalReq = event.request;
+          const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
+          if (alertTarget) {
+            feishuChannel.approvalBridge.pushApprovalCard(alertTarget, event.request).catch(() => {});
+          }
+        }
+      }
+
+      if (session.messages) {
+        session.messages.push({ role: 'user', content: message });
+        if (output) session.messages.push({ role: 'assistant', content: output });
+        sessionStore.save(session);
+      }
+
+      if (needsApproval && pendingApprovalReq) {
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          status: 'needs_approval',
+          approval_id: pendingApprovalReq.approvalId,
+          action_summary: pendingApprovalReq.actionSummary,
+          session_id: session.id,
+          bot_id: bot.id,
+          message: '操作涉及高危动作，已被 Sentinel 拦截并推送到管理员审批通道'
+        }));
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        status: 'completed',
+        reply: output || '任务已顺利执行完毕。',
+        session_id: session.id,
+        bot_id: bot.id
+      }));
+    }
+
+    // B4. 交付工件与产出物接口 (Artifacts Delivery)
+    const artifactsDir = path.resolve(__dirname, '../data/artifacts');
+    if (req.method === 'GET' && url.pathname === '/api/artifacts') {
+      if (!fs.existsSync(artifactsDir)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify([]));
+      }
+      const files = fs.readdirSync(artifactsDir).map((file) => {
+        const stat = fs.statSync(path.join(artifactsDir, file));
+        return {
+          filename: file,
+          sizeBytes: stat.size,
+          updatedAt: stat.mtimeMs,
+          url: `/api/artifacts/${encodeURIComponent(file)}`
+        };
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(files));
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/api/artifacts/')) {
+      const filename = path.basename(decodeURIComponent(url.pathname.replace('/api/artifacts/', '')));
+      const filePath = path.join(artifactsDir, filename);
+      if (!fs.existsSync(filePath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Artifact not found' }));
+      }
+      const content = fs.readFileSync(filePath);
+      const isText = filename.endsWith('.txt') || filename.endsWith('.md') || filename.endsWith('.json') || filename.endsWith('.csv');
+      res.writeHead(200, {
+        'Content-Type': isText ? 'text/plain; charset=utf-8' : 'application/octet-stream',
+        'Content-Disposition': `inline; filename="${filename}"`
+      });
+      return res.end(content);
+    }
+
+    // B5. 标准 MCP 工具生态管理接口 (Model Context Protocol)
+    if (req.method === 'GET' && url.pathname === '/api/mcp/servers') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        servers: mcpManager.listServers(),
+        totalTools: mcpManager.getToolDefinitions().length
+      }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/mcp/servers') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { name, command, args, env } = JSON.parse(body || '{}');
+      if (!name || !command) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Fields "name" and "command" are required' }));
+      }
+      try {
+        await mcpManager.addServer(name, { command, args, env });
+        refreshTools();
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          success: true,
+          name,
+          servers: mcpManager.listServers()
+        }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/mcp/servers/')) {
+      const name = url.pathname.replace('/api/mcp/servers/', '');
+      const success = await mcpManager.removeServer(name);
+      refreshTools();
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success }));
     }
 
     // C. 会话列表接口
@@ -413,7 +583,7 @@ export function startGatewayServer(port = 8799) {
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
         text,
-        tools,
+        refreshTools(),
         sentinel,
         callLLM,
         { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
@@ -450,11 +620,21 @@ export function startGatewayServer(port = 8799) {
     res.end('Not Found');
   });
 
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);
     console.log(`📡 如流 (Infoflow) Webhook 接收端点: http://localhost:${port}/api/channels/infoflow/webhook`);
     console.log(`📡 飞书 (Feishu) Webhook 接收端点: http://localhost:${port}/api/channels/feishu/webhook`);
     console.log(`⏰ 主动任务管理端点: http://localhost:${port}/api/routines | 外部 Webhook: http://localhost:${port}/api/hooks/:id`);
+    console.log(`📦 交付工件存储端点: http://localhost:${port}/api/artifacts`);
+    console.log(`🔌 MCP 工具生态端点: http://localhost:${port}/api/mcp/servers`);
+
+    // 初始化已配置的 MCP 服务器工具生态
+    try {
+      await mcpManager.init();
+      refreshTools();
+    } catch (err: any) {
+      console.warn(`[MCP] 初始化提示: ${err.message}`);
+    }
 
     // 启动 Proactive 自动化例行调度器 (每 30 秒心跳)
     proactive.start(30000);
