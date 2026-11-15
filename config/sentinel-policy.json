@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "description": "MuseClaw Sentinel Enterprise Security Policy",
+  "deny_tools": [],
+  "high_risk_patterns": [
+    "rm -rf",
+    "drop ",
+    "truncate ",
+    "mkfs",
+    "dd if=",
+    "chmod 777",
+    ":(){ :|:& };:",
+    "shutdown",
+    "reboot",
+    "init 0"
+  ],
+  "cloud_metadata_targets": [
+    "169.254.169.254",
+    "metadata.google.internal",
+    "metadata.azure.com",
+    "100.100.100.200"
+  ],
+  "credential_patterns": [
+    "/etc/shadow",
+    "/etc/sudoers",
+    ".ssh/id_rsa",
+    ".ssh/id_ed25519",
+    ".aws/credentials",
+    ".env",
+    "vault.key"
+  ],
+  "egress_allowlist": [
+    "localhost",
+    "127.0.0.1",
+    "*.feishu.cn",
+    "open.feishu.cn",
+    "api.deepseek.com",
+    "api.openai.com"
+  ],
+  "always_ask_tools": [
+    "send_external_email"
+  ]
+}

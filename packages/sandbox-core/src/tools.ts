@@ -87,7 +87,7 @@ export function createDefaultTools(options?: {
     // 阶梯 4 (Browser): 无头 Chromium 浏览器
     {
       name: 'browser_open',
-      description: '在沙箱持久化 Chromium 浏览器中打开指定 URL 并获取完整渲染的 DOM 页面内容',
+      description: '在沙箱持久化 Chromium 浏览器中打开指定 URL 并获取渲染内容（若浏览器 Worker 未启动则降级轻量 HTTP 抓取）',
       parameters: {
         type: 'object',
         properties: {
@@ -99,25 +99,49 @@ export function createDefaultTools(options?: {
         const url = String(args.url);
         console.log(`[Tool:browser_open] 访问: ${url}`);
         try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 2000);
           const res = await fetch(`${browserWorkerUrl}/navigate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-          });
+            body: JSON.stringify({ url }),
+            signal: controller.signal
+          }).finally(() => clearTimeout(timer));
           if (res.ok) {
             return await res.json();
           }
         } catch {
-          // 降级本地抓取
+          // Worker 未就绪时，降级使用轻量 HTTP 获取文本，绝不伪造虚假渲染成功
         }
-        return { status: 'navigated', url };
+
+        try {
+          const fetchRes = await fetch(url, { headers: { 'User-Agent': 'MuseClaw-LiteBrowser/1.0' } });
+          if (fetchRes.ok) {
+            const text = await fetchRes.text();
+            return {
+              status: 'fetched_via_http_fallback',
+              notice: 'Headless browser worker (8790) is offline; retrieved static content via HTTP fallback.',
+              url,
+              content: text.slice(0, 3000)
+            };
+          }
+          return {
+            success: false,
+            error: `Browser worker offline and HTTP fallback returned status ${fetchRes.status}`
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `Browser worker (8790) offline and direct fetch failed: ${err?.message || err}`
+          };
+        }
       }
     },
 
-    // 阶梯 5 (GUI): 屏幕截图与视觉交互
+    // 阶梯 5 (GUI): 屏幕感知 (严格校验真机 Bridge 连接)
     {
       name: 'phone_screen',
-      description: '捕获桌面/手机当前屏幕画面，供多模态视觉模型感知（阶梯 5: 最高开销与延迟，仅在无 API 时使用）',
+      description: '捕获桌面/手机当前屏幕画面，供多模态视觉模型感知（阶梯 5: 最高开销与延迟，仅在真机 Bridge 在线时可用）',
       parameters: {
         type: 'object',
         properties: {
@@ -127,20 +151,27 @@ export function createDefaultTools(options?: {
       execute: async (args) => {
         const target = String(args.target || 'phone_1');
         console.log(`[Tool:phone_screen] 获取屏幕: ${target}`);
-        return {
-          device: target,
-          resolution: '360x800',
-          view: 'wechat_chat_list',
-          elements: ['[Button: 搜索]', '[Item: 文件传输助手]', '[Item: 订阅号消息]'],
-          caption: '微信首页会话列表'
-        };
+        const bridgeUrl = process.env.DEVICE_BRIDGE_URL;
+        if (!bridgeUrl) {
+          return {
+            success: false,
+            error: 'GUI device offline: no active mobile/desktop device connected (set DEVICE_BRIDGE_URL or connect via ADB bridge)'
+          };
+        }
+        try {
+          const res = await fetch(`${bridgeUrl}/screen?device=${encodeURIComponent(target)}`);
+          if (res.ok) return await res.json();
+          return { success: false, error: `Device bridge returned HTTP ${res.status}` };
+        } catch (err: any) {
+          return { success: false, error: `Failed to connect to device bridge: ${err?.message || err}` };
+        }
       }
     },
 
-    // 阶梯 5 (GUI): 模拟触控点击/滑动
+    // 阶梯 5 (GUI): 模拟触控点击/滑动 (严格校验真机 Bridge 连接)
     {
       name: 'phone_act',
-      description: '在手机/桌面屏幕上模拟触控点击或滑动操作（阶梯 5: 最高成本动作）',
+      description: '在手机/桌面屏幕上模拟触控点击或滑动操作（阶梯 5: 最高成本动作，需真机在线）',
       parameters: {
         type: 'object',
         properties: {
@@ -154,7 +185,24 @@ export function createDefaultTools(options?: {
       execute: async (args) => {
         const action = String(args.action);
         console.log(`[Tool:phone_act] 执行触控: ${action} at (${args.x}, ${args.y})`);
-        return { success: true, action, targetCoords: [args.x, args.y] };
+        const bridgeUrl = process.env.DEVICE_BRIDGE_URL;
+        if (!bridgeUrl) {
+          return {
+            success: false,
+            error: 'GUI device offline: cannot perform touch/input without active device bridge (set DEVICE_BRIDGE_URL)'
+          };
+        }
+        try {
+          const res = await fetch(`${bridgeUrl}/act`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(args)
+          });
+          if (res.ok) return await res.json();
+          return { success: false, error: `Device bridge action failed with status ${res.status}` };
+        } catch (err: any) {
+          return { success: false, error: `Device bridge unreachable: ${err?.message || err}` };
+        }
       }
     },
 
@@ -219,10 +267,10 @@ export function createDefaultTools(options?: {
       }
     },
 
-    // 阶梯 1/3 (Egress Action): 外发邮件
+    // 阶梯 1/3 (Egress Action): 外发邮件 (严格要求配置发信凭据，拒绝虚假成功)
     {
       name: 'send_external_email',
-      description: '向指定外部邮箱发送邮件或数据报告',
+      description: '向指定外部邮箱发送邮件或数据报告（需配置 SMTP 或 Resend 凭据）',
       parameters: {
         type: 'object',
         properties: {
@@ -235,8 +283,49 @@ export function createDefaultTools(options?: {
       execute: async (args) => {
         const to = String(args.to || '');
         const subject = String(args.subject || '');
+        const body = String(args.body || '');
         console.log(`[Tool:send_external_email] 发送邮件给 ${to}: ${subject}`);
-        return { success: true, message: `Email successfully sent to ${to}` };
+
+        const smtpHost = process.env.SMTP_HOST;
+        const resendKey = process.env.RESEND_API_KEY;
+
+        if (!smtpHost && !resendKey) {
+          return {
+            success: false,
+            error: 'Email service unconfigured: missing SMTP_HOST or RESEND_API_KEY credentials. Email was NOT sent to prevent false-success hallucinations.'
+          };
+        }
+
+        // 真实集成 Resend 发信服务
+        if (resendKey) {
+          try {
+            const res = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${resendKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                from: process.env.SMTP_FROM || 'museclaw@resend.dev',
+                to: [to],
+                subject,
+                text: body
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              return { success: true, messageId: (data as any)?.id, to };
+            }
+            return { success: false, error: `Resend API rejected request: ${res.statusText}` };
+          } catch (err: any) {
+            return { success: false, error: `Resend email dispatch error: ${err?.message || err}` };
+          }
+        }
+
+        return {
+          success: false,
+          error: 'SMTP host configured but native socket delivery requires SMTP_USER and SMTP_PASS credentials'
+        };
       }
     }
   ];

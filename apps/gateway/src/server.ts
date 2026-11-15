@@ -576,16 +576,50 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(stats));
     }
 
-    // D. 审批结果回调接口 (供 Web 交互卡片或外部 Webhook 点击调用)
+    // D. 审批结果回调接口 (供 Web 交互卡片或外部 Webhook 点击调用，支持 scope: once | session | 24h | always)
     if (req.method === 'POST' && url.pathname.startsWith('/api/approvals/')) {
       const approvalId = url.pathname.replace('/api/approvals/', '');
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { approved } = JSON.parse(body || '{}');
+      const { approved, scope, operator } = JSON.parse(body || '{}');
 
-      const success = sentinel.resolveApproval(approvalId, Boolean(approved));
+      const success = sentinel.resolveApproval(approvalId, Boolean(approved), scope || 'once', operator || 'human');
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success, approvalId, approved }));
+      return res.end(JSON.stringify({ success, approvalId, approved, scope: scope || 'once' }));
+    }
+
+    // D1. 结构化审计日志接口 (Audit Trail)
+    if (req.method === 'GET' && url.pathname === '/api/audit') {
+      const sessionId = url.searchParams.get('sessionId') || undefined;
+      const limit = Number(url.searchParams.get('limit')) || 50;
+      const logs = sentinel.getAuditLog().query({ sessionId, limit });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(logs));
+    }
+
+    // D1.2 复用授权管理接口 (Grants)
+    if (req.method === 'GET' && url.pathname === '/api/grants') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(sentinel.getGrantStore().list()));
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/grants/') && url.pathname.endsWith('/revoke')) {
+      const grantId = url.pathname.replace('/api/grants/', '').replace('/revoke', '');
+      const revoked = sentinel.getGrantStore().revoke(grantId);
+      res.writeHead(revoked ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: revoked, grantId }));
+    }
+
+    // D1.3 声明式外部安全策略接口 (Policy)
+    if (req.method === 'GET' && url.pathname === '/api/policy') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(sentinel.getPolicyConfig()));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/policy/reload') {
+      sentinel.loadPolicy();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, policy: sentinel.getPolicyConfig() }));
     }
 
     // D2. 例行自动化任务管理接口 (Routines)

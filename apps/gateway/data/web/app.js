@@ -488,7 +488,13 @@ function renderSentinelApprovalCard(request, container) {
       ${request.targetDetails.command ? `<div><strong>目标命令:</strong> ${escapeHtml(request.targetDetails.command)}</div>` : ''}
       ${request.targetDetails.parameters ? `<div><strong>操作参数:</strong> ${escapeHtml(JSON.stringify(request.targetDetails.parameters))}</div>` : ''}
     </div>
-    <div class="approval-actions" id="actions-${request.approvalId}">
+    <div class="approval-actions" id="actions-${request.approvalId}" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <select id="scope-${request.approvalId}" style="background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; font-size: 11px;">
+        <option value="once">本次生效 (Once)</option>
+        <option value="session">当前会话有效 (Session)</option>
+        <option value="24h">24小时有效 (24h)</option>
+        <option value="always">永久白名单 (Always)</option>
+      </select>
       <button class="btn-reject" onclick="window.resolveApproval('${request.approvalId}', false)">
         ${Icons.x(14)} 拒绝拦截 (Reject)
       </button>
@@ -502,18 +508,20 @@ function renderSentinelApprovalCard(request, container) {
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 }
 
-// 暴露全局解挂审批处理函数
+// 暴露全局解挂审批处理函数 (支持选择 once / session / 24h / always 作用域)
 window.resolveApproval = async function (approvalId, approved) {
+  const scopeEl = document.getElementById(`scope-${approvalId}`);
+  const scope = scopeEl ? scopeEl.value : 'once';
   const actionContainer = document.getElementById(`actions-${approvalId}`);
   if (actionContainer) {
-    actionContainer.innerHTML = `<span style="font-size: 12px; color: ${approved ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">已${approved ? '批准' : '拒绝'}</span>`;
+    actionContainer.innerHTML = `<span style="font-size: 12px; color: ${approved ? 'var(--accent-green)' : 'var(--accent-red)'}; font-weight: 600;">已${approved ? `批准 (${scope})` : '拒绝'}</span>`;
   }
 
   try {
     await fetch(`/api/approvals/${encodeURIComponent(approvalId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approved })
+      body: JSON.stringify({ approved, scope, operator: 'web_user' })
     });
   } catch (err) {
     console.error('处理审批失败:', err);

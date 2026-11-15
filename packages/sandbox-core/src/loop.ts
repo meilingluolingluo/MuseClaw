@@ -1,4 +1,5 @@
 import type { MuseEvent, TrajectoryStep, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
+import { defaultVault } from './vault.ts';
 
 export interface ToolDefinition {
   name: string;
@@ -189,17 +190,28 @@ export async function* runAgentLoop(
         yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'running' };
       }
 
-      // 6. 执行具体工具
+      // 6. 执行具体工具 (自动还原 {{vault:KEY}} 凭据占位符)
       const startTime = Date.now();
       let output: unknown;
       try {
-        output = await toolDef.execute(call.args);
+        const resolvedArgs = defaultVault.resolve(call.args);
+        output = await toolDef.execute(resolvedArgs);
       } catch (err: unknown) {
         output = { error: err instanceof Error ? err.message : String(err) };
       }
       const durationMs = Date.now() - startTime;
 
-      yield { type: 'tool:call_end', toolName: call.name, output, durationMs, bot_id: context.botId, session_id: context.sessionId };
+      // 工具输出全局脱敏 (Redact): 杜绝敏感 Key / Secret 在日志或前端泄露
+      const rawOutputStr = typeof output === 'string' ? output : JSON.stringify(output);
+      const redactedOutputStr = defaultVault.redact(rawOutputStr);
+      let sanitizedOutput: unknown = output;
+      try {
+        sanitizedOutput = typeof output === 'string' ? redactedOutputStr : JSON.parse(redactedOutputStr);
+      } catch {
+        sanitizedOutput = redactedOutputStr;
+      }
+
+      yield { type: 'tool:call_end', toolName: call.name, output: sanitizedOutput, durationMs, bot_id: context.botId, session_id: context.sessionId };
 
       // 7. 动态污点识别：检查当前工具是否为污点源 (Taint Source)
       // 若读取了敏感文件、内网数据库或凭据，立即将当前会话置为受污染 (Tainted) 状态
@@ -219,7 +231,7 @@ export async function* runAgentLoop(
       }
 
       // Loop Guard 检查 B: 防连续相同错误导致无进展停滞
-      const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
+      const outputStr = defaultVault.redact(typeof output === 'string' ? output : JSON.stringify(output));
       const isError = Boolean((output as any)?.error || (output as any)?.exitCode !== 0);
       if (isError) {
         const errDetail = (output as any)?.error || (output as any)?.stderr || outputStr;

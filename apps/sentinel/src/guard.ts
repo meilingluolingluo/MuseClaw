@@ -1,12 +1,30 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ApprovalRequest } from '@museclaw/protocol';
 import type { SentinelHook } from '../../../packages/sandbox-core/src/loop.ts';
 import { ChannelLadderPolicy, type ExecutionChannel, classifyToolChannel } from '../../../packages/sandbox-core/src/channel-ladder.ts';
+import { GrantStore, type GrantScope } from './grants.ts';
+import { AuditLog, defaultAuditLog } from './audit.ts';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface PolicyContext {
   approval_level?: 'ask' | 'auto_edits' | 'full';
   botId?: string;
   sessionId?: string;
   isTainted?: boolean;
+}
+
+export interface SentinelPolicyConfig {
+  version?: string;
+  description?: string;
+  deny_tools?: string[];
+  high_risk_patterns?: string[];
+  cloud_metadata_targets?: string[];
+  credential_patterns?: string[];
+  egress_allowlist?: string[];
+  always_ask_tools?: string[];
 }
 
 export class SentinelPolicyManager implements SentinelHook {
@@ -25,8 +43,65 @@ export class SentinelPolicyManager implements SentinelHook {
   // 技能成本阶梯策略管理器 (Channel Ladder)
   private channelLadder = new ChannelLadderPolicy();
 
+  // 授权复用管理器 (Grants Store)
+  private grantStore: GrantStore;
+
+  // 结构化审计日志 (Audit Log)
+  private auditLog: AuditLog;
+
+  // 声明式外部安全策略
+  private policyConfig: SentinelPolicyConfig = {};
+  private policyPath: string;
+
+  constructor(customStorePath?: string, customPolicyPath?: string) {
+    this.grantStore = new GrantStore(customStorePath);
+    this.auditLog = defaultAuditLog;
+    this.policyPath = customPolicyPath || path.resolve(__dirname, '../../../config/sentinel-policy.json');
+    this.loadPolicy();
+  }
+
   public getChannelLadder(): ChannelLadderPolicy {
     return this.channelLadder;
+  }
+
+  public getGrantStore(): GrantStore {
+    return this.grantStore;
+  }
+
+  public getAuditLog(): AuditLog {
+    return this.auditLog;
+  }
+
+  public getPolicyConfig(): SentinelPolicyConfig {
+    return this.policyConfig;
+  }
+
+  /**
+   * 加载或热重载声明式外部策略配置 (sentinel-policy.json)
+   */
+  public loadPolicy(customPath?: string): void {
+    const targetPath = customPath || this.policyPath;
+    try {
+      if (fs.existsSync(targetPath)) {
+        const raw = fs.readFileSync(targetPath, 'utf-8');
+        this.policyConfig = JSON.parse(raw);
+        console.log(`[Sentinel:Policy] 成功载入外部声明式策略文件: ${targetPath}`);
+        return;
+      }
+    } catch (err: any) {
+      console.warn(`[Sentinel:Policy] 外部策略文件解析异常，使用内置安全基线: ${err.message}`);
+    }
+
+    // 内置安全默认基线 (Hard Baseline)
+    this.policyConfig = {
+      version: '1.0',
+      deny_tools: [],
+      high_risk_patterns: ['rm -rf', 'drop ', 'truncate ', 'mkfs', 'dd if=', 'chmod 777', ':(){ :|:& };:'],
+      cloud_metadata_targets: ['169.254.169.254', 'metadata.google.internal', 'metadata.azure.com'],
+      credential_patterns: ['/etc/shadow', '/etc/sudoers', '.ssh/id_rsa', '.ssh/id_ed25519', '.aws/credentials', '.env'],
+      egress_allowlist: ['localhost', '127.0.0.1', '*.feishu.cn', 'open.feishu.cn', 'api.deepseek.com'],
+      always_ask_tools: ['send_external_email']
+    };
   }
 
   public isSessionTainted(sessionId?: string): boolean {
@@ -40,6 +115,12 @@ export class SentinelPolicyManager implements SentinelHook {
     const existing = this.sessionTaintReasons.get(sessionId) || [];
     existing.push(reason);
     this.sessionTaintReasons.set(sessionId, existing);
+
+    this.auditLog.record('TAINT_EVENT', {
+      sessionId,
+      details: { action: 'tainted', reason }
+    });
+
     console.log(`[Sentinel:Taint] 会话已标记污染 (Tainted): ${sessionId}，原因: ${reason}`);
   }
 
@@ -47,6 +128,12 @@ export class SentinelPolicyManager implements SentinelHook {
     if (!sessionId) return;
     this.taintedSessions.delete(sessionId);
     this.sessionTaintReasons.delete(sessionId);
+
+    this.auditLog.record('TAINT_EVENT', {
+      sessionId,
+      details: { action: 'untainted' }
+    });
+
     console.log(`[Sentinel:Taint] 会话已解除污染 (Untainted): ${sessionId}`);
   }
 
@@ -57,7 +144,6 @@ export class SentinelPolicyManager implements SentinelHook {
 
   /**
    * 判断一个工具调用是否属于敏感数据源 (Taint Source)
-   * 触发源例如：读取内部文件、查询数据库、调用内网私有 API、读取凭据、获取员工通讯录等
    */
   public isTaintSource(
     name: string,
@@ -120,7 +206,6 @@ export class SentinelPolicyManager implements SentinelHook {
 
   /**
    * 判断一个工具调用是否属于网络出站/外发行为 (Egress Sink)
-   * 目标包含：发邮件、发Webhook、上传文件到外部、Shell发起curl/wget/ssh/nc等出站网络连接
    */
   public isEgressAction(name: string, args: Record<string, unknown>): { isEgress: boolean; target?: string } {
     const toolLower = name.toLowerCase();
@@ -146,13 +231,12 @@ export class SentinelPolicyManager implements SentinelHook {
     // 浏览器打开外网地址
     if (toolLower === 'browser_open' || toolLower.includes('browser')) {
       const url = String(args.url || '');
-      // 外部公网 URL
       if (url.startsWith('http://') || url.startsWith('https://')) {
         return { isEgress: true, target: url };
       }
     }
 
-    // Shell 命令中的出站网络行为 (curl, wget, ssh, scp, nc, git push 等)
+    // Shell 命令中的出站网络行为
     if (toolLower === 'bash' || toolLower === 'execute_shell' || toolLower === 'terminal') {
       const cmd = String(args.command || args.cmd || '');
       const egressCommands = [
@@ -180,49 +264,116 @@ export class SentinelPolicyManager implements SentinelHook {
     return { isEgress: false };
   }
 
-  // 1. 规则预检：判断是否属于高危破坏性操作 (支持差异化审批分级、双向污点外发阻断与技能阶梯跃迁守卫)
+  /**
+   * 规则预检：判断是否属于高危操作 (结合声明式外部策略 + Grants 授权复用 + 双向污点阻断 + 技能成本阶梯)
+   */
   public evaluateToolCall(
     name: string,
     args: Record<string, unknown>,
     context?: PolicyContext
-  ): { isDangerous: boolean; reason?: string; isTaintedEgress?: boolean; channelLadder?: { channel: ExecutionChannel; rung: number; reason?: string } } {
+  ): {
+    isDangerous: boolean;
+    reason?: string;
+    isTaintedEgress?: boolean;
+    channelLadder?: { channel: ExecutionChannel; rung: number; reason?: string };
+  } {
     const level = context?.approval_level || 'ask';
     const toolLower = name.toLowerCase();
+    const targetStr = String(args.command || args.cmd || args.url || args.to || args.path || '');
 
-    // 无论任何级别，绝对拦截底层元数据外泄、系统私钥与物理破坏命令 (Hard Invariants)
+    // -------------------------------------------------------------------------
+    // 0. 检查复用授权 (Grants Check): 若用户已授予当前会话或永久白名单，自动免批放行
+    // -------------------------------------------------------------------------
+    const grantCheck = this.grantStore.check(name, targetStr, context?.sessionId);
+    if (grantCheck.hasGrant) {
+      this.auditLog.record('GRANT_USED', {
+        sessionId: context?.sessionId,
+        botId: context?.botId,
+        tool: name,
+        target: targetStr,
+        details: { grantId: grantCheck.grant?.id, scope: grantCheck.grant?.scope }
+      });
+      return { isDangerous: false, reason: `已由复用授权 (${grantCheck.grant?.scope}) 自动豁免` };
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. 策略黑名单拦截 (deny_tools)
+    // -------------------------------------------------------------------------
+    if (this.policyConfig.deny_tools && this.policyConfig.deny_tools.includes(name)) {
+      const reason = `工具 [${name}] 已被企业安全策略全局禁用 (deny_tools)`;
+      this.auditLog.record('SENTINEL_INTERCEPT', {
+        sessionId: context?.sessionId,
+        botId: context?.botId,
+        tool: name,
+        target: targetStr,
+        details: { reason }
+      });
+      return { isDangerous: true, reason };
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. 底层绝对破坏性操作与凭证防护 (Hard Invariants)
+    // -------------------------------------------------------------------------
     if (toolLower === 'bash' || toolLower === 'execute_shell' || toolLower === 'terminal') {
       const cmd = String(args.command || args.cmd || '');
-      const hasBadCmd = ['rm -rf', 'drop ', 'truncate ', 'mkfs', 'dd if='].some((p) => cmd.includes(p));
-      if (hasBadCmd) {
-        return { isDangerous: true, reason: `Shell 包含破坏性系统命令: ${cmd}` };
+      const patterns = this.policyConfig.high_risk_patterns || ['rm -rf', 'drop ', 'truncate ', 'mkfs', 'dd if='];
+      const matchedBad = patterns.find((p) => cmd.includes(p));
+      if (matchedBad) {
+        const reason = `Shell 包含破坏性系统命令: ${cmd}`;
+        this.auditLog.record('SENTINEL_INTERCEPT', {
+          sessionId: context?.sessionId,
+          botId: context?.botId,
+          tool: name,
+          target: cmd,
+          details: { reason }
+        });
+        return { isDangerous: true, reason };
       }
 
       // 出向安全与元数据接口防御 (Egress Gate)
-      const egressBadTargets = ['169.254.169.254', 'metadata.google.internal', 'metadata.azure.com'];
+      const egressBadTargets = this.policyConfig.cloud_metadata_targets || ['169.254.169.254', 'metadata.google.internal', 'metadata.azure.com'];
       const matchedEgress = egressBadTargets.find((target) => cmd.includes(target));
       if (matchedEgress) {
-        return { isDangerous: true, reason: `Shell 尝试探测云主机元数据接口 [${matchedEgress}]: ${cmd}` };
+        const reason = `Shell 尝试探测云主机元数据接口 [${matchedEgress}]: ${cmd}`;
+        this.auditLog.record('SENTINEL_INTERCEPT', {
+          sessionId: context?.sessionId,
+          botId: context?.botId,
+          tool: name,
+          target: cmd,
+          details: { reason }
+        });
+        return { isDangerous: true, reason };
       }
 
       // 核心凭证与敏感系统文件外泄防御
-      const credentialPatterns = ['/etc/shadow', '/etc/sudoers', '.ssh/id_rsa', '.ssh/id_ed25519', '.aws/credentials'];
+      const credentialPatterns = this.policyConfig.credential_patterns || ['/etc/shadow', '/etc/sudoers', '.ssh/id_rsa', '.ssh/id_ed25519', '.aws/credentials'];
       const matchedCred = credentialPatterns.find((pattern) => cmd.includes(pattern));
       if (matchedCred) {
-        return { isDangerous: true, reason: `Shell 尝试访问敏感凭证或私钥文件 [${matchedCred}]: ${cmd}` };
+        const reason = `Shell 尝试访问敏感凭证或私钥文件 [${matchedCred}]: ${cmd}`;
+        this.auditLog.record('SENTINEL_INTERCEPT', {
+          sessionId: context?.sessionId,
+          botId: context?.botId,
+          tool: name,
+          target: cmd,
+          details: { reason }
+        });
+        return { isDangerous: true, reason };
       }
     }
 
     // 检查浏览器/HTTP工具访问云元数据服务
     if (toolLower === 'browser_open' || toolLower.includes('browser')) {
       const url = String(args.url || '');
-      if (url.includes('169.254.169.254') || url.includes('metadata.google.internal')) {
+      const egressBadTargets = this.policyConfig.cloud_metadata_targets || ['169.254.169.254', 'metadata.google.internal'];
+      const matchedEgress = egressBadTargets.find((target) => url.includes(target));
+      if (matchedEgress) {
         return { isDangerous: true, reason: `浏览器工具尝试访问云元数据服务: ${url}` };
       }
     }
 
     // -------------------------------------------------------------------------
-    // 2. 双向污点外发阻断 (Taint Egress Barrier)
-    // 只要当前会话处于受污染状态 (Tainted)，且尝试进行网络出站或外部发信 (Egress)：
+    // 3. 双向污点外发阻断 (Taint Egress Barrier)
+    // 只要当前会话处于受污染状态 (Tainted)，且试图进行网络出站 (Egress)：
     // 即使 approval_level 为 full 或 auto_edits，也绝对不能静默放行，强制触发人工审批确认！
     // -------------------------------------------------------------------------
     const isTainted = Boolean(
@@ -231,19 +382,43 @@ export class SentinelPolicyManager implements SentinelHook {
     const egress = this.isEgressAction(name, args);
 
     if (isTainted && egress.isEgress) {
-      const reasons = context?.sessionId ? this.getTaintReasons(context.sessionId) : [];
-      const reasonSuffix = reasons.length > 0 ? ` (污染源: ${reasons.join('; ')})` : '';
-      return {
-        isDangerous: true,
-        reason: `[Taint Egress 阻断] 当前会话已读取内部私有/敏感数据${reasonSuffix}，禁止未经审批直接向外部发送数据或请求 [${egress.target || name}]，以防止间接提示词注入 (Indirect Prompt Injection) 造成数据外泄`,
-        isTaintedEgress: true
-      };
+      // 检查是否在白名单 egress_allowlist 中
+      const allowlist = this.policyConfig.egress_allowlist || [];
+      const targetHost = String(egress.target || '');
+      const isAllowed = allowlist.some((domain) => {
+        if (domain === '*') return true;
+        if (domain.startsWith('*.')) return targetHost.includes(domain.slice(2));
+        return targetHost.includes(domain);
+      });
+
+      if (!isAllowed) {
+        const reasons = context?.sessionId ? this.getTaintReasons(context.sessionId) : [];
+        const reasonSuffix = reasons.length > 0 ? ` (污染源: ${reasons.join('; ')})` : '';
+        const reason = `[Taint Egress 阻断] 当前会话已读取内部私有/敏感数据${reasonSuffix}，禁止未经审批直接向外部发送数据或请求 [${egress.target || name}]，以防止间接提示词注入 (Indirect Prompt Injection) 造成数据外泄`;
+        this.auditLog.record('TAINT_EVENT', {
+          sessionId: context?.sessionId,
+          botId: context?.botId,
+          tool: name,
+          target: egress.target,
+          details: { reason, isTaintedEgress: true }
+        });
+        return {
+          isDangerous: true,
+          reason,
+          isTaintedEgress: true
+        };
+      }
     }
 
     // -------------------------------------------------------------------------
-    // 3. 技能成本阶梯校验 (Channel Ladder Escalation Check)
-    // 凡调用 Rung 5 (GUI) 高成本视觉/模拟触控工具，若会话尚未尝试过 API / CLI / Web 等低成本通道，
-    // 一律拦截并要求审批，避免模型肆意调用耗时极长的多模态视觉操作
+    // 4. 强制要求人工审批的工具 (always_ask_tools)
+    // -------------------------------------------------------------------------
+    if (this.policyConfig.always_ask_tools && this.policyConfig.always_ask_tools.includes(name)) {
+      return { isDangerous: true, reason: `工具 [${name}] 在企业安全策略中被配置为必须人工确认 (always_ask_tools)` };
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. 技能成本阶梯校验 (Channel Ladder Escalation Check)
     // -------------------------------------------------------------------------
     const escalation = this.channelLadder.evaluateEscalation(context?.sessionId || 'default', name);
     if (escalation.requiresApproval && level !== 'full') {
@@ -286,7 +461,7 @@ export class SentinelPolicyManager implements SentinelHook {
     return { isDangerous: false };
   }
 
-  // 3. 挂起等待人类审批（返回一个 Promise）
+  // 挂起等待人类审批
   public waitForApproval(request: ApprovalRequest): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       this.pendingApprovals.set(request.approvalId, { request, resolve });
@@ -294,8 +469,13 @@ export class SentinelPolicyManager implements SentinelHook {
     });
   }
 
-  // 4. 供 Web 或企业 IM 回调的解挂方法
-  public resolveApproval(approvalId: string, approved: boolean): boolean {
+  // 供 Web 或企业 IM 回调的解挂方法 (支持授予 once / session / 24h / always 作用域)
+  public resolveApproval(
+    approvalId: string,
+    approved: boolean,
+    scope: GrantScope = 'once',
+    operator = 'human'
+  ): boolean {
     const item = this.pendingApprovals.get(approvalId);
     if (!item) {
       console.warn(`[Sentinel] 未找到待审批项或已超时: ${approvalId}`);
@@ -307,7 +487,36 @@ export class SentinelPolicyManager implements SentinelHook {
     item.resolve(approved);
     this.pendingApprovals.delete(approvalId);
 
-    console.log(`[Sentinel] 审批已处理: ${approvalId} -> ${approved ? '批准' : '拒绝'}`);
+    // 结构化审计记录
+    this.auditLog.record('APPROVAL_DECISION', {
+      sessionId: item.request.sessionId,
+      botId: item.request.botId,
+      tool: item.request.targetDetails?.parameters?.name || item.request.actionSummary,
+      target: item.request.targetDetails?.command || item.request.actionSummary,
+      decision: approved ? 'approved' : 'rejected',
+      operator,
+      details: { approvalId, scope, actionSummary: item.request.actionSummary }
+    });
+
+    // 若批准且授予 scope 大于 once，自动注册复用授权 (Grant)
+    if (approved && scope !== 'once') {
+      const toolMatch = item.request.actionSummary.match(/准备执行高危操作: ([^\s(]+)/);
+      const toolName = (item.request.targetDetails as any)?.tool || (item.request as any)?.toolName || (toolMatch ? toolMatch[1] : '*');
+      const target = item.request.targetDetails?.command ||
+        item.request.targetDetails?.parameters?.url ||
+        item.request.targetDetails?.parameters?.to ||
+        item.request.targetDetails?.parameters?.path ||
+        undefined;
+
+      this.grantStore.addGrant({
+        tool: toolName,
+        target: target ? String(target) : undefined,
+        scope,
+        sessionId: item.request.sessionId
+      });
+    }
+
+    console.log(`[Sentinel] 审批已处理: ${approvalId} -> ${approved ? '批准' : '拒绝'} (Scope: ${scope}, 操作人: ${operator})`);
     return true;
   }
 
