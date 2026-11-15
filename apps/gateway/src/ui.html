@@ -104,6 +104,24 @@
     .send-btn { background: var(--accent); color: white; border: none; border-radius: 6px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; margin-bottom: 2px; }
     .send-btn:hover { background: var(--accent-hover); }
     .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Modal Styles */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(2px); }
+    .modal { background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 10px; width: 850px; max-width: 92vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 16px 32px rgba(0,0,0,0.5); }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .modal-title { font-weight: 600; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    .modal-close { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 20px; }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 20px; }
+    .routine-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+    .routine-header { display: flex; align-items: center; justify-content: space-between; }
+    .routine-name { font-weight: 600; font-size: 14px; }
+    .routine-meta { font-size: 12px; color: var(--muted); display: flex; gap: 16px; }
+    .badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+    .badge-idle { background: #21262d; color: #8b949e; }
+    .badge-running { background: rgba(47, 129, 247, 0.2); color: #58a6ff; }
+    .badge-paused { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+    .code-block { background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 12px; color: #79c0ff; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -116,6 +134,9 @@
 
     <button class="new-chat-btn" onclick="startNewSession()">
       <span>+</span> 新建对话
+    </button>
+    <button class="new-chat-btn" style="margin-top: -4px;" onclick="openRoutinesModal()">
+      <span>⏰</span> 主动巡检与 Webhook
     </button>
 
     <div class="section-title">数字员工</div>
@@ -430,6 +451,129 @@
         body: JSON.stringify({ approved })
       });
     }
+
+    // --- 主动任务与 Webhook 管理弹窗逻辑 ---
+    async function openRoutinesModal() {
+      document.getElementById('routinesModal').style.display = 'flex';
+      await loadRoutinesData();
+    }
+
+    function closeRoutinesModal() {
+      document.getElementById('routinesModal').style.display = 'none';
+    }
+
+    async function loadRoutinesData() {
+      try {
+        const [rRes, hRes, runsRes] = await Promise.all([
+          fetch('/api/routines').then(r => r.json()),
+          fetch('/api/hooks').then(r => r.json()),
+          fetch('/api/routines/runs').then(r => r.json())
+        ]);
+
+        // 渲染例行任务
+        const rListEl = document.getElementById('routinesListContainer');
+        rListEl.innerHTML = rRes.map(r => `
+          <div class="routine-card">
+            <div class="routine-header">
+              <div class="routine-name">⏰ ${escapeHtml(r.name)}</div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge badge-${r.status}">${r.status === 'running' ? '运行中' : (r.enabled ? '已启用' : '已暂停')}</span>
+                <button class="btn btn-deny" style="padding:3px 8px; font-size:11px;" onclick="triggerRoutineNow('${r.id}')">立即执行</button>
+                <button class="btn btn-deny" style="padding:3px 8px; font-size:11px;" onclick="toggleRoutineStatus('${r.id}')">${r.enabled ? '暂停' : '启用'}</button>
+              </div>
+            </div>
+            <div class="routine-meta">
+              <span>Cron: <code>${escapeHtml(r.cronExpr || '-')}</code></span>
+              <span>执行角色: <code>${escapeHtml(r.agentId)}</code></span>
+              <span>下次运行: ${r.nextRunAt ? new Date(r.nextRunAt).toLocaleString() : '未排期'}</span>
+            </div>
+            <div style="font-size:12px; color:var(--muted); line-height:1.4;">${escapeHtml(r.instructions)}</div>
+          </div>
+        `).join('');
+
+        // 渲染 Webhook
+        const hListEl = document.getElementById('hooksListContainer');
+        hListEl.innerHTML = hRes.map(h => `
+          <div class="routine-card">
+            <div class="routine-header">
+              <div class="routine-name">⚡ ${escapeHtml(h.name)}</div>
+              <span class="badge badge-idle">并发上限: ${h.maxPending}</span>
+            </div>
+            <div class="code-block">
+              curl -X POST http://${window.location.host}/api/hooks/${h.id} \\<br/>
+              &nbsp;&nbsp;-H "Authorization: Bearer ${h.secret}" \\<br/>
+              &nbsp;&nbsp;-H "Content-Type: application/json" \\<br/>
+              &nbsp;&nbsp;-d '{"event":"alert","payload":{"metric":"cpu","value":"95%"}}'
+            </div>
+          </div>
+        `).join('');
+
+        // 渲染运行历史
+        const runsListEl = document.getElementById('runsListContainer');
+        if (runsRes.length === 0) {
+          runsListEl.innerHTML = '<div style="font-size:12px; color:var(--muted);">暂无执行记录</div>';
+        } else {
+          runsListEl.innerHTML = runsRes.map(run => `
+            <div style="padding:8px 12px; background:#161b22; border:1px solid var(--border); border-radius:6px; font-size:12px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <span style="font-weight:600;">${escapeHtml(run.routineName)}</span>
+                <span style="color:var(--muted); margin-left:8px;">[${run.triggerSource}]</span>
+                <span style="color:var(--muted); margin-left:8px;">${new Date(run.startedAt).toLocaleTimeString()}</span>
+                ${run.approvalRequired ? '<span style="color:#d29922; margin-left:8px;">⚠️ 曾需审批</span>' : ''}
+              </div>
+              <div>
+                <span class="badge" style="background:${run.status === 'success' ? '#238636' : (run.status === 'running' ? '#1f6feb' : '#da3633')}; color:white;">${run.status}</span>
+              </div>
+            </div>
+          `).join('');
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function triggerRoutineNow(id) {
+      await fetch(`/api/routines/${id}/run`, { method: 'POST' });
+      alert('已触发立即执行，稍后可在会话或运行记录中查看结果。');
+      loadRoutinesData();
+    }
+
+    async function toggleRoutineStatus(id) {
+      await fetch(`/api/routines/${id}/toggle`, { method: 'POST' });
+      loadRoutinesData();
+    }
   </script>
+
+  <!-- Routines & Hooks Modal -->
+  <div class="modal-overlay" id="routinesModal" onclick="if(event.target===this) closeRoutinesModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">⏰ 主动例行巡检与外部 Webhook 管理</div>
+        <button class="modal-close" onclick="closeRoutinesModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div>
+          <div style="font-size:13px; font-weight:600; margin-bottom:8px; display:flex; justify-content:space-between;">
+            <span>📅 周期例行任务 (Cron Schedules)</span>
+          </div>
+          <div id="routinesListContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+        </div>
+
+        <div>
+          <div style="font-size:13px; font-weight:600; margin-bottom:8px;">
+            <span>⚡ 外部系统入站 Webhook (Events & Alerts)</span>
+          </div>
+          <div id="hooksListContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+        </div>
+
+        <div>
+          <div style="font-size:13px; font-weight:600; margin-bottom:8px;">
+            <span>📋 最近自动化执行记录</span>
+          </div>
+          <div id="runsListContainer" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

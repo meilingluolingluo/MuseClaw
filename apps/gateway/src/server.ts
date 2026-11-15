@@ -8,6 +8,7 @@ import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts'
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
+import { ProactiveManager } from '../proactive/index.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -144,6 +145,35 @@ function getOrCreateSession(sessionId?: string, botId = 'ops_bot'): SessionData 
   return sessions.get(id)!;
 }
 
+// 4. 初始化例行自动化与主动任务调度器 (Proactive Automation Manager)
+const proactive = new ProactiveManager({
+  sentinel,
+  tools,
+  callLLM,
+  onApprovalNeeded: async (request, routine) => {
+    console.log(`⚠️ [Proactive] 例行任务触发审批需求: ${routine.name} (${request.approvalId})`);
+    // 若配置了飞书通知目标，自动推送原生审批卡片
+    const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
+    if (alertTarget) {
+      await feishuChannel.approvalBridge.pushApprovalCard(alertTarget, request);
+    }
+  },
+  onRunCompleted: async (run, output) => {
+    // 写入会话历史以便 Web 前端同步显示
+    const session = getOrCreateSession(run.sessionId, 'ops_bot');
+    session.title = `[主动巡检] ${run.routineName}`;
+    session.messages.push({ role: 'user', content: `[触发源: ${run.triggerSource}] 执行例行任务: ${run.routineName}` });
+    session.messages.push({ role: 'assistant', content: output });
+
+    // 推送巡检简报到飞书
+    const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
+    if (alertTarget) {
+      const summaryText = `📋 【MuseClaw 自动化巡检简报】${run.routineName}\n状态: ${run.status === 'success' ? '✅ 顺利完成' : '❌ 存在异常'}\n\n${output.slice(0, 450)}`;
+      feishuChannel.sender.sendMessage(alertTarget, summaryText, 'text').catch(() => {});
+    }
+  }
+});
+
 /**
  * MuseClaw Gateway & Relay HTTP Server
  */
@@ -208,6 +238,57 @@ export function startGatewayServer(port = 8799) {
       return res.end(JSON.stringify({ success, approvalId, approved }));
     }
 
+    // D2. 例行自动化任务管理接口 (Routines)
+    if (req.method === 'GET' && url.pathname === '/api/routines') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(proactive.listRoutines()));
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/run')) {
+      const id = url.pathname.replace('/api/routines/', '').replace('/run', '');
+      const r = proactive.getRoutine(id);
+      if (!r) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Routine not found' }));
+      }
+      proactive.executeRoutine(r, 'manual').catch(err => {
+        console.error(`[Proactive:Manual] 执行异常:`, err.message);
+      });
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, message: `任务 [${r.name}] 已手动触发` }));
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/toggle')) {
+      const id = url.pathname.replace('/api/routines/', '').replace('/toggle', '');
+      const enabled = proactive.toggleRoutine(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, enabled }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/routines/runs') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(proactive.listRuns()));
+    }
+
+    // D3. 外部 Webhook 触发入口 (带 Bearer 鉴权与限流)
+    if (req.method === 'GET' && url.pathname === '/api/hooks') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(proactive.listHooks()));
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/hooks/')) {
+      const hookId = url.pathname.replace('/api/hooks/', '');
+      let bodyStr = '';
+      for await (const chunk of req) bodyStr += chunk;
+      let bodyJson = {};
+      try { bodyJson = JSON.parse(bodyStr || '{}'); } catch {}
+
+      const authHeader = req.headers.authorization;
+      const result = await proactive.handleWebhookTrigger(hookId, authHeader, bodyJson);
+      res.writeHead(result.status, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result.body));
+    }
+
     // E. Web 任务执行流式接口（多轮上下文支持）
     if (req.method === 'POST' && url.pathname === '/api/tasks') {
       let body = '';
@@ -269,6 +350,10 @@ export function startGatewayServer(port = 8799) {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);
     console.log(`📡 如流 (Infoflow) Webhook 接收端点: http://localhost:${port}/api/channels/infoflow/webhook`);
     console.log(`📡 飞书 (Feishu) Webhook 接收端点: http://localhost:${port}/api/channels/feishu/webhook`);
+    console.log(`⏰ 主动任务管理端点: http://localhost:${port}/api/routines | 外部 Webhook: http://localhost:${port}/api/hooks/:id`);
+
+    // 启动 Proactive 自动化例行调度器 (每 30 秒心跳)
+    proactive.start(30000);
 
     // 尝试启动飞书 WebSocket 长连接 (若已在后台开启长连接订阅)
     if (feishuAppId && feishuAppSecret) {

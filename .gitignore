@@ -27,3 +27,4 @@ Thumbs.db
 # Scratch / Local testing
 scratch/
 tmp/
+apps/gateway/data/
