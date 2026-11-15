@@ -32,28 +32,38 @@ export async function startFeishuWebSocket(
 
         if (!senderId || !text) return;
 
+        console.log(`[FeishuWS] 收到来自用户 ${senderId} 的消息: "${text}"`);
+
         // 检查是否为审批指令
-        const handled = approvalBridge.handleTextApproval(senderId, text);
-        if (handled) return;
+        const approvalRes = approvalBridge.tryHandleTextApproval(text);
+        if (approvalRes.isApproval) {
+          console.log(`[FeishuWS] 审批指令已处理: ${text} -> ${approvalRes.approved}`);
+          return;
+        }
 
         // 作为新任务派发到沙箱
-        sender.sendMessage(senderId, `🐾 收到指令: "${text}"，沙箱任务已启动...`, 'text').catch(() => {});
+        console.log(`[FeishuWS] 启动 Agent 沙箱任务: "${text}"`);
+        sender.sendMessage(senderId, `🐾 收到指令: "${text}"，沙箱任务已启动...`, 'text').catch((err) => {
+          console.warn(`[FeishuWS] 发送确认消息提示: ${err.message}`);
+        });
+
         try {
           const result = await onTaskPrompt(senderId, text);
           await sender.sendMessage(senderId, result, 'text');
+          console.log(`[FeishuWS] 任务执行完成，结果已推送到飞书。`);
         } catch (err: any) {
-          await sender.sendMessage(senderId, `❌ 任务执行出错: ${err.message}`, 'text');
+          console.error(`[FeishuWS] 任务执行或回传异常: ${err.message}`);
+          await sender.sendMessage(senderId, `❌ 任务执行出错: ${err.message}`, 'text').catch(() => {});
         }
       },
       'card.action.trigger': async (data: any) => {
         const action = data.action?.value;
         if (action && action.approvalId && action.action) {
-          const approved = action.action === 'approve';
-          const success = approvalBridge.resolveApproval(action.approvalId, approved);
+          const res = approvalBridge.handleCardAction(action);
           return {
             toast: {
-              type: success ? 'success' : 'warning',
-              content: success ? (approved ? '已批准执行' : '已拒绝操作') : '审批无效或已处理'
+              type: res.success ? 'success' : 'warning',
+              content: res.success ? (res.approved ? '已批准执行' : '已拒绝操作') : '审批无效或已处理'
             }
           };
         }
