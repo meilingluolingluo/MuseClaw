@@ -38,6 +38,14 @@ function loadEnv() {
 }
 loadEnv();
 
+// 全局未捕获异常与 Promise 拒绝防御，防止网关因偶发网络波动或第三方 SDK 异常崩溃
+process.on('uncaughtException', (err) => {
+  console.error('💥 [Server:UncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('💥 [Server:UnhandledRejection]', reason);
+});
+
 const sentinel = new SentinelPolicyManager();
 const baseTools = createDefaultTools();
 const mcpManager = new McpClientManager();
@@ -50,90 +58,7 @@ function refreshTools() {
 
 const callLLM = createDeepSeekCaller();
 
-// 1. 初始化如流 (Infoflow) 通道配置
-const infoflowToken = process.env.INFOFLOW_TOKEN || 'museclaw_token';
-const infoflowAesKey = process.env.INFOFLOW_AES_KEY || '1234567890123456789012345678901234567890123'; // 43 位
-const infoflowAppId = process.env.INFOFLOW_APP_ID;
-const infoflowAppSecret = process.env.INFOFLOW_APP_SECRET;
-const infoflowApiBase = process.env.INFOFLOW_API_BASE;
-const infoflowWebhookUrl = process.env.INFOFLOW_WEBHOOK_URL;
-
-const infoflowChannel = createInfoflowChannel(
-  {
-    token: infoflowToken,
-    encodingAesKey: infoflowAesKey,
-    appId: infoflowAppId,
-    appSecret: infoflowAppSecret,
-    apiBase: infoflowApiBase,
-    webhookUrl: infoflowWebhookUrl
-  },
-  sentinel,
-  async (userId, prompt) => {
-    // 异步执行 Agent 任务并支持审批桥接
-    const loop = runAgentLoop(
-      '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
-      prompt,
-      tools,
-      sentinel,
-      callLLM,
-      { sessionId: `infoflow_${Date.now()}`, userId, botId: 'ops_bot', maxSteps: 8 }
-    );
-
-    let output = '';
-    for await (const event of loop) {
-      if (event.type === 'stream:text-delta') {
-        output += event.text;
-      }
-      if (event.type === 'sentinel:approval_needed') {
-        // 自动将审批指令卡片推送给如流用户
-        await infoflowChannel.approvalBridge.pushApprovalNotice(userId, event.request);
-      }
-    }
-    return output || '任务已顺利完成。';
-  }
-);
-
-// 2. 初始化飞书 (Feishu) 通道配置
-const feishuAppId = process.env.FEISHU_APP_ID;
-const feishuAppSecret = process.env.FEISHU_APP_SECRET;
-const feishuEncryptKey = process.env.FEISHU_ENCRYPT_KEY;
-const feishuVerificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
-const feishuWebhookUrl = process.env.FEISHU_WEBHOOK_URL;
-
-const feishuChannel = createFeishuChannel(
-  {
-    appId: feishuAppId,
-    appSecret: feishuAppSecret,
-    encryptKey: feishuEncryptKey,
-    verificationToken: feishuVerificationToken,
-    webhookUrl: feishuWebhookUrl
-  },
-  sentinel,
-  async (userId, prompt) => {
-    const loop = runAgentLoop(
-      '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
-      prompt,
-      tools,
-      sentinel,
-      callLLM,
-      { sessionId: `feishu_${Date.now()}`, userId, botId: 'ops_bot', maxSteps: 8 }
-    );
-
-    let output = '';
-    for await (const event of loop) {
-      if (event.type === 'stream:text-delta') {
-        output += event.text;
-      }
-      if (event.type === 'sentinel:approval_needed') {
-        // 推送飞书原生互动卡片（带允许/拒绝按钮）
-        await feishuChannel.approvalBridge.pushApprovalCard(userId, event.request);
-      }
-    }
-    return output || '任务已顺利完成。';
-  }
-);
-
-// 3. 多 Bot 注册中心与会话存储 (BotRegistry, SessionStore, SessionRouter, BotMemoryManager)
+// 1. 多 Bot 注册中心与会话存储 (BotRegistry, SessionStore, SessionRouter, BotMemoryManager)
 const botRegistry = new BotRegistry();
 const sessionStore = new SessionStore();
 const sessionRouter = new SessionRouter(botRegistry, sessionStore);
@@ -154,10 +79,116 @@ function getOrCreateSession(sessionId?: string, botId?: string): Session {
   return session;
 }
 
+// 2. 初始化如流 (Infoflow) 通道配置
+const infoflowToken = process.env.INFOFLOW_TOKEN || 'museclaw_token';
+const infoflowAesKey = process.env.INFOFLOW_AES_KEY || '1234567890123456789012345678901234567890123'; // 43 位
+const infoflowAppId = process.env.INFOFLOW_APP_ID;
+const infoflowAppSecret = process.env.INFOFLOW_APP_SECRET;
+const infoflowApiBase = process.env.INFOFLOW_API_BASE;
+const infoflowWebhookUrl = process.env.INFOFLOW_WEBHOOK_URL;
+
+const infoflowChannel = createInfoflowChannel(
+  {
+    token: infoflowToken,
+    encodingAesKey: infoflowAesKey,
+    appId: infoflowAppId,
+    appSecret: infoflowAppSecret,
+    apiBase: infoflowApiBase,
+    webhookUrl: infoflowWebhookUrl
+  },
+  sentinel,
+  async (userId, prompt) => {
+    // 路由解析支持 @Mention 与 Bot 专属记忆/策略注入
+    const routeResult = sessionRouter.route({
+      text: prompt,
+      session_id: `infoflow_user_${userId}`,
+      user_id: userId
+    });
+    const { bot, session_id: finalSessionId } = routeResult;
+    const botWithMemory: AgentProfile = {
+      ...bot,
+      memory: botMemory.getMemory(bot.id)
+    };
+
+    const loop = runAgentLoop(
+      bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
+      prompt,
+      refreshTools(),
+      sentinel,
+      callLLM,
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+    );
+
+    let output = '';
+    for await (const event of loop) {
+      if (event.type === 'stream:text-delta') {
+        output += event.text;
+      }
+      if (event.type === 'sentinel:approval_needed') {
+        // 自动将审批指令卡片推送给如流用户
+        await infoflowChannel.approvalBridge.pushApprovalNotice(userId, event.request);
+      }
+    }
+    return output || '任务已顺利完成。';
+  }
+);
+
+// 3. 初始化飞书 (Feishu) 通道配置
+const feishuAppId = process.env.FEISHU_APP_ID;
+const feishuAppSecret = process.env.FEISHU_APP_SECRET;
+const feishuEncryptKey = process.env.FEISHU_ENCRYPT_KEY;
+const feishuVerificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+const feishuWebhookUrl = process.env.FEISHU_WEBHOOK_URL;
+
+const feishuChannel = createFeishuChannel(
+  {
+    appId: feishuAppId,
+    appSecret: feishuAppSecret,
+    encryptKey: feishuEncryptKey,
+    verificationToken: feishuVerificationToken,
+    webhookUrl: feishuWebhookUrl
+  },
+  sentinel,
+  async (userId, prompt) => {
+    // 路由解析支持 @Mention 与 Bot 专属记忆/策略注入
+    const routeResult = sessionRouter.route({
+      text: prompt,
+      session_id: `feishu_user_${userId}`,
+      user_id: userId
+    });
+    const { bot, session_id: finalSessionId } = routeResult;
+    const botWithMemory: AgentProfile = {
+      ...bot,
+      memory: botMemory.getMemory(bot.id)
+    };
+
+    const loop = runAgentLoop(
+      bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
+      prompt,
+      refreshTools(),
+      sentinel,
+      callLLM,
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+    );
+
+    let output = '';
+    for await (const event of loop) {
+      if (event.type === 'stream:text-delta') {
+        output += event.text;
+      }
+      if (event.type === 'sentinel:approval_needed') {
+        // 推送飞书原生互动卡片（带允许/拒绝按钮）
+        await feishuChannel.approvalBridge.pushApprovalCard(userId, event.request);
+      }
+    }
+    return output || '任务已顺利完成。';
+  }
+);
+
 // 4. 初始化例行自动化与主动任务调度器 (Proactive Automation Manager)
 const proactive = new ProactiveManager({
   sentinel,
-  tools,
+  tools: refreshTools(),
   callLLM,
   botRegistry,
   sessionStore,
@@ -209,7 +240,8 @@ const goalEngine = new GoalEngine({
 /**
  * MuseClaw Gateway & Relay HTTP Server
  */
-export function startGatewayServer(port = 8799) {
+export function startGatewayServer(defaultPort = 8799) {
+  const port = Number(process.env.PORT) || defaultPort;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
