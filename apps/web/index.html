@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>MuseClaw - 企业级多 Agent 数字员工工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- 1. 最左侧导航栏 (Navigation Rail) -->
+      <nav class="nav-rail">
+        <div class="brand-icon" id="btn-brand" title="MuseClaw 数字员工工作台">🐾</div>
+        
+        <button class="nav-item active" data-tab="chat" title="对话工作台">
+          <span class="nav-icon" id="icon-nav-chat"></span>
+          <span class="nav-label">对话</span>
+        </button>
+
+        <button class="nav-item" data-tab="goals" title="长周期自驱目标">
+          <span class="nav-icon" id="icon-nav-goals"></span>
+          <span class="nav-label">目标</span>
+        </button>
+
+        <button class="nav-item" data-tab="memory" title="受控长期记忆">
+          <span class="nav-icon" id="icon-nav-memory"></span>
+          <span class="nav-label">记忆</span>
+        </button>
+
+        <button class="nav-item" data-tab="skills" title="技能成本阶梯与微沙箱">
+          <span class="nav-icon" id="icon-nav-ladder"></span>
+          <span class="nav-label">阶梯</span>
+        </button>
+
+        <button class="nav-item" data-tab="artifacts" title="交付工件展台">
+          <span class="nav-icon" id="icon-nav-artifacts"></span>
+          <span class="nav-label">工件</span>
+        </button>
+      </nav>
+
+      <!-- 2. 二级抽屉 (多 Bot 列表与会话管理) -->
+      <aside class="side-drawer">
+        <div class="drawer-header">
+          <span class="drawer-title">数字员工 (Bots)</span>
+          <span class="pill-badge pill-blue" id="bot-count-badge">4 个活跃</span>
+        </div>
+        
+        <div class="bot-list" id="bot-list-container">
+          <!-- 动态渲染 Bot 列表 -->
+        </div>
+
+        <div class="session-section">
+          <div class="session-header">
+            <span>会话历史 (SESSIONS)</span>
+            <button class="btn-secondary" id="btn-new-session" style="padding: 2px 8px; font-size: 11px;">+ 新建</button>
+          </div>
+          <div class="session-list" id="session-list-container">
+            <!-- 动态渲染当前 Bot 绑定的会话列表 -->
+          </div>
+        </div>
+      </aside>
+
+      <!-- 3. 主舞台区域 (Main Stage) -->
+      <main class="main-stage">
+        <!-- 顶部控制条 (Top Bar) -->
+        <header class="top-bar">
+          <div class="top-bar-left">
+            <div class="bot-title-badge">
+              <span id="active-bot-avatar" style="font-size: 18px;">🤖</span>
+              <span id="active-bot-name">加载中...</span>
+              <span class="pill-badge pill-blue" id="active-bot-role">Coordinator</span>
+            </div>
+            <!-- 动态污点状态标识 (Taint Badge) -->
+            <div id="taint-badge-container">
+              <span class="pill-badge pill-green" id="taint-status-badge">
+                <span id="icon-taint-clean"></span> 纯净态 (Untainted)
+              </span>
+            </div>
+            <!-- 微沙箱指示器 -->
+            <span class="pill-badge pill-blue" id="sandbox-status-badge">
+              <span id="icon-sandbox"></span> bwrap 隔离
+            </span>
+          </div>
+
+          <div class="top-bar-right">
+            <!-- OpenMausBot 风格：审批模式选择器 (Approval Mode Selector) -->
+            <div class="approval-selector" id="approval-mode-btn" title="调整此 Bot 的操作门禁级别">
+              <span id="icon-lock"></span>
+              <span id="current-approval-mode-text">Ask (严格模式)</span>
+              <span id="icon-dropdown"></span>
+            </div>
+          </div>
+        </header>
+
+        <!-- 视图 1: 💬 对话工作台 -->
+        <section class="chat-container" id="view-chat">
+          <div class="chat-history" id="chat-messages">
+            <!-- 消息气泡与卡片流 -->
+          </div>
+
+          <div class="chat-composer-wrap">
+            <div class="composer-box">
+              <textarea
+                class="composer-textarea"
+                id="composer-input"
+                placeholder="向数字员工下达指令（Enter 发送，Shift+Enter 换行）..."
+                rows="2"
+              ></textarea>
+              <div class="composer-actions">
+                <div class="prompt-suggestions">
+                  <span class="prompt-pill" data-prompt="帮我巡检一下当前服务器运行状态与磁盘空间">⚡ 巡检服务器状态</span>
+                  <span class="prompt-pill" data-prompt="制定一个为期两周的前端组件库升级 React 19 长周期目标">🎯 制定长周期目标</span>
+                  <span class="prompt-pill" data-prompt="梳理并整理近期的长期记忆碎屑">🧠 整理常驻记忆</span>
+                </div>
+                <button class="btn-send" id="btn-send-message">
+                  <span id="icon-send"></span> 发送
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 视图 2: 🎯 长周期自驱目标 (nanoMuse GoalsScreen 风格) -->
+        <section class="view-stage" id="view-goals" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-goals-heading"></span> 长周期自驱目标 (Goals)</div>
+              <div class="view-sub">持久化多步骤目标管理，支持周期自然语言巡检（如 weekdays 09:30）与客观阻碍自动修订提案</div>
+            </div>
+            <button class="btn-primary" id="btn-create-goal">+ 规划新目标</button>
+          </div>
+          <div class="goals-grid" id="goals-container">
+            <!-- 动态渲染 Goals 列表 -->
+          </div>
+        </section>
+
+        <!-- 视图 3: 🧠 受控长期记忆 (nanoMuse MemoryScreen 风格) -->
+        <section class="view-stage" id="view-memory" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-memory-heading"></span> 受控长期记忆库 (Memory)</div>
+              <div class="view-sub">结构化 MEMORY.md 事实存储，[user] 声明严格受守卫保护，支持 20% 预算精简与一键 Undo 撤销</div>
+            </div>
+            <button class="btn-secondary" id="btn-undo-memory" title="撤销上一次记忆自整理">
+              <span id="icon-undo"></span> 一键撤销 (Undo)
+            </button>
+          </div>
+          <div class="memory-layout">
+            <div class="memory-items-box">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; display: flex; justify-content: space-between;">
+                <span>常驻记忆条目 (MEMORY.md)</span>
+                <span style="font-size: 12px; color: var(--text-muted);" id="memory-meta-info"></span>
+              </div>
+              <div id="memory-items-list">
+                <!-- 动态渲染记忆项 -->
+              </div>
+            </div>
+
+            <div class="memory-control-panel">
+              <div style="font-weight: 600; font-size: 14px;">记忆受控自整理 (Consolidation)</div>
+              <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+                采用模型提议 + 确定性死线原则：严禁捏造新事实，严禁删除用户声明，单次预算上限 20%。
+              </p>
+              <button class="btn-secondary" id="btn-dry-run-memory">
+                <span id="icon-sparkles-dry"></span> 整理预检 (Dry-Run)
+              </button>
+              <button class="btn-primary" id="btn-run-consolidate">
+                <span id="icon-sparkles-run"></span> 正式执行精炼整理
+              </button>
+              <div style="margin-top: 10px;">
+                <span style="font-size: 12px; font-weight: 600; color: var(--text-muted);">最近整理审计记录</span>
+                <div id="consolidation-history-list" style="margin-top: 8px; font-size: 12px; font-family: var(--font-mono); color: var(--text-dim);">
+                  暂无整理记录
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 视图 4: 🪜 技能成本阶梯与微沙箱 (nanoMuse SkillsScreen 风格) -->
+        <section class="view-stage" id="view-skills" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-ladder-heading"></span> 技能成本阶梯与微沙箱 (Ladder & MicroSandbox)</div>
+              <div class="view-sub">API (最低成本) ⟶ CLI (Linux 微沙箱) ⟶ Web ⟶ Browser ⟶ GUI (屏幕投屏)。优先低开销接口，禁止跳级滥用</div>
+            </div>
+            <button class="btn-secondary" id="btn-refresh-sandbox">
+              <span id="icon-refresh"></span> 刷新探测状态
+            </button>
+          </div>
+
+          <!-- 微沙箱健康面板 -->
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px; margin-bottom: 20px;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+              <span id="icon-shield-sandbox"></span> Linux 内核级微沙箱状态 (Bubblewrap)
+            </div>
+            <div id="sandbox-details-container" style="font-size: 13px; color: var(--text-muted); line-height: 1.6;">
+              正在探测内核状态...
+            </div>
+          </div>
+
+          <!-- 5 级阶梯看板 -->
+          <div class="ladder-container" id="ladder-rungs-container">
+            <!-- 动态渲染 5 级成本卡片 -->
+          </div>
+        </section>
+
+        <!-- 视图 5: 📦 交付工件展台 (Artifacts) -->
+        <section class="view-stage" id="view-artifacts" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-artifacts-heading"></span> 交付工件与产出物 (Artifacts)</div>
+              <div class="view-sub">Agent 运行产生的正式交付物（巡检报告、配置导出、数据总结、代码快照）</div>
+            </div>
+            <button class="btn-secondary" id="btn-refresh-artifacts">
+              <span id="icon-refresh-art"></span> 刷新工件列表
+            </button>
+          </div>
+          <div class="artifacts-grid" id="artifacts-container">
+            <!-- 动态渲染工件卡片 -->
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- 通用弹窗容器 (Modal Container) -->
+    <div id="modal-container"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

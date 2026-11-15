@@ -3,6 +3,16 @@
  * Core event and data contracts for MuseClaw.
  */
 
+// 0. Channel Ladder (技能执行通道阶梯)
+export type ExecutionChannel = 'api' | 'cli' | 'web' | 'browser' | 'gui' | 'mixed';
+
+export interface ChannelLadderStep {
+  toolName: string;
+  channel: ExecutionChannel;
+  rung: number;
+  timestamp: number;
+}
+
 // 1. Agent Profile (多 Bot 实体与配置定义)
 export interface AgentProfile {
   id: string;
@@ -83,6 +93,12 @@ export interface ApprovalRequest {
     parameters?: Record<string, unknown>;
   };
   status: 'pending' | 'approved' | 'rejected' | 'timeout';
+  isTainted?: boolean;
+  channelLadder?: {
+    channel: ExecutionChannel;
+    rung: number;
+    reason?: string;
+  };
   requestedAt: number;
   decidedAt?: number;
 }
@@ -95,6 +111,9 @@ export type MuseEvent =
   | { type: 'tool:call_start'; toolName: string; input: Record<string, unknown>; bot_id?: string; session_id?: string }
   | { type: 'tool:call_end'; toolName: string; output: unknown; durationMs: number; bot_id?: string; session_id?: string }
   | { type: 'sentinel:approval_needed'; request: ApprovalRequest; bot_id?: string; session_id?: string }
+  | { type: 'sentinel:taint_updated'; sessionId: string; isTainted: boolean; reason: string; bot_id?: string; session_id?: string }
+  | { type: 'ladder:escalation'; sessionId: string; toolName: string; fromRung?: number; toRung: number; channel: ExecutionChannel; bot_id?: string; session_id?: string }
+  | { type: 'sandbox:execution'; command: string; engine: 'bwrap' | 'env_scrubbed'; networkBlocked: boolean; bot_id?: string; session_id?: string }
   | { type: 'artifact:created'; artifactType: 'file' | 'report' | 'screenshot'; title: string; url: string; bot_id?: string; session_id?: string };
 
 // 4. Trajectory Export Format (执行轨迹导出格式，供模型微调与对齐使用)

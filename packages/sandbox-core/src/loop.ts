@@ -11,12 +11,23 @@ export interface SentinelHook {
   evaluateToolCall: (
     name: string,
     args: Record<string, unknown>,
-    context?: { approval_level?: string; botId?: string }
+    context?: { approval_level?: string; botId?: string; sessionId?: string; isTainted?: boolean }
   ) => {
     isDangerous: boolean;
     reason?: string;
+    isTaintedEgress?: boolean;
+    channelLadder?: { channel: any; rung: number; reason?: string };
   };
   waitForApproval: (request: ApprovalRequest) => Promise<boolean>;
+  isSessionTainted?: (sessionId?: string) => boolean;
+  taintSession?: (sessionId: string, reason?: string) => void;
+  untaintSession?: (sessionId: string) => void;
+  isTaintSource?: (
+    name: string,
+    args: Record<string, unknown>,
+    output?: unknown
+  ) => { isSource: boolean; reason?: string };
+  isEgressAction?: (name: string, args: Record<string, unknown>) => { isEgress: boolean; target?: string };
 }
 
 export interface LLMMessage {
@@ -47,9 +58,13 @@ export async function* runAgentLoop(
     botId: string;
     maxSteps?: number;
     profile?: AgentProfile;
+    isTainted?: boolean;
   }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
+
+  // 0. 追踪会话污点状态 (Taint Tracking)
+  let isTainted = context.isTainted || sentinel.isSessionTainted?.(context.sessionId) || false;
 
   // 1. 按 profile 注入 system_prompt 与 memory_ns / memory
   let effectivePrompt = context.profile?.system_prompt || context.profile?.systemPrompt || systemPrompt;
@@ -129,10 +144,12 @@ export async function* runAgentLoop(
 
       yield { type: 'tool:call_start', toolName: call.name, input: call.args, bot_id: context.botId, session_id: context.sessionId };
 
-      // 5. Sentinel 确定性安全拦截门禁 (支持 Bot 差异化审批级别)
+      // 5. Sentinel 确定性安全拦截门禁 (支持 Bot 差异化审批级别与双向污点外发阻断)
       const check = sentinel.evaluateToolCall(call.name, call.args, {
         approval_level: context.profile?.approval_level,
-        botId: context.botId
+        botId: context.botId,
+        sessionId: context.sessionId,
+        isTainted
       });
       if (check.isDangerous) {
         const approvalId = `appr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -146,8 +163,10 @@ export async function* runAgentLoop(
           userId: context.userId,
           user_id: context.userId,
           riskLevel: 'high_risk',
+          isTainted,
+          channelLadder: check.channelLadder,
           actionSummary: `准备执行高危操作: ${call.name} (${check.reason || '可能导致数据修改或外部影响'})`,
-          targetDetails: { parameters: call.args },
+          targetDetails: { parameters: call.args, command: call.args.command ? String(call.args.command) : undefined },
           status: 'pending',
           requestedAt: Date.now()
         };
@@ -182,11 +201,29 @@ export async function* runAgentLoop(
 
       yield { type: 'tool:call_end', toolName: call.name, output, durationMs, bot_id: context.botId, session_id: context.sessionId };
 
+      // 7. 动态污点识别：检查当前工具是否为污点源 (Taint Source)
+      // 若读取了敏感文件、内网数据库或凭据，立即将当前会话置为受污染 (Tainted) 状态
+      const taintCheck = sentinel.isTaintSource?.(call.name, call.args, output);
+      if (taintCheck?.isSource) {
+        const taintReason = taintCheck.reason || `调用了敏感数据源 [${call.name}]`;
+        isTainted = true;
+        sentinel.taintSession?.(context.sessionId, taintReason);
+        yield {
+          type: 'sentinel:taint_updated',
+          sessionId: context.sessionId,
+          session_id: context.sessionId,
+          isTainted: true,
+          reason: taintReason,
+          bot_id: context.botId
+        };
+      }
+
       // Loop Guard 检查 B: 防连续相同错误导致无进展停滞
       const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
       const isError = Boolean((output as any)?.error || (output as any)?.exitCode !== 0);
       if (isError) {
-        const errorSig = `${call.name}:${outputStr}`;
+        const errDetail = (output as any)?.error || (output as any)?.stderr || outputStr;
+        const errorSig = `${call.name}:${(output as any)?.exitCode ?? 1}:${String(errDetail).trim()}`;
         if (errorSig === lastErrorSig) {
           sameErrorCount++;
         } else {

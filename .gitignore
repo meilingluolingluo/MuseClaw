@@ -27,4 +27,12 @@ Thumbs.db
 # Scratch / Local testing
 scratch/
 tmp/
-apps/gateway/data/
+apps/gateway/data/*
+!apps/gateway/data/web/
+
+# Graphify knowledge graph caches
+graphify-out/.graphify_*
+graphify-out/cache/
+graphify-out/202*
+graphify-out/cost.json
+graphify-out/manifest.json

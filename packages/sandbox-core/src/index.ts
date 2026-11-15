@@ -1,5 +1,11 @@
 import type { AgentProfile, TrajectoryStep } from '@museclaw/protocol';
 
+export * from './micro-sandbox.ts';
+export * from './channel-ladder.ts';
+export * from './tools.ts';
+export * from './loop.ts';
+export * from './llm.ts';
+
 /**
  * SandboxCore
  * Manages per-user sandbox container lifecycle, Chromium profiles, and execution logs.

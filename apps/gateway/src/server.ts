@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { runAgentLoop, type LLMMessage } from '../../../packages/sandbox-core/src/loop.ts';
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
+import { MicroSandbox, CHANNEL_RANK, CHANNEL_DETAILS } from '../../../packages/sandbox-core/src/index.ts';
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
 import { ProactiveManager } from '../proactive/index.ts';
 import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager } from '../bots/index.ts';
+import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
 import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
@@ -190,6 +192,20 @@ const proactive = new ProactiveManager({
   }
 });
 
+// 5. 初始化长周期目标自驱推进引擎 (Long-Horizon Goals Engine)
+const goalStore = new GoalStore();
+const goalEngine = new GoalEngine({
+  store: goalStore,
+  sentinel,
+  tools: refreshTools(),
+  callLLM,
+  botRegistry,
+  botMemory,
+  onGoalCheckInCompleted: async (result, goal) => {
+    console.log(`[Goals:CheckIn] 目标 "${goal.title}" 阶段推进完成: 步骤 [${result.stepTitle || result.stepId}] -> ${result.status}`);
+  }
+});
+
 /**
  * MuseClaw Gateway & Relay HTTP Server
  */
@@ -205,16 +221,21 @@ export function startGatewayServer(port = 8799) {
     const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
     if (handledByFeishu) return;
 
-    // B. 静态主页：Web 控制台
+    // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 data/web 或 apps/web，平滑兼容旧版 ui.html)
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      const htmlPath = path.join(__dirname, 'ui.html');
+      const modernWebCandidates = [
+        path.resolve(__dirname, '../data/web/index.html'),
+        path.resolve(__dirname, '../../web/index.html'),
+      ];
+      const modernWebPath = modernWebCandidates.find((p) => fs.existsSync(p));
+      const htmlPath = modernWebPath || path.join(__dirname, 'ui.html');
       try {
         const html = fs.readFileSync(htmlPath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(html);
       } catch {
         res.writeHead(500);
-        return res.end('ui.html not found');
+        return res.end('Web UI not found');
       }
     }
 
@@ -278,6 +299,46 @@ export function startGatewayServer(port = 8799) {
       botMemory.saveMemory(id, memory);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, bot_id: id, memory }));
+    }
+
+    // 记忆受控自整理 (Memory Consolidation: POST /api/bots/:id/memory/consolidate)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/consolidate$/)) {
+      const id = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { dry_run, budget_share } = JSON.parse(body || '{}');
+
+      try {
+        const report = await botMemory.consolidateMemory(
+          id,
+          async (prompt) => {
+            const resp = await callLLM([{ role: 'user', content: prompt }], []);
+            return resp.content || '';
+          },
+          { dryRun: Boolean(dry_run), budgetShare: typeof budget_share === 'number' ? budget_share : 0.2 }
+        );
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, bot_id: id, report }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 记忆整理一键撤销 (Memory Consolidation Undo: POST /api/bots/:id/memory/undo)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/undo$/)) {
+      const id = url.pathname.split('/')[3];
+      const result = botMemory.undoLastConsolidation(id);
+      res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ bot_id: id, ...result }));
+    }
+
+    // 获取记忆整理历史审计报告 (GET /api/bots/:id/memory/reports)
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/reports$/)) {
+      const id = url.pathname.split('/')[3];
+      const reports = botMemory.getConsolidationHistory(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ bot_id: id, reports }));
     }
 
     // B3. 对外独立 Bot API (Headless Bot API: POST /api/bots/:id/chat)
@@ -462,6 +523,27 @@ export function startGatewayServer(port = 8799) {
       return res.end(JSON.stringify(s));
     }
 
+    // C2. 沙箱与技能阶梯状态接口 (Sandbox & Channel Ladder Status)
+    if (req.method === 'GET' && url.pathname === '/api/sandbox/status') {
+      const msb = new MicroSandbox();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        microSandbox: msb.getStatus(),
+        channelLadder: {
+          channels: CHANNEL_RANK,
+          details: CHANNEL_DETAILS
+        }
+      }));
+    }
+
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/sessions\/[^/]+\/ladder$/)) {
+      const targetSessionId = url.pathname.split('/')[2]; // /api/sessions/:id/ladder -> index 3
+      const actualSessionId = url.pathname.replace('/api/sessions/', '').replace('/ladder', '');
+      const stats = sentinel.getChannelLadder().getSessionStats(actualSessionId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(stats));
+    }
+
     // D. 审批结果回调接口 (供 Web 交互卡片或外部 Webhook 点击调用)
     if (req.method === 'POST' && url.pathname.startsWith('/api/approvals/')) {
       const approvalId = url.pathname.replace('/api/approvals/', '');
@@ -523,6 +605,113 @@ export function startGatewayServer(port = 8799) {
       const result = await proactive.handleWebhookTrigger(hookId, authHeader, bodyJson);
       res.writeHead(result.status, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(result.body));
+    }
+
+    // ==========================================
+    // D2. 长周期目标与自主推进 API (Long-Horizon Goals API)
+    // ==========================================
+    // 获取目标列表 (GET /api/goals)
+    if (req.method === 'GET' && url.pathname === '/api/goals') {
+      const botId = url.searchParams.get('bot_id') || undefined;
+      const status = (url.searchParams.get('status') as any) || undefined;
+      const goals = goalStore.list({ botId, status });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(goals));
+    }
+
+    // 创建新长周期目标 (POST /api/goals)
+    if (req.method === 'POST' && url.pathname === '/api/goals') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      if (!data.title) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "title" is required' }));
+      }
+      const goal = goalStore.create({
+        title: data.title,
+        description: data.description || data.title,
+        botId: data.botId || data.bot_id || 'ops_bot',
+        userId: data.userId || data.user_id || 'admin',
+        category: data.category,
+        cadence: data.cadence,
+        steps: data.steps
+      });
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(goal));
+    }
+
+    // 获取特定目标详情 (GET /api/goals/:id)
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/goals\/[^/]+$/)) {
+      const goalId = url.pathname.split('/')[3];
+      const goal = goalStore.get(goalId);
+      if (!goal) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(goal));
+    }
+
+    // 自主推进当前步骤 (POST /api/goals/:id/advance)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/advance$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const override = JSON.parse(body || '{}');
+      try {
+        const result = await goalEngine.advanceGoal(goalId, override);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, ...result }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 提交计划修订提案 (POST /api/goals/:id/proposal)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/proposal$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { reason, proposed_steps, proposedSteps } = JSON.parse(body || '{}');
+      const steps = proposed_steps || proposedSteps;
+      if (!reason || !Array.isArray(steps)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(
+          JSON.stringify({ error: 'Fields "reason" and "proposed_steps" (array) are required' })
+        );
+      }
+      const proposal = goalStore.proposeReplan(goalId, reason, steps);
+      if (!proposal) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, proposal }));
+    }
+
+    // 审批重新规划提案 (POST /api/goals/:id/proposal/resolve)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/proposal\/resolve$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { accept } = JSON.parse(body || '{}');
+      if (typeof accept !== 'boolean') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "accept" (boolean) is required' }));
+      }
+      const result = goalStore.resolveProposal(goalId, accept);
+      res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    // 删除目标 (DELETE /api/goals/:id)
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/goals\/[^/]+$/)) {
+      const goalId = url.pathname.split('/')[3];
+      const deleted = goalStore.delete(goalId);
+      res.writeHead(deleted ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: deleted }));
     }
 
     // E. Web 任务执行流式接口（多 Bot 路由与 @Mention 支持）
@@ -616,8 +805,78 @@ export function startGatewayServer(port = 8799) {
       return res.end();
     }
 
-    res.writeHead(404);
-    res.end('Not Found');
+    // 静态前端资源托管 (SPA 模式: 提供 MuseClaw 数字员工工作台 Web UI)
+    const webDirCandidates = [
+      path.resolve(__dirname, '../data/web'),
+      path.resolve(__dirname, '../../web'),
+    ];
+    const webDir = webDirCandidates.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) || path.resolve(__dirname, '../data/web');
+    if (fs.existsSync(webDir) && req.method === 'GET') {
+      // 路径遍历攻击防御
+      if (req.url && (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E'))) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Forbidden: path traversal blocked' }));
+      }
+
+      let reqPath = url.pathname === '/' ? '/index.html' : url.pathname;
+      let filePath = path.join(webDir, reqPath);
+      if (!filePath.startsWith(webDir)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Forbidden' }));
+      }
+
+      // 如果请求带扩展名且文件不存在，返回 404
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext && !fs.existsSync(filePath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Static asset not found' }));
+      }
+
+      // 如果属于已声明的前端 SPA 路由，fallback 到 index.html (SPA History 模式)
+      const isSpaRoute = [
+        '/',
+        '/index.html',
+        '/chat',
+        '/goals',
+        '/memory',
+        '/skills',
+        '/artifacts',
+        '/sessions',
+        '/bots'
+      ].some((r) => url.pathname === r || url.pathname.startsWith(`${r}/`));
+
+      if (isSpaRoute) {
+        filePath = path.join(webDir, 'index.html');
+      } else if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Not found' }));
+      }
+
+      if (fs.existsSync(filePath)) {
+        const ext = path.extname(filePath).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'application/javascript; charset=utf-8',
+          '.mjs': 'application/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8',
+          '.json': 'application/json; charset=utf-8',
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.svg': 'image/svg+xml',
+          '.ico': 'image/x-icon',
+          '.woff2': 'font/woff2',
+          '.webp': 'image/webp'
+        };
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+        res.writeHead(200, { 'Content-Type': contentType });
+        const stream = fs.createReadStream(filePath);
+        return stream.pipe(res);
+      }
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Route not found' }));
   });
 
   server.listen(port, async () => {
@@ -638,6 +897,9 @@ export function startGatewayServer(port = 8799) {
 
     // 启动 Proactive 自动化例行调度器 (每 30 秒心跳)
     proactive.start(30000);
+
+    // 启动长周期目标 Check-in 自驱推进调度器 (每 60 秒心跳)
+    goalEngine.startScheduler(60000);
 
     // 尝试启动飞书 WebSocket 长连接 (若已在后台开启长连接订阅)
     if (feishuAppId && feishuAppSecret) {
