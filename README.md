@@ -101,9 +101,12 @@ MuseClaw/
 - [x] **Milestone 2: 确定性安全门禁 (Sentinel)**
   - 拦截高危破坏性系统调用与操作。
   - 状态挂起与恢复流程完成（Pending -> Approval -> Resume）。
-- [ ] **Milestone 3: 通讯录式多角色调度 (Roster UI)**
+- [x] **Milestone 3: 企业 IM 通道与双端审批闭环**
+  - **如流 (Infoflow)**：支持 Webhook 验签、AES-256 解密、私聊交互与文字审批闭环。
+  - **飞书 (Feishu / Lark)**：支持开放平台 Challenge 校验、消息加解密、原生交互卡片（一键允许/拒绝按钮回写）、文本审批双回退。
+- [ ] **Milestone 4: 通讯录式多角色调度 (Roster UI)**
   - 落地多 Bot 角色面板（数据分析助理、工单巡检助理、代码审查助理）。
   - 双端（Web + 企业 IM）状态同步与审批联动。
-- [ ] **Milestone 4: 数据飞轮与自进化**
+- [ ] **Milestone 5: 数据飞轮与自进化**
   - 任务轨迹收集并输出标准训练数据格式，用于私有模型迭代。
   - 探索高频工作流自动提炼为持久化 Skill。

@@ -7,6 +7,7 @@ import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts'
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
+import { createFeishuChannel } from '../channels/feishu/index.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sentinel = new SentinelPolicyManager();
@@ -56,7 +57,47 @@ const infoflowChannel = createInfoflowChannel(
   }
 );
 
-// 2. 会话持久化与多轮历史存储
+// 2. 初始化飞书 (Feishu) 通道配置
+const feishuAppId = process.env.FEISHU_APP_ID;
+const feishuAppSecret = process.env.FEISHU_APP_SECRET;
+const feishuEncryptKey = process.env.FEISHU_ENCRYPT_KEY;
+const feishuVerificationToken = process.env.FEISHU_VERIFICATION_TOKEN;
+const feishuWebhookUrl = process.env.FEISHU_WEBHOOK_URL;
+
+const feishuChannel = createFeishuChannel(
+  {
+    appId: feishuAppId,
+    appSecret: feishuAppSecret,
+    encryptKey: feishuEncryptKey,
+    verificationToken: feishuVerificationToken,
+    webhookUrl: feishuWebhookUrl
+  },
+  sentinel,
+  async (userId, prompt) => {
+    const loop = runAgentLoop(
+      '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
+      prompt,
+      tools,
+      sentinel,
+      callLLM,
+      { sessionId: `feishu_${Date.now()}`, userId, botId: 'ops_bot', maxSteps: 8 }
+    );
+
+    let output = '';
+    for await (const event of loop) {
+      if (event.type === 'stream:text-delta') {
+        output += event.text;
+      }
+      if (event.type === 'sentinel:approval_needed') {
+        // 推送飞书原生互动卡片（带允许/拒绝按钮）
+        await feishuChannel.approvalBridge.pushApprovalCard(userId, event.request);
+      }
+    }
+    return output || '任务已顺利完成。';
+  }
+);
+
+// 3. 会话持久化与多轮历史存储
 interface SessionData {
   id: string;
   title: string;
@@ -91,6 +132,10 @@ export function startGatewayServer(port = 8799) {
     // A. 优先处理如流 Webhook (GET 校验 / POST 消息)
     const handledByInfoflow = await infoflowChannel.handleHttpRequest(req, res);
     if (handledByInfoflow) return;
+
+    // A2. 优先处理飞书 Webhook (Challenge / 交互卡片按钮 / 消息事件)
+    const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
+    if (handledByFeishu) return;
 
     // B. 静态主页：Web 控制台
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
@@ -201,6 +246,7 @@ export function startGatewayServer(port = 8799) {
   server.listen(port, () => {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);
     console.log(`📡 如流 (Infoflow) Webhook 接收端点: http://localhost:${port}/api/channels/infoflow/webhook`);
+    console.log(`📡 飞书 (Feishu) Webhook 接收端点: http://localhost:${port}/api/channels/feishu/webhook`);
   });
 
   return server;
