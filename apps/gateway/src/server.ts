@@ -254,7 +254,7 @@ export function startGatewayServer(defaultPort = 8799) {
     if (handledByFeishu) return;
 
     // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 data/web 或 apps/web，平滑兼容旧版 ui.html)
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/index.html')) {
       const modernWebCandidates = [
         path.resolve(__dirname, '../data/web/index.html'),
         path.resolve(__dirname, '../../web/index.html'),
@@ -843,7 +843,7 @@ export function startGatewayServer(defaultPort = 8799) {
       path.resolve(__dirname, '../../web'),
     ];
     const webDir = webDirCandidates.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) || path.resolve(__dirname, '../data/web');
-    if (fs.existsSync(webDir) && req.method === 'GET') {
+    if (fs.existsSync(webDir) && (req.method === 'GET' || req.method === 'HEAD')) {
       // 路径遍历攻击防御
       if (req.url && (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E'))) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
