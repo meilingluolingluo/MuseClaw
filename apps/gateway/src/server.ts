@@ -6,13 +6,57 @@ import { runAgentLoop, type LLMMessage } from '../../../packages/sandbox-core/sr
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
+import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sentinel = new SentinelPolicyManager();
 const tools = createDefaultTools();
 const callLLM = createDeepSeekCaller();
 
-// 会话持久化与多轮历史存储
+// 1. 初始化如流 (Infoflow) 通道配置
+const infoflowToken = process.env.INFOFLOW_TOKEN || 'museclaw_token';
+const infoflowAesKey = process.env.INFOFLOW_AES_KEY || '1234567890123456789012345678901234567890123'; // 43 位
+const infoflowAppId = process.env.INFOFLOW_APP_ID;
+const infoflowAppSecret = process.env.INFOFLOW_APP_SECRET;
+const infoflowApiBase = process.env.INFOFLOW_API_BASE;
+const infoflowWebhookUrl = process.env.INFOFLOW_WEBHOOK_URL;
+
+const infoflowChannel = createInfoflowChannel(
+  {
+    token: infoflowToken,
+    encodingAesKey: infoflowAesKey,
+    appId: infoflowAppId,
+    appSecret: infoflowAppSecret,
+    apiBase: infoflowApiBase,
+    webhookUrl: infoflowWebhookUrl
+  },
+  sentinel,
+  async (userId, prompt) => {
+    // 异步执行 Agent 任务并支持审批桥接
+    const loop = runAgentLoop(
+      '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
+      prompt,
+      tools,
+      sentinel,
+      callLLM,
+      { sessionId: `infoflow_${Date.now()}`, userId, botId: 'ops_bot', maxSteps: 8 }
+    );
+
+    let output = '';
+    for await (const event of loop) {
+      if (event.type === 'stream:text-delta') {
+        output += event.text;
+      }
+      if (event.type === 'sentinel:approval_needed') {
+        // 自动将审批指令卡片推送给如流用户
+        await infoflowChannel.approvalBridge.pushApprovalNotice(userId, event.request);
+      }
+    }
+    return output || '任务已顺利完成。';
+  }
+);
+
+// 2. 会话持久化与多轮历史存储
 interface SessionData {
   id: string;
   title: string;
@@ -22,7 +66,6 @@ interface SessionData {
 }
 
 const sessions = new Map<string, SessionData>();
-const activeAbortControllers = new Map<string, AbortController>();
 
 function getOrCreateSession(sessionId?: string, botId = 'ops_bot'): SessionData {
   const id = sessionId || `sess_${Date.now()}`;
@@ -45,7 +88,11 @@ export function startGatewayServer(port = 8799) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
-    // 1. 静态主页：Web 控制台
+    // A. 优先处理如流 Webhook (GET 校验 / POST 消息)
+    const handledByInfoflow = await infoflowChannel.handleHttpRequest(req, res);
+    if (handledByInfoflow) return;
+
+    // B. 静态主页：Web 控制台
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       const htmlPath = path.join(__dirname, 'ui.html');
       try {
@@ -58,7 +105,7 @@ export function startGatewayServer(port = 8799) {
       }
     }
 
-    // 2. 会话列表与管理
+    // C. 会话列表接口
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const list = Array.from(sessions.values()).map(s => ({
         id: s.id,
@@ -82,7 +129,7 @@ export function startGatewayServer(port = 8799) {
       return res.end(JSON.stringify(s));
     }
 
-    // 3. 审批结果回调接口
+    // D. 审批结果回调接口 (供 Web 交互卡片或外部 Webhook 点击调用)
     if (req.method === 'POST' && url.pathname.startsWith('/api/approvals/')) {
       const approvalId = url.pathname.replace('/api/approvals/', '');
       let body = '';
@@ -94,7 +141,7 @@ export function startGatewayServer(port = 8799) {
       return res.end(JSON.stringify({ success, approvalId, approved }));
     }
 
-    // 4. 任务执行流式接口（多轮上下文支持）
+    // E. Web 任务执行流式接口（多轮上下文支持）
     if (req.method === 'POST' && url.pathname === '/api/tasks') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -102,7 +149,6 @@ export function startGatewayServer(port = 8799) {
 
       const session = getOrCreateSession(sessionId, botId);
       if (session.messages.length === 0) {
-        // 第一句话作为会话标题
         session.title = prompt.slice(0, 16) || '新任务';
       }
 
@@ -112,7 +158,6 @@ export function startGatewayServer(port = 8799) {
         Connection: 'keep-alive'
       });
 
-      // 发送当前 sessionId 给前端
       res.write(`data: ${JSON.stringify({ type: 'session:init', sessionId: session.id, title: session.title })}\n\n`);
 
       const systemPrompt = `你是一个企业内部严谨、高效的自动化数字员工。
@@ -138,7 +183,6 @@ export function startGatewayServer(port = 8799) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
 
-        // 保存多轮历史
         session.messages.push({ role: 'user', content: prompt });
         if (fullAssistantText) {
           session.messages.push({ role: 'assistant', content: fullAssistantText });
@@ -150,13 +194,13 @@ export function startGatewayServer(port = 8799) {
       return res.end();
     }
 
-    // 默认 404
     res.writeHead(404);
     res.end('Not Found');
   });
 
   server.listen(port, () => {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);
+    console.log(`📡 如流 (Infoflow) Webhook 接收端点: http://localhost:${port}/api/channels/infoflow/webhook`);
   });
 
   return server;
