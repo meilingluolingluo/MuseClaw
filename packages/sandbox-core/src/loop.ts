@@ -70,9 +70,17 @@ export async function* runAgentLoop(
   const maxSteps = context.maxSteps ?? 10;
   let step = 0;
 
+  // Loop Guard 循环守卫：防无意义重复动作与连续相同报错停滞
+  let lastActionSig = '';
+  let sameActionCount = 0;
+  let lastErrorSig = '';
+  let sameErrorCount = 0;
+  let isLoopGuarded = false;
+
   yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'running' };
 
   while (step < maxSteps) {
+    if (isLoopGuarded) break;
     step++;
 
     // 3. 调用大模型进行下一步推理 (使用生效的工具子集)
@@ -97,6 +105,22 @@ export async function* runAgentLoop(
       const toolDef = effectiveTools.find((t) => t.name === call.name);
       if (!toolDef) {
         throw new Error(`Tool not found or not permitted: ${call.name}`);
+      }
+
+      // Loop Guard 检查 A: 防连续重复动作
+      const actionSig = `${call.name}:${JSON.stringify(call.args)}`;
+      if (actionSig === lastActionSig) {
+        sameActionCount++;
+      } else {
+        lastActionSig = actionSig;
+        sameActionCount = 1;
+      }
+
+      if (sameActionCount >= 3) {
+        const guardMsg = `[Loop Guard: 检测到连续 3 次重复调用相同动作 (${call.name})，已触发自动熔断保护算力]`;
+        yield { type: 'stream:text-delta', text: `\n${guardMsg}`, bot_id: context.botId, session_id: context.sessionId };
+        isLoopGuarded = true;
+        break;
       }
 
       yield { type: 'tool:call_start', toolName: call.name, input: call.args, bot_id: context.botId, session_id: context.sessionId };
@@ -150,6 +174,29 @@ export async function* runAgentLoop(
       const durationMs = Date.now() - startTime;
 
       yield { type: 'tool:call_end', toolName: call.name, output, durationMs, bot_id: context.botId, session_id: context.sessionId };
+
+      // Loop Guard 检查 B: 防连续相同错误导致无进展停滞
+      const outputStr = typeof output === 'string' ? output : JSON.stringify(output);
+      const isError = Boolean((output as any)?.error || (output as any)?.exitCode !== 0);
+      if (isError) {
+        const errorSig = `${call.name}:${outputStr}`;
+        if (errorSig === lastErrorSig) {
+          sameErrorCount++;
+        } else {
+          lastErrorSig = errorSig;
+          sameErrorCount = 1;
+        }
+
+        if (sameErrorCount >= 2) {
+          const guardMsg = `[Loop Guard: 检测到工具调用连续出现相同错误，任务已停滞，已自动中断熔断]`;
+          yield { type: 'stream:text-delta', text: `\n${guardMsg}`, bot_id: context.botId, session_id: context.sessionId };
+          isLoopGuarded = true;
+          break;
+        }
+      } else {
+        sameErrorCount = 0;
+        lastErrorSig = '';
+      }
 
       // 7. 记录执行结果并注入上下文
       messages.push({

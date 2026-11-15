@@ -5,6 +5,22 @@ import type { ToolDefinition } from './loop.js';
 const execAsync = promisify(exec);
 
 /**
+ * 剥离宿主敏感环境变量，防止模型执行命令外泄 API 密钥与凭证
+ */
+function getSanitizedEnv(): NodeJS.ProcessEnv {
+  const safeEnv: NodeJS.ProcessEnv = {};
+  const allowlist = ['PATH', 'HOME', 'USER', 'LANG', 'TERM', 'SHELL', 'PWD', 'TMPDIR', 'TEMP', 'TMP', 'NODE_ENV'];
+  for (const key of allowlist) {
+    if (process.env[key] !== undefined) {
+      safeEnv[key] = process.env[key];
+    }
+  }
+  safeEnv.SANDBOX_ENV = '1';
+  safeEnv.MUSECLAW_SANDBOX = 'true';
+  return safeEnv;
+}
+
+/**
  * 基础内置工具集（可扩展）
  */
 export function createDefaultTools(options?: { browserWorkerUrl?: string }): ToolDefinition[] {
@@ -25,7 +41,10 @@ export function createDefaultTools(options?: { browserWorkerUrl?: string }): Too
         const cmd = String(args.command);
         console.log(`[Tool:execute_shell] ${cmd}`);
         try {
-          const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 });
+          const { stdout, stderr } = await execAsync(cmd, {
+            timeout: 30000,
+            env: getSanitizedEnv()
+          });
           return { stdout, stderr, exitCode: 0 };
         } catch (error: any) {
           return { error: error.message, stderr: error.stderr, exitCode: error.code || 1 };

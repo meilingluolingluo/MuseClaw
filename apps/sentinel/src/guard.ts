@@ -28,6 +28,28 @@ export class SentinelPolicyManager implements SentinelHook {
       if (hasBadCmd) {
         return { isDangerous: true, reason: `Shell 包含破坏性系统命令: ${cmd}` };
       }
+
+      // 出向安全与元数据接口防御 (Egress Gate)
+      const egressBadTargets = ['169.254.169.254', 'metadata.google.internal', 'metadata.azure.com'];
+      const matchedEgress = egressBadTargets.find((target) => cmd.includes(target));
+      if (matchedEgress) {
+        return { isDangerous: true, reason: `Shell 尝试探测云主机元数据接口 [${matchedEgress}]: ${cmd}` };
+      }
+
+      // 核心凭证与敏感系统文件外泄防御
+      const credentialPatterns = ['/etc/shadow', '/etc/sudoers', '.ssh/id_rsa', '.ssh/id_ed25519', '.aws/credentials'];
+      const matchedCred = credentialPatterns.find((pattern) => cmd.includes(pattern));
+      if (matchedCred) {
+        return { isDangerous: true, reason: `Shell 尝试访问敏感凭证或私钥文件 [${matchedCred}]: ${cmd}` };
+      }
+    }
+
+    // 检查浏览器/HTTP工具访问云元数据服务
+    if (toolLower === 'browser_open' || toolLower.includes('browser')) {
+      const url = String(args.url || '');
+      if (url.includes('169.254.169.254') || url.includes('metadata.google.internal')) {
+        return { isDangerous: true, reason: `浏览器工具尝试访问云元数据服务: ${url}` };
+      }
     }
 
     return { isDangerous: false };
