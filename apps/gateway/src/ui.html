@@ -3,164 +3,293 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MuseClaw · 企业常驻数字员工工作台</title>
+  <title>MuseClaw</title>
+  <!-- Markdown & Code Highlight -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
   <style>
     :root {
-      --bg: #0f172a;
-      --sidebar: #1e293b;
-      --card: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --accent: #3b82f6;
-      --accent-hover: #2563eb;
-      --danger-bg: #451a1a;
-      --danger-border: #dc2626;
-      --danger-text: #fca5a5;
-      --success: #10b981;
+      --bg: #0d1117;
+      --sidebar-bg: #161b22;
+      --card-bg: #1c2128;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #2f81f7;
+      --accent-hover: #1f6feb;
+      --warn-bg: rgba(210, 153, 34, 0.1);
+      --warn-border: #d29922;
+      --warn-text: #e3b341;
+      --success: #3fb950;
+      --code-bg: #161b22;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; font-size: 14px; }
 
-    /* Left Sidebar: Roster */
-    .sidebar { width: 280px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-    .brand { padding: 20px; border-bottom: 1px solid var(--border); font-size: 18px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
-    .badge { font-size: 11px; background: #065f46; color: #6ee7b7; padding: 2px 8px; border-radius: 12px; font-weight: normal; }
-    .roster-title { padding: 16px 20px 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-    .roster-list { flex: 1; overflow-y: auto; padding: 0 10px; }
-    .bot-item { padding: 12px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; margin-bottom: 4px; transition: background 0.2s; }
-    .bot-item:hover, .bot-item.active { background: #334155; }
-    .bot-avatar { font-size: 24px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; background: #0f172a; border-radius: 8px; }
-    .bot-info { flex: 1; overflow: hidden; }
-    .bot-name { font-size: 14px; font-weight: 600; }
-    .bot-desc { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Left Sidebar */
+    .sidebar { width: 280px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+    .brand-bar { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .brand-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .new-chat-btn { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 12px 14px; padding: 9px 12px; background: #21262d; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: 0.15s; }
+    .new-chat-btn:hover { background: #30363d; border-color: #8b949e; }
 
-    /* Main Chat Panel */
-    .main { flex: 1; display: flex; flex-direction: column; }
-    .header { height: 60px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: var(--sidebar); }
-    .active-bot-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    .status-indicator { width: 8px; height: 8px; background: var(--success); border-radius: 50%; }
+    .section-title { padding: 12px 18px 6px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    
+    /* Bot Roster */
+    .roster-list { padding: 0 10px; margin-bottom: 12px; }
+    .bot-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 10px; margin-bottom: 2px; transition: background 0.15s; }
+    .bot-item:hover, .bot-item.active { background: #21262d; }
+    .bot-icon { font-size: 16px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: #0d1117; border-radius: 6px; border: 1px solid var(--border); }
+    .bot-name { font-size: 13px; font-weight: 500; }
 
-    .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-    .message { max-width: 80%; padding: 14px 18px; border-radius: 12px; line-height: 1.5; font-size: 14px; }
-    .message.user { align-self: flex-end; background: var(--accent); color: white; border-bottom-right-radius: 2px; }
-    .message.assistant { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 2px; white-space: pre-wrap; }
+    /* Session List */
+    .session-list { flex: 1; overflow-y: auto; padding: 0 10px; }
+    .session-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; font-size: 13px; color: var(--text); transition: 0.15s; }
+    .session-item:hover, .session-item.active { background: #21262d; }
+    .session-item.active { border-left: 2px solid var(--accent); }
+    .session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .session-time { font-size: 11px; color: var(--muted); }
 
-    /* Tool Call Badge */
-    .tool-box { align-self: flex-start; background: #0b1329; border: 1px solid #1e3a8a; border-radius: 8px; padding: 10px 14px; font-family: monospace; font-size: 12px; max-width: 85%; color: #93c5fd; }
-    .tool-box pre { margin-top: 6px; color: #cbd5e1; overflow-x: auto; }
+    /* Main Workspace */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+    .header { height: 56px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: var(--sidebar-bg); }
+    .header-left { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
 
-    /* Sentinel Approval Card */
-    .sentinel-card { align-self: center; width: 90%; max-width: 600px; background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: 12px; padding: 18px 20px; box-shadow: 0 8px 24px rgba(220, 38, 38, 0.2); animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { border-color: #dc2626; } 50% { border-color: #f87171; } }
-    .sentinel-header { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 15px; color: #fca5a5; margin-bottom: 8px; }
-    .sentinel-desc { font-size: 13px; color: #fecaca; margin-bottom: 12px; line-height: 1.4; }
-    .sentinel-actions { display: flex; gap: 12px; justify-content: flex-end; }
-    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: 0.2s; }
-    .btn-approve { background: #16a34a; color: white; }
-    .btn-approve:hover { background: #15803d; }
-    .btn-reject { background: #475569; color: white; }
-    .btn-reject:hover { background: #334155; }
+    .chat-scroll { flex: 1; overflow-y: auto; padding: 24px 20%; display: flex; flex-direction: column; gap: 20px; }
+    @media (max-width: 1200px) { .chat-scroll { padding: 20px 8%; } }
+
+    /* Message Bubbles */
+    .msg-row { display: flex; gap: 12px; width: 100%; }
+    .msg-row.user { justify-content: flex-end; }
+    .avatar { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; background: #21262d; border: 1px solid var(--border); }
+    .msg-content { max-width: 85%; padding: 12px 16px; border-radius: 8px; line-height: 1.6; word-break: break-word; }
+    .msg-row.user .msg-content { background: #1f6feb; color: white; border-bottom-right-radius: 2px; }
+    .msg-row.assistant .msg-content { background: var(--card-bg); border: 1px solid var(--border); border-bottom-left-radius: 2px; flex: 1; }
+
+    /* Markdown Styling */
+    .markdown-body pre { background: var(--code-bg); padding: 12px; border-radius: 6px; overflow-x: auto; margin: 10px 0; border: 1px solid var(--border); }
+    .markdown-body code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+    .markdown-body p { margin-bottom: 8px; }
+    .markdown-body p:last-child { margin-bottom: 0; }
+    .markdown-body ul, .markdown-body ol { margin-left: 20px; margin-bottom: 8px; }
+
+    /* Tool Call Collapsible Accordion */
+    .tool-accordion { border: 1px solid var(--border); border-radius: 6px; background: #161b22; margin: 8px 0; overflow: hidden; font-size: 12px; }
+    .tool-summary { padding: 8px 12px; background: #21262d; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-family: monospace; color: #79c0ff; user-select: none; }
+    .tool-summary:hover { background: #30363d; }
+    .tool-body { padding: 12px; border-top: 1px solid var(--border); font-family: monospace; font-size: 12px; background: #0d1117; max-height: 250px; overflow-y: auto; color: #c9d1d9; white-space: pre-wrap; }
+
+    /* Action Confirmation Card (Native Approval Card) */
+    .confirm-card { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 8px; padding: 16px 18px; margin: 12px 0; }
+    .confirm-header { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--warn-text); font-size: 14px; margin-bottom: 8px; }
+    .confirm-text { color: #f0f6fc; font-size: 13px; line-height: 1.5; margin-bottom: 14px; }
+    .confirm-btns { display: flex; gap: 10px; justify-content: flex-end; }
+    .btn { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: 0.15s; }
+    .btn-allow { background: #238636; color: white; }
+    .btn-allow:hover { background: #2ea043; }
+    .btn-deny { background: #21262d; color: var(--text); border-color: var(--border); }
+    .btn-deny:hover { background: #30363d; }
 
     /* Footer & Input */
-    .footer { padding: 16px 24px 20px; background: var(--sidebar); border-top: 1px solid var(--border); }
-    .presets { display: flex; gap: 8px; margin-bottom: 10px; }
-    .preset-btn { font-size: 12px; background: #334155; color: #cbd5e1; border: 1px solid var(--border); border-radius: 16px; padding: 4px 12px; cursor: pointer; }
-    .preset-btn:hover { background: #475569; color: white; }
-    .input-bar { display: flex; gap: 10px; }
-    .input-box { flex: 1; background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; color: white; font-size: 14px; outline: none; }
-    .input-box:focus { border-color: var(--accent); }
-    .send-btn { background: var(--accent); color: white; padding: 0 20px; border-radius: 8px; font-weight: 600; border: none; cursor: pointer; }
+    .footer { padding: 16px 20% 20px; background: var(--bg); border-top: 1px solid var(--border); }
+    @media (max-width: 1200px) { .footer { padding: 14px 8% 18px; } }
+    .presets { display: flex; gap: 8px; margin-bottom: 10px; overflow-x: auto; }
+    .preset-chip { font-size: 12px; background: #21262d; color: var(--muted); border: 1px solid var(--border); border-radius: 14px; padding: 4px 12px; cursor: pointer; white-space: nowrap; transition: 0.15s; }
+    .preset-chip:hover { color: var(--text); border-color: #8b949e; }
+    .input-wrapper { display: flex; background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; align-items: flex-end; }
+    .input-wrapper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .input-box { flex: 1; background: transparent; border: none; color: var(--text); font-size: 14px; resize: none; max-height: 160px; min-height: 38px; outline: none; padding: 8px; line-height: 1.5; }
+    .send-btn { background: var(--accent); color: white; border: none; border-radius: 6px; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; margin-bottom: 2px; }
     .send-btn:hover { background: var(--accent-hover); }
-    .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   </style>
 </head>
 <body>
 
-  <!-- Left: Roster Panel -->
+  <!-- Left Sidebar -->
   <div class="sidebar">
-    <div class="brand">
-      <span>🐾 MuseClaw</span>
-      <span class="badge">常驻运行</span>
+    <div class="brand-bar">
+      <div class="brand-title">🐾 MuseClaw</div>
     </div>
-    <div class="roster-title">虚拟员工通讯录 (Roster)</div>
+
+    <button class="new-chat-btn" onclick="startNewSession()">
+      <span>+</span> 新建对话
+    </button>
+
+    <div class="section-title">数字员工</div>
     <div class="roster-list">
-      <div class="bot-item active" onclick="switchBot('ops_bot', '💻 自动化运维助手')">
-        <div class="bot-avatar">💻</div>
-        <div class="bot-info">
-          <div class="bot-name">自动化运维助手</div>
-          <div class="bot-desc">执行 Shell、系统巡检与资源清理</div>
-        </div>
+      <div class="bot-item active" onclick="switchBot('ops_bot', '💻 运维助手')">
+        <div class="bot-icon">💻</div>
+        <div class="bot-name">运维助手</div>
       </div>
-      <div class="bot-item" onclick="switchBot('data_bot', '📊 报表与数据分析助手')">
-        <div class="bot-avatar">📊</div>
-        <div class="bot-info">
-          <div class="bot-name">数据分析助手</div>
-          <div class="bot-desc">处理内网数据表与业务统计导出</div>
-        </div>
+      <div class="bot-item" onclick="switchBot('data_bot', '📊 数据助手')">
+        <div class="bot-icon">📊</div>
+        <div class="bot-name">数据分析助手</div>
       </div>
-      <div class="bot-item" onclick="switchBot('crawler_bot', '🌐 网页采集助手')">
-        <div class="bot-avatar">🌐</div>
-        <div class="bot-info">
-          <div class="bot-name">网页采集助手</div>
-          <div class="bot-desc">持久化 Chromium 页面抓取与监控</div>
-        </div>
+      <div class="bot-item" onclick="switchBot('crawler_bot', '🌐 采集助手')">
+        <div class="bot-icon">🌐</div>
+        <div class="bot-name">网页采集助手</div>
       </div>
+    </div>
+
+    <div class="section-title">历史对话</div>
+    <div class="session-list" id="sessionList">
+      <!-- 动态加载历史会话 -->
     </div>
   </div>
 
-  <!-- Right: Active Chat & Execution Panel -->
+  <!-- Main Content -->
   <div class="main">
     <div class="header">
-      <div class="active-bot-title">
-        <span class="status-indicator"></span>
-        <span id="currentBotLabel">💻 自动化运维助手</span>
+      <div class="header-left">
+        <div class="status-dot"></div>
+        <span id="currentBotTitle">💻 运维助手</span>
       </div>
-      <div style="font-size: 12px; color: var(--muted);">
-        模型: DeepSeek · 门禁: Sentinel 物理风控在线
-      </div>
+      <div style="font-size: 12px; color: var(--muted);" id="sessionStatus">就绪</div>
     </div>
 
-    <div class="messages" id="messagesList">
-      <div class="message assistant">你好！我是你的专属常驻运维助手。已为你在沙箱中挂载了 Linux 工具链与 Sentinel 确定性安全门禁。<br/>你可以吩咐我执行系统检查、文件生成或清理任务。遇到不可逆高危操作，我会自动暂停并向你求证。</div>
+    <div class="chat-scroll" id="chatScroll">
+      <!-- 初始欢迎语 -->
+      <div class="msg-row assistant">
+        <div class="avatar">🐾</div>
+        <div class="msg-content markdown-body">
+          你好！我是你的专属常驻数字员工，已挂载当前沙箱工作区与工具链。可以直接吩咐我执行日常自动化、文件处理或巡检任务。
+        </div>
+      </div>
     </div>
 
     <div class="footer">
       <div class="presets">
-        <span style="font-size: 12px; color: var(--muted); line-height: 24px;">快捷试用：</span>
-        <button class="preset-btn" onclick="usePreset('请帮我查看当前系统的基础信息（查看 uptime 和 uname -a）')">🟢 基础安全指令 (只读)</button>
-        <button class="preset-btn" onclick="usePreset('请在 /tmp/test_muse.txt 写入内容，确认后使用 rm -rf /tmp/test_muse.txt 删除它')">🔴 高危操作 (触发 Sentinel 审批)</button>
+        <div class="preset-chip" onclick="usePreset('请查看当前系统的基础运行状态（uptime 与系统信息）')">查看系统基础状态</div>
+        <div class="preset-chip" onclick="usePreset('请在 /tmp/test_muse.txt 创建测试文件，确认内容后使用 rm -rf 清理')">测试高危敏感操作确认</div>
       </div>
-      <div class="input-bar">
-        <input type="text" id="promptInput" class="input-box" placeholder="吩咐任务，例如：检查当前目录文件..." onkeydown="if(event.key==='Enter') sendTask()">
-        <button id="sendBtn" class="send-btn" onclick="sendTask()">发送任务</button>
+      <div class="input-wrapper">
+        <textarea id="promptInput" class="input-box" rows="1" placeholder="发送指令或提问... (Enter 发送，Shift+Enter 换行)" onkeydown="handleKeyDown(event)"></textarea>
+        <button id="sendBtn" class="send-btn" onclick="sendTask()">↑</button>
       </div>
     </div>
   </div>
 
   <script>
     let currentBotId = 'ops_bot';
+    let currentSessionId = '';
 
-    function switchBot(id, label) {
+    // 初始化 marked 与代码高亮
+    marked.setOptions({
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+      },
+      breaks: true
+    });
+
+    // 页面加载拉取历史
+    window.addEventListener('DOMContentLoaded', loadSessions);
+
+    async function loadSessions() {
+      try {
+        const res = await fetch('/api/sessions');
+        const list = await res.json();
+        const container = document.getElementById('sessionList');
+        container.innerHTML = '';
+        list.forEach(s => {
+          const item = document.createElement('div');
+          item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
+          item.id = `sess_item_${s.id}`;
+          item.onclick = () => switchSession(s.id);
+          item.innerHTML = `<span class="session-name">${s.title}</span><span class="session-time">${formatTime(s.createdAt)}</span>`;
+          container.appendChild(item);
+        });
+      } catch {}
+    }
+
+    function formatTime(ts) {
+      const d = new Date(ts);
+      return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
+    function startNewSession() {
+      currentSessionId = `sess_${Date.now()}`;
+      document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+      const container = document.getElementById('chatScroll');
+      container.innerHTML = `
+        <div class="msg-row assistant">
+          <div class="avatar">🐾</div>
+          <div class="msg-content markdown-body">
+            已开启新对话，请问有什么可以协助你的？
+          </div>
+        </div>
+      `;
+    }
+
+    async function switchSession(id) {
+      currentSessionId = id;
+      document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+      const activeEl = document.getElementById(`sess_item_${id}`);
+      if (activeEl) activeEl.classList.add('active');
+
+      const res = await fetch(`/api/sessions/${id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      
+      const container = document.getElementById('chatScroll');
+      container.innerHTML = '';
+
+      data.messages.forEach(m => {
+        if (m.role === 'user') {
+          appendUserMsg(m.content);
+        } else if (m.role === 'assistant') {
+          appendAssistantMsg(m.content);
+        }
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function switchBot(id, title) {
       currentBotId = id;
-      document.getElementById('currentBotLabel').innerText = label;
+      document.getElementById('currentBotTitle').innerText = title;
       document.querySelectorAll('.bot-item').forEach(el => el.classList.remove('active'));
       event.currentTarget.classList.add('active');
     }
 
     function usePreset(text) {
-      document.getElementById('promptInput').value = text;
+      const input = document.getElementById('promptInput');
+      input.value = text;
       sendTask();
     }
 
-    function appendMessage(role, text) {
-      const container = document.getElementById('messagesList');
-      const div = document.createElement('div');
-      div.className = `message ${role}`;
-      div.innerText = text;
-      container.appendChild(div);
+    function handleKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendTask();
+      }
+    }
+
+    function appendUserMsg(text) {
+      const container = document.getElementById('chatScroll');
+      const row = document.createElement('div');
+      row.className = 'msg-row user';
+      row.innerHTML = `<div class="msg-content">${escapeHtml(text)}</div>`;
+      container.appendChild(row);
       container.scrollTop = container.scrollHeight;
-      return div;
+    }
+
+    function appendAssistantMsg(text = '') {
+      const container = document.getElementById('chatScroll');
+      const row = document.createElement('div');
+      row.className = 'msg-row assistant';
+      row.innerHTML = `<div class="avatar">🐾</div><div class="msg-content markdown-body">${marked.parse(text)}</div>`;
+      container.appendChild(row);
+      container.scrollTop = container.scrollHeight;
+      return row.querySelector('.msg-content');
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     async function sendTask() {
@@ -169,16 +298,19 @@
       if (!text) return;
       input.value = '';
 
-      appendMessage('user', text);
-      const assistantMsg = appendMessage('assistant', '');
+      appendUserMsg(text);
+      const assistantBox = appendAssistantMsg('');
       const sendBtn = document.getElementById('sendBtn');
       sendBtn.disabled = true;
+      document.getElementById('sessionStatus').innerText = '正在执行...';
+
+      let accumulatedText = '';
 
       try {
         const response = await fetch('/api/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text, botId: currentBotId })
+          body: JSON.stringify({ prompt: text, botId: currentBotId, sessionId: currentSessionId })
         });
 
         const reader = response.body.getReader();
@@ -195,71 +327,102 @@
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const event = JSON.parse(line.slice(6));
-              handleEvent(event, assistantMsg);
+              
+              if (event.type === 'session:init') {
+                currentSessionId = event.sessionId;
+                loadSessions();
+              }
+
+              if (event.type === 'stream:text-delta') {
+                accumulatedText += event.text;
+                assistantBox.innerHTML = marked.parse(accumulatedText);
+                document.getElementById('chatScroll').scrollTop = document.getElementById('chatScroll').scrollHeight;
+              }
+
+              if (event.type === 'tool:call_start') {
+                renderToolAccordion(event.toolName, event.input);
+              }
+
+              if (event.type === 'tool:call_end') {
+                updateToolAccordion(event.toolName, event.output, event.durationMs);
+              }
+
+              if (event.type === 'sentinel:approval_needed') {
+                renderActionConfirmation(event.request);
+              }
             }
           }
         }
       } catch (err) {
-        assistantMsg.innerText += `\n[系统错误: ${err.message}]`;
+        assistantBox.innerHTML += `<p style="color:#f85149;">[请求中断: ${err.message}]</p>`;
       } finally {
         sendBtn.disabled = false;
+        document.getElementById('sessionStatus').innerText = '就绪';
+        loadSessions();
       }
     }
 
-    function handleEvent(event, assistantMsg) {
-      const container = document.getElementById('messagesList');
+    let activeToolEl = null;
 
-      if (event.type === 'stream:text-delta') {
-        assistantMsg.innerText += event.text;
-        container.scrollTop = container.scrollHeight;
-      }
-
-      if (event.type === 'tool:call_start') {
-        const toolBox = document.createElement('div');
-        toolBox.className = 'tool-box';
-        toolBox.id = `tool_${Date.now()}`;
-        toolBox.innerHTML = `<strong>🔧 正在执行工具: ${event.toolName}</strong><pre>${JSON.stringify(event.input, null, 2)}</pre>`;
-        container.appendChild(toolBox);
-        container.scrollTop = container.scrollHeight;
-      }
-
-      if (event.type === 'sentinel:approval_needed') {
-        const req = event.request;
-        const card = document.createElement('div');
-        card.className = 'sentinel-card';
-        card.id = `approval_${req.approvalId}`;
-        card.innerHTML = `
-          <div class="sentinel-header">
-            <span>🛡️ Sentinel 哨兵安全拦截</span>
-            <span style="font-size: 11px; background: #b91c1c; padding: 2px 6px; border-radius: 4px;">高危动作 (${req.riskLevel})</span>
-          </div>
-          <div class="sentinel-desc">${req.actionSummary}</div>
-          <div class="sentinel-actions">
-            <button class="btn btn-reject" onclick="resolveApproval('${req.approvalId}', false)">❌ 拒绝执行</button>
-            <button class="btn btn-approve" onclick="resolveApproval('${req.approvalId}', true)">✅ 批准执行</button>
-          </div>
-        `;
-        container.appendChild(card);
-        container.scrollTop = container.scrollHeight;
-      }
-
-      if (event.type === 'tool:call_end') {
-        const doneTip = document.createElement('div');
-        doneTip.style.fontSize = '12px';
-        doneTip.style.color = '#10b981';
-        doneTip.style.alignSelf = 'flex-start';
-        doneTip.innerText = `  └─ ✅ 工具执行完成 (${event.durationMs}ms)`;
-        container.appendChild(doneTip);
-        container.scrollTop = container.scrollHeight;
-      }
+    function renderToolAccordion(name, input) {
+      const container = document.getElementById('chatScroll');
+      const wrap = document.createElement('div');
+      wrap.style.paddingLeft = '44px';
+      wrap.innerHTML = `
+        <details class="tool-accordion" open>
+          <summary class="tool-summary">
+            <span>⚙️ 正在执行操作: ${name}</span>
+            <span style="font-size:11px; color:#8b949e;">运行中...</span>
+          </summary>
+          <div class="tool-body">输入参数:\n${escapeHtml(JSON.stringify(input, null, 2))}</div>
+        </details>
+      `;
+      container.appendChild(wrap);
+      activeToolEl = wrap;
+      container.scrollTop = container.scrollHeight;
     }
 
-    async function resolveApproval(approvalId, approved) {
-      const card = document.getElementById(`approval_${approvalId}`);
+    function updateToolAccordion(name, output, durationMs) {
+      if (!activeToolEl) return;
+      const details = activeToolEl.querySelector('details');
+      const summary = activeToolEl.querySelector('.tool-summary');
+      const body = activeToolEl.querySelector('.tool-body');
+      
+      summary.innerHTML = `
+        <span>✓ 已完成: ${name}</span>
+        <span style="font-size:11px; color:#3fb950;">${durationMs}ms</span>
+      `;
+      body.innerHTML += `\n\n执行输出:\n${escapeHtml(JSON.stringify(output, null, 2))}`;
+      details.removeAttribute('open'); // 默认折叠以保持界面清爽
+      activeToolEl = null;
+    }
+
+    // 操作权限确认卡片（去除底层 Sentinel 内部名词）
+    function renderActionConfirmation(req) {
+      const container = document.getElementById('chatScroll');
+      const card = document.createElement('div');
+      card.className = 'confirm-card';
+      card.id = `confirm_${req.approvalId}`;
+      card.style.marginLeft = '44px';
+      card.innerHTML = `
+        <div class="confirm-header">
+          <span>⚠️ 敏感操作执行确认</span>
+        </div>
+        <div class="confirm-text">${escapeHtml(req.actionSummary)}</div>
+        <div class="confirm-btns">
+          <button class="btn btn-deny" onclick="resolveAction('${req.approvalId}', false)">拒绝</button>
+          <button class="btn btn-allow" onclick="resolveAction('${req.approvalId}', true)">允许执行</button>
+        </div>
+      `;
+      container.appendChild(card);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    async function resolveAction(approvalId, approved) {
+      const card = document.getElementById(`confirm_${approvalId}`);
       if (card) {
-        card.style.animation = 'none';
-        card.innerHTML = `<div style="color: ${approved ? '#86efac' : '#fca5a5'}; font-size: 13px;">` +
-          `审批已提交：${approved ? '已批准，正在恢复沙箱执行...' : '已拒绝，已取消该操作'}</div>`;
+        card.innerHTML = `<div style="font-size:13px; color:${approved ? '#3fb950' : '#8b949e'};">` +
+          `已${approved ? '允许操作，正在继续执行...' : '已拒绝该操作'}</div>`;
       }
       await fetch(`/api/approvals/${approvalId}`, {
         method: 'POST',
