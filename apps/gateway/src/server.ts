@@ -1,44 +1,38 @@
 import { createServer } from 'node:http';
-import { runAgentLoop, type LLMCaller } from '@museclaw/sandbox-core/src/loop.js';
-import { createDefaultTools } from '@museclaw/sandbox-core/src/tools.js';
-import { exportToShareGPT } from '@museclaw/sandbox-core/src/trajectory.js';
-import { SentinelPolicyManager } from '@museclaw/sentinel/src/guard.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { runAgentLoop } from '../../../packages/sandbox-core/src/loop.ts';
+import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
+import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
+import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sentinel = new SentinelPolicyManager();
 const tools = createDefaultTools();
-
-// 简单的 Mock LLM Caller (演示状态机流转；生产中可直接走 OpenAI / LiteLLM)
-const defaultLLMCaller: LLMCaller = async (messages) => {
-  const lastMsg = messages[messages.length - 1];
-  const userText = String(lastMsg.content || '');
-
-  // 模拟对删除操作的识别
-  if (userText.includes('删除') || userText.includes('清理')) {
-    return {
-      content: '检测到清理数据需求，准备调用系统工具执行删除...',
-      toolCalls: [
-        {
-          id: `call_${Date.now()}`,
-          name: 'execute_shell',
-          args: { command: 'rm -rf /tmp/test_cache_*' }
-        }
-      ]
-    };
-  }
-
-  return {
-    content: `已收到任务并分析完毕：${userText}。`
-  };
-};
+const callLLM = createDeepSeekCaller();
 
 /**
- * 极简中继 HTTP 服务 (可作为 Web 与 企业微信/飞书的网关)
+ * MuseClaw Gateway & Relay HTTP Server
  */
 export function startGatewayServer(port = 8799) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
-    // 1. 审批结果回调接口 (供 Web 按钮或企业微信/飞书点击回传)
+    // 1. 静态主页：Web 控制台 (通讯录 Roster UI)
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+      const htmlPath = path.join(__dirname, 'ui.html');
+      try {
+        const html = fs.readFileSync(htmlPath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(html);
+      } catch {
+        res.writeHead(500);
+        return res.end('ui.html not found');
+      }
+    }
+
+    // 2. 审批结果回调接口 (供 Web 交互卡片或企业 IM 机器人点击调用)
     if (req.method === 'POST' && url.pathname.startsWith('/api/approvals/')) {
       const approvalId = url.pathname.replace('/api/approvals/', '');
       let body = '';
@@ -50,11 +44,11 @@ export function startGatewayServer(port = 8799) {
       return res.end(JSON.stringify({ success, approvalId, approved }));
     }
 
-    // 2. 派发任务入口 (以 SSE 流式输出 AG-UI 事件)
+    // 3. 任务执行流式接口 (SSE 输出 AG-UI / MuseEvent)
     if (req.method === 'POST' && url.pathname === '/api/tasks') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { prompt = '请帮我清理过期临时数据', userId = 'user_001', botId = 'bot_cleaner' } = JSON.parse(body || '{}');
+      const { prompt = '', userId = 'user_web', botId = 'ops_bot' } = JSON.parse(body || '{}');
 
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -63,12 +57,12 @@ export function startGatewayServer(port = 8799) {
       });
 
       const loop = runAgentLoop(
-        '你是一个企业内部的自动化运维助手',
+        '你是一个企业内部严谨的自动化助手。请根据指令调用工具解决问题。',
         prompt,
         tools,
         sentinel,
-        defaultLLMCaller,
-        { sessionId: `sess_${Date.now()}`, userId, botId }
+        callLLM,
+        { sessionId: `sess_${Date.now()}`, userId, botId, maxSteps: 8 }
       );
 
       try {
@@ -76,19 +70,22 @@ export function startGatewayServer(port = 8799) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
       } catch (err: any) {
-        res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'stream:text-delta', text: `\n[执行出错: ${err.message}]` })}\n\n`);
       }
 
       return res.end();
     }
 
-    // 默认健康检查
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'MuseClaw Gateway', port }));
+    // 默认 404
+    res.writeHead(404);
+    res.end('Not Found');
   });
 
   server.listen(port, () => {
-    console.log(`🌐 MuseClaw Gateway & Relay Server 运行在: http://localhost:${port}`);
+    console.log(`\n========================================================`);
+    console.log(`🐾 MuseClaw Web 控制台与 Gateway 已启动!`);
+    console.log(`👉 请在浏览器直接打开: http://localhost:${port}`);
+    console.log(`========================================================\n`);
   });
 
   return server;
