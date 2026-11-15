@@ -9,6 +9,8 @@ import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
 import { ProactiveManager } from '../proactive/index.ts';
+import { BotRegistry, SessionStore, SessionRouter } from '../bots/index.ts';
+import type { RouteResult, Session } from '@museclaw/protocol';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -120,29 +122,20 @@ const feishuChannel = createFeishuChannel(
   }
 );
 
-// 3. 会话持久化与多轮历史存储
-interface SessionData {
-  id: string;
-  title: string;
-  botId: string;
-  messages: LLMMessage[];
-  createdAt: number;
-}
+// 3. 多 Bot 注册中心与会话存储 (BotRegistry, SessionStore, SessionRouter)
+const botRegistry = new BotRegistry();
+const sessionStore = new SessionStore();
+const sessionRouter = new SessionRouter(botRegistry, sessionStore);
 
-const sessions = new Map<string, SessionData>();
-
-function getOrCreateSession(sessionId?: string, botId = 'ops_bot'): SessionData {
+function getOrCreateSession(sessionId?: string, botId?: string): Session {
   const id = sessionId || `sess_${Date.now()}`;
-  if (!sessions.has(id)) {
-    sessions.set(id, {
-      id,
-      title: '新对话',
-      botId,
-      messages: [],
-      createdAt: Date.now()
-    });
+  let session = sessionStore.get(id);
+  if (!session) {
+    const defaultBot = botRegistry.getCoordinator() || botRegistry.list()[0];
+    const targetBotId = botId || (defaultBot ? defaultBot.id : 'muse');
+    session = sessionStore.create(id, targetBotId, '新对话');
   }
-  return sessions.get(id)!;
+  return session;
 }
 
 // 4. 初始化例行自动化与主动任务调度器 (Proactive Automation Manager)
@@ -202,22 +195,66 @@ export function startGatewayServer(port = 8799) {
       }
     }
 
+    // B2. 多 Bot 管理接口 (BotRegistry)
+    if (req.method === 'GET' && url.pathname === '/api/bots') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(botRegistry.list()));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/bots') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      if (!data.name) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Bot name is required' }));
+      }
+      const created = botRegistry.create(data);
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(created));
+    }
+
+    if (req.method === 'PATCH' && url.pathname.startsWith('/api/bots/')) {
+      const id = url.pathname.replace('/api/bots/', '');
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const patch = JSON.parse(body || '{}');
+      try {
+        const updated = botRegistry.update(id, patch);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(updated));
+      } catch (err: any) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/sessions')) {
+      const id = url.pathname.replace('/api/bots/', '').replace('/sessions', '');
+      const sessions = sessionStore.list(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(sessions));
+    }
+
     // C. 会话列表接口
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
-      const list = Array.from(sessions.values()).map(s => ({
+      const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
+      const list = sessionStore.list(botIdParam).map(s => ({
         id: s.id,
         title: s.title,
-        botId: s.botId,
-        createdAt: s.createdAt,
-        messageCount: s.messages.length
-      })).reverse();
+        botId: s.bot_id,
+        bot_id: s.bot_id,
+        createdAt: s.created_at,
+        updatedAt: s.updated_at,
+        messageCount: s.messages ? s.messages.length : 0
+      }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(list));
     }
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
-      const s = sessions.get(id);
+      const s = sessionStore.get(id);
       if (!s) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Session not found' }));
@@ -289,15 +326,35 @@ export function startGatewayServer(port = 8799) {
       return res.end(JSON.stringify(result.body));
     }
 
-    // E. Web 任务执行流式接口（多轮上下文支持）
+    // E. Web 任务执行流式接口（多 Bot 路由与 @Mention 支持）
     if (req.method === 'POST' && url.pathname === '/api/tasks') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { prompt = '', userId = 'user_web', botId = 'ops_bot', sessionId } = JSON.parse(body || '{}');
+      const parsed = JSON.parse(body || '{}');
+      const text = parsed.prompt || parsed.text || '';
+      const userId = parsed.userId || parsed.user_id || 'user_web';
+      const requestedSessionId = parsed.sessionId || parsed.session_id;
+      const requestedBotId = parsed.botId || parsed.bot_id;
 
-      const session = getOrCreateSession(sessionId, botId);
+      // 1. 先进行多 Bot 路由解析 (@Mention 优先，再考虑 session_id 与 bot_id)
+      let routeResult: RouteResult;
+      try {
+        routeResult = sessionRouter.route({
+          text,
+          session_id: requestedSessionId,
+          bot_id: requestedBotId,
+          user_id: userId
+        });
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+
+      const { bot, session_id: finalSessionId, mention_name } = routeResult;
+      const session = sessionStore.get(finalSessionId)!;
+      if (!session.messages) session.messages = [];
       if (session.messages.length === 0) {
-        session.title = prompt.slice(0, 16) || '新任务';
+        session.title = text.slice(0, 16) || '新任务';
       }
 
       res.writeHead(200, {
@@ -306,19 +363,26 @@ export function startGatewayServer(port = 8799) {
         Connection: 'keep-alive'
       });
 
-      res.write(`data: ${JSON.stringify({ type: 'session:init', sessionId: session.id, title: session.title })}\n\n`);
+      // 发送 session 初始化事件，包含 bot_id 与 session_id
+      res.write(`data: ${JSON.stringify({
+        type: 'session:init',
+        sessionId: session.id,
+        session_id: session.id,
+        botId: bot.id,
+        bot_id: bot.id,
+        botName: bot.name,
+        title: session.title,
+        mentionName: mention_name
+      })}\n\n`);
 
-      const systemPrompt = `你是一个企业内部严谨、高效的自动化数字员工。
-你可以自主调用已提供的工具链（Shell 执行、浏览器导航等）来完成用户的复杂指令。
-回答请结构清晰、言简意赅。`;
-
+      // 启动 Agent Loop，注入该 Bot 的 Profile
       const loop = runAgentLoop(
-        systemPrompt,
-        prompt,
+        bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
+        text,
         tools,
         sentinel,
         callLLM,
-        { sessionId: session.id, userId, botId, maxSteps: 8 }
+        { sessionId: session.id, userId, botId: bot.id, profile: bot, maxSteps: 8 }
       );
 
       let fullAssistantText = '';
@@ -331,12 +395,18 @@ export function startGatewayServer(port = 8799) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
 
-        session.messages.push({ role: 'user', content: prompt });
+        session.messages.push({ role: 'user', content: text });
         if (fullAssistantText) {
           session.messages.push({ role: 'assistant', content: fullAssistantText });
         }
+        sessionStore.save(session);
       } catch (err: any) {
-        res.write(`data: ${JSON.stringify({ type: 'stream:text-delta', text: `\n[执行出错: ${err.message}]` })}\n\n`);
+        res.write(`data: ${JSON.stringify({
+          type: 'stream:text-delta',
+          text: `\n[执行出错: ${err.message}]`,
+          bot_id: bot.id,
+          session_id: session.id
+        })}\n\n`);
       }
 
       return res.end();

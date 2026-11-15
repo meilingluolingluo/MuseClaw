@@ -1,4 +1,4 @@
-import type { MuseEvent, TrajectoryStep, ApprovalRequest } from '@museclaw/protocol';
+import type { MuseEvent, TrajectoryStep, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
 export interface ToolDefinition {
   name: string;
@@ -37,27 +37,47 @@ export async function* runAgentLoop(
   tools: ToolDefinition[],
   sentinel: SentinelHook,
   callLLM: LLMCaller,
-  context: { sessionId: string; userId: string; botId: string; maxSteps?: number }
+  context: {
+    sessionId: string;
+    userId: string;
+    botId: string;
+    maxSteps?: number;
+    profile?: AgentProfile;
+  }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
+
+  // 1. 按 profile 注入 system_prompt 与 memory_ns
+  let effectivePrompt = context.profile?.system_prompt || context.profile?.systemPrompt || systemPrompt;
+  if (context.profile?.memory_ns) {
+    effectivePrompt += `\n[Memory Workspace: ${context.profile.memory_ns}]`;
+  }
+
+  // 2. 按 profile 过滤 tool_allowlist
+  let effectiveTools = tools;
+  const allowlist = context.profile?.tool_allowlist || context.profile?.defaultTools;
+  if (allowlist && allowlist.length > 0 && !allowlist.includes('*')) {
+    effectiveTools = tools.filter((t) => allowlist.includes(t.name));
+  }
+
   const messages: LLMMessage[] = [
-    { role: 'system', content: systemPrompt },
+    { role: 'system', content: effectivePrompt },
     { role: 'user', content: userGoal }
   ];
 
   const maxSteps = context.maxSteps ?? 10;
   let step = 0;
 
-  yield { type: 'agent:state', botId: context.botId, state: 'running' };
+  yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'running' };
 
   while (step < maxSteps) {
     step++;
 
-    // 1. 调用大模型进行下一步推理
-    const response = await callLLM(messages, tools);
+    // 3. 调用大模型进行下一步推理 (使用生效的工具子集)
+    const response = await callLLM(messages, effectiveTools);
 
     if (response.content) {
-      yield { type: 'stream:text-delta', text: response.content };
+      yield { type: 'stream:text-delta', text: response.content, bot_id: context.botId, session_id: context.sessionId };
     }
 
     // 没有工具调用，说明任务思考结束或直接回答完毕
@@ -70,23 +90,28 @@ export async function* runAgentLoop(
       break;
     }
 
-    // 2. 遍历并执行工具调用
+    // 4. 遍历并执行工具调用
     for (const call of response.toolCalls) {
-      const toolDef = tools.find((t) => t.name === call.name);
+      const toolDef = effectiveTools.find((t) => t.name === call.name);
       if (!toolDef) {
-        throw new Error(`Tool not found: ${call.name}`);
+        throw new Error(`Tool not found or not permitted: ${call.name}`);
       }
 
-      yield { type: 'tool:call_start', toolName: call.name, input: call.args };
+      yield { type: 'tool:call_start', toolName: call.name, input: call.args, bot_id: context.botId, session_id: context.sessionId };
 
-      // 3. Sentinel 确定性安全拦截门禁
+      // 5. Sentinel 确定性安全拦截门禁
       const check = sentinel.evaluateToolCall(call.name, call.args);
       if (check.isDangerous) {
+        const approvalId = `appr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const approvalReq: ApprovalRequest = {
-          approvalId: `appr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          approvalId,
+          approval_id: approvalId,
           sessionId: context.sessionId,
+          session_id: context.sessionId,
           botId: context.botId,
+          bot_id: context.botId,
           userId: context.userId,
+          user_id: context.userId,
           riskLevel: 'high_risk',
           actionSummary: `准备执行高危操作: ${call.name} (${check.reason || '可能导致数据修改或外部影响'})`,
           targetDetails: { parameters: call.args },
@@ -94,13 +119,13 @@ export async function* runAgentLoop(
           requestedAt: Date.now()
         };
 
-        yield { type: 'sentinel:approval_needed', request: approvalReq };
-        yield { type: 'agent:state', botId: context.botId, state: 'paused' };
+        yield { type: 'sentinel:approval_needed', request: approvalReq, bot_id: context.botId, session_id: context.sessionId };
+        yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'paused' };
 
         // 挂起等待人类通过 Web 或企微/飞书进行确认
         const approved = await sentinel.waitForApproval(approvalReq);
         if (!approved) {
-          yield { type: 'tool:call_end', toolName: call.name, output: '操作已被用户或管理员拒绝', durationMs: 0 };
+          yield { type: 'tool:call_end', toolName: call.name, output: '操作已被用户或管理员拒绝', durationMs: 0, bot_id: context.botId, session_id: context.sessionId };
           messages.push({
             role: 'tool',
             tool_call_id: call.id,
@@ -109,10 +134,10 @@ export async function* runAgentLoop(
           continue;
         }
 
-        yield { type: 'agent:state', botId: context.botId, state: 'running' };
+        yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'running' };
       }
 
-      // 4. 执行具体工具
+      // 6. 执行具体工具
       const startTime = Date.now();
       let output: unknown;
       try {
@@ -122,9 +147,9 @@ export async function* runAgentLoop(
       }
       const durationMs = Date.now() - startTime;
 
-      yield { type: 'tool:call_end', toolName: call.name, output, durationMs };
+      yield { type: 'tool:call_end', toolName: call.name, output, durationMs, bot_id: context.botId, session_id: context.sessionId };
 
-      // 5. 记录执行结果并注入上下文
+      // 7. 记录执行结果并注入上下文
       messages.push({
         role: 'assistant',
         content: response.content,
@@ -136,7 +161,7 @@ export async function* runAgentLoop(
         content: typeof output === 'string' ? output : JSON.stringify(output)
       });
 
-      // 6. 记录轨迹 (用于后续微调数据集沉淀)
+      // 8. 记录轨迹 (用于后续微调数据集沉淀)
       trajectory.push({
         stepIndex: step,
         role: 'tool',
@@ -146,6 +171,6 @@ export async function* runAgentLoop(
     }
   }
 
-  yield { type: 'agent:state', botId: context.botId, state: 'idle' };
+  yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'idle' };
   return trajectory;
 }

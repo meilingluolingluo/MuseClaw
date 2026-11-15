@@ -140,19 +140,8 @@
     </button>
 
     <div class="section-title">数字员工</div>
-    <div class="roster-list">
-      <div class="bot-item active" onclick="switchBot('ops_bot', '💻 运维助手')">
-        <div class="bot-icon">💻</div>
-        <div class="bot-name">运维助手</div>
-      </div>
-      <div class="bot-item" onclick="switchBot('data_bot', '📊 数据助手')">
-        <div class="bot-icon">📊</div>
-        <div class="bot-name">数据分析助手</div>
-      </div>
-      <div class="bot-item" onclick="switchBot('crawler_bot', '🌐 采集助手')">
-        <div class="bot-icon">🌐</div>
-        <div class="bot-name">网页采集助手</div>
-      </div>
+    <div class="roster-list" id="rosterList">
+      <!-- 动态加载 Bot 列表 -->
     </div>
 
     <div class="section-title">历史对话</div>
@@ -208,12 +197,51 @@
       breaks: true
     });
 
-    // 页面加载拉取历史
-    window.addEventListener('DOMContentLoaded', loadSessions);
+    // 页面加载拉取 Bot 列表与会话历史
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadBots();
+      await loadSessions();
+    });
+
+    async function loadBots() {
+      try {
+        const res = await fetch('/api/bots');
+        const bots = await res.json();
+        const container = document.getElementById('rosterList');
+        if (!container) return;
+        container.innerHTML = bots.map(b => `
+          <div class="bot-item ${b.id === currentBotId ? 'active' : ''}" id="bot_item_${b.id}" onclick="switchBot('${b.id}', '${escapeHtml(b.name)}')">
+            <div class="bot-icon">${b.is_coordinator ? '👑' : '🤖'}</div>
+            <div class="bot-name">${escapeHtml(b.name)}</div>
+          </div>
+        `).join('');
+
+        if (!currentBotId && bots.length > 0) {
+          const defaultBot = bots.find(b => b.is_coordinator) || bots[0];
+          currentBotId = defaultBot.id;
+          document.getElementById('currentBotTitle').innerText = defaultBot.name;
+          const el = document.getElementById(`bot_item_${defaultBot.id}`);
+          if (el) el.classList.add('active');
+        }
+      } catch (err) {
+        console.error('加载数字员工失败:', err);
+      }
+    }
+
+    async function switchBot(id, title) {
+      currentBotId = id;
+      document.getElementById('currentBotTitle').innerText = title;
+      document.querySelectorAll('.bot-item').forEach(el => el.classList.remove('active'));
+      const activeEl = document.getElementById(`bot_item_${id}`);
+      if (activeEl) activeEl.classList.add('active');
+      startNewSession();
+      await loadSessions();
+    }
 
     async function loadSessions() {
       try {
-        const res = await fetch('/api/sessions');
+        const query = currentBotId ? `?bot_id=${encodeURIComponent(currentBotId)}` : '';
+        const res = await fetch(`/api/sessions${query}`);
         const list = await res.json();
         const container = document.getElementById('sessionList');
         container.innerHTML = '';
@@ -222,7 +250,7 @@
           item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
           item.id = `sess_item_${s.id}`;
           item.onclick = () => switchSession(s.id);
-          item.innerHTML = `<span class="session-name">${s.title}</span><span class="session-time">${formatTime(s.createdAt)}</span>`;
+          item.innerHTML = `<span class="session-name">${escapeHtml(s.title || '会话')}</span><span class="session-time">${formatTime(s.createdAt || s.updatedAt || Date.now())}</span>`;
           container.appendChild(item);
         });
       } catch {}
@@ -268,13 +296,6 @@
         }
       });
       container.scrollTop = container.scrollHeight;
-    }
-
-    function switchBot(id, title) {
-      currentBotId = id;
-      document.getElementById('currentBotTitle').innerText = title;
-      document.querySelectorAll('.bot-item').forEach(el => el.classList.remove('active'));
-      event.currentTarget.classList.add('active');
     }
 
     function usePreset(text) {
@@ -350,7 +371,16 @@
               const event = JSON.parse(line.slice(6));
               
               if (event.type === 'session:init') {
-                currentSessionId = event.sessionId;
+                currentSessionId = event.session_id || event.sessionId;
+                if (event.bot_id || event.botId) {
+                  currentBotId = event.bot_id || event.botId;
+                  if (event.botName) {
+                    document.getElementById('currentBotTitle').innerText = event.botName;
+                  }
+                  document.querySelectorAll('.bot-item').forEach(el => el.classList.remove('active'));
+                  const activeEl = document.getElementById(`bot_item_${currentBotId}`);
+                  if (activeEl) activeEl.classList.add('active');
+                }
                 loadSessions();
               }
 
