@@ -9,7 +9,7 @@ import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
 import { ProactiveManager } from '../proactive/index.ts';
-import { BotRegistry, SessionStore, SessionRouter } from '../bots/index.ts';
+import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager } from '../bots/index.ts';
 import type { RouteResult, Session } from '@museclaw/protocol';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -122,10 +122,15 @@ const feishuChannel = createFeishuChannel(
   }
 );
 
-// 3. 多 Bot 注册中心与会话存储 (BotRegistry, SessionStore, SessionRouter)
+// 3. 多 Bot 注册中心与会话存储 (BotRegistry, SessionStore, SessionRouter, BotMemoryManager)
 const botRegistry = new BotRegistry();
 const sessionStore = new SessionStore();
 const sessionRouter = new SessionRouter(botRegistry, sessionStore);
+const botMemory = new BotMemoryManager();
+botMemory.ensureDefaultMemory(
+  'muse',
+  '# Muse 核心记忆与准则\n- 企业自动化总协调助手。\n- 优先调用工具解决问题，回答清晰精炼。'
+);
 
 function getOrCreateSession(sessionId?: string, botId?: string): Session {
   const id = sessionId || `sess_${Date.now()}`;
@@ -143,6 +148,9 @@ const proactive = new ProactiveManager({
   sentinel,
   tools,
   callLLM,
+  botRegistry,
+  sessionStore,
+  botMemory,
   onApprovalNeeded: async (request, routine) => {
     console.log(`⚠️ [Proactive] 例行任务触发审批需求: ${routine.name} (${request.approvalId})`);
     // 若配置了飞书通知目标，自动推送原生审批卡片
@@ -234,6 +242,27 @@ export function startGatewayServer(port = 8799) {
       const sessions = sessionStore.list(id);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(sessions));
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
+      const id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
+      const memory = botMemory.getMemory(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ bot_id: id, memory }));
+    }
+
+    if (req.method === 'PUT' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
+      const id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { memory } = JSON.parse(body || '{}');
+      if (typeof memory !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "memory" must be a string' }));
+      }
+      botMemory.saveMemory(id, memory);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, bot_id: id, memory }));
     }
 
     // C. 会话列表接口
@@ -375,14 +404,19 @@ export function startGatewayServer(port = 8799) {
         mentionName: mention_name
       })}\n\n`);
 
-      // 启动 Agent Loop，注入该 Bot 的 Profile
+      // 启动 Agent Loop，注入该 Bot 的 Profile 及专属静态记忆
+      const botWithMemory: AgentProfile = {
+        ...bot,
+        memory: botMemory.getMemory(bot.id)
+      };
+
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
         text,
         tools,
         sentinel,
         callLLM,
-        { sessionId: session.id, userId, botId: bot.id, profile: bot, maxSteps: 8 }
+        { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
       );
 
       let fullAssistantText = '';

@@ -47,9 +47,11 @@ export async function* runAgentLoop(
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
 
-  // 1. 按 profile 注入 system_prompt 与 memory_ns
+  // 1. 按 profile 注入 system_prompt 与 memory_ns / memory
   let effectivePrompt = context.profile?.system_prompt || context.profile?.systemPrompt || systemPrompt;
-  if (context.profile?.memory_ns) {
+  if (context.profile?.memory) {
+    effectivePrompt += `\n\n[Bot Memory & Preferences]:\n${context.profile.memory}`;
+  } else if (context.profile?.memory_ns) {
     effectivePrompt += `\n[Memory Workspace: ${context.profile.memory_ns}]`;
   }
 

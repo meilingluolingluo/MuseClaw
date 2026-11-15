@@ -14,6 +14,7 @@ export interface AgentProfile {
   tool_allowlist: string[];
   defaultTools?: string[];        // 兼容别名
   memory_ns: string;              // 独立记忆命名空间，如 "bots/<id>"
+  memory?: string;                // 本地 MEMORY.md 静态记忆文本
   is_coordinator?: boolean;       // 全局协调者（默认最多一个）
   enabled: boolean;
   created_at: number;
