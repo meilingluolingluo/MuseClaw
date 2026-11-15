@@ -2,11 +2,13 @@ export * from './crypto.ts';
 export * from './sender.ts';
 export * from './approval.ts';
 export * from './receiver.ts';
+export * from './ws.ts';
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { FeishuReceiver } from './receiver.ts';
 import { FeishuSender } from './sender.ts';
 import { FeishuApprovalBridge } from './approval.ts';
+import { startFeishuWebSocket } from './ws.ts';
 import type { SentinelPolicyManager } from '../../../sentinel/src/guard.ts';
 
 export interface FeishuChannelOptions {
@@ -34,6 +36,16 @@ export function createFeishuChannel(
     sender,
     approvalBridge,
     receiver,
+
+    /**
+     * 启动飞书长连接模式（WebSocket，无需公网 IP）
+     */
+    async startWebSocket() {
+      if (options.appId && options.appSecret) {
+        return startFeishuWebSocket(options.appId, options.appSecret, approvalBridge, sender, onTaskPrompt);
+      }
+      return null;
+    },
 
     /**
      * 处理 Gateway 接收到的 /api/channels/feishu/webhook HTTP 请求

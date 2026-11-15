@@ -269,6 +269,13 @@ export function startGatewayServer(port = 8799) {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);
     console.log(`📡 如流 (Infoflow) Webhook 接收端点: http://localhost:${port}/api/channels/infoflow/webhook`);
     console.log(`📡 飞书 (Feishu) Webhook 接收端点: http://localhost:${port}/api/channels/feishu/webhook`);
+
+    // 尝试启动飞书 WebSocket 长连接 (若已在后台开启长连接订阅)
+    if (feishuAppId && feishuAppSecret) {
+      feishuChannel.startWebSocket().catch((err) => {
+        console.warn(`[FeishuWS] 长连接未启动: ${err.message}`);
+      });
+    }
   });
 
   return server;
