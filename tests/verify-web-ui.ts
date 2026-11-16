@@ -33,7 +33,9 @@ async function runWebUiTests() {
     assert.ok(htmlText.includes('id="view-memory"'));
     assert.ok(htmlText.includes('id="view-skills"'));
     assert.ok(htmlText.includes('id="view-artifacts"'));
-    console.log('  -> [PASS] 根路径成功返回完整 SPA 页面结构 (含 5 大功能视窗容器)');
+    assert.ok(htmlText.includes('id="view-routines"'));
+    assert.ok(htmlText.includes('id="view-audit"'));
+    console.log('  -> [PASS] 根路径成功返回完整 SPA 页面结构 (含 7 大功能视窗容器)');
 
     // =========================================================================
     // 2. CSS 样式文件与设计系统测试 (GET /styles.css)
@@ -73,6 +75,14 @@ async function runWebUiTests() {
     const resSpaRoute = await fetch(`http://localhost:${testPort}/chat/session_demo_123`);
     assert.strictEqual(resSpaRoute.status, 200);
     assert.ok(resSpaRoute.headers.get('content-type')?.includes('text/html'));
+
+    const resRoutinesSpa = await fetch(`http://localhost:${testPort}/routines`);
+    assert.strictEqual(resRoutinesSpa.status, 200);
+    assert.ok(resRoutinesSpa.headers.get('content-type')?.includes('text/html'));
+
+    const resAuditSpa = await fetch(`http://localhost:${testPort}/audit`);
+    assert.strictEqual(resAuditSpa.status, 200);
+    assert.ok(resAuditSpa.headers.get('content-type')?.includes('text/html'));
     console.log('  -> [PASS] 任意深度子路由平滑回退至 index.html，保障 SPA 路由刷新');
 
     // =========================================================================
@@ -123,6 +133,35 @@ async function runWebUiTests() {
     const goalsData = await resGoals.json();
     assert.ok(Array.isArray(goalsData));
     console.log(`  -> 长周期目标就绪: 共 ${goalsData.length} 个目标`);
+
+    // 6.4 巡检 Routine 列表与 Hooks
+    const resRoutines = await fetch(`http://localhost:${testPort}/api/routines`);
+    const routinesData = await resRoutines.json();
+    assert.ok(Array.isArray(routinesData));
+    console.log(`  -> 巡检例行任务就绪: 共 ${routinesData.length} 个例行任务`);
+
+    // 6.5 安全策略与审计
+    const resPolicy = await fetch(`http://localhost:${testPort}/api/policy`);
+    const policyData = await resPolicy.json();
+    assert.ok(policyData.version || policyData.high_risk_patterns);
+    const resGrants = await fetch(`http://localhost:${testPort}/api/grants`);
+    const grantsData = await resGrants.json();
+    assert.ok(Array.isArray(grantsData));
+    console.log(`  -> 声明式策略与 Grants 授权体系就绪: 共 ${grantsData.length} 个授权`);
+
+    // 6.6 /api/chat 别名对齐 /api/tasks (SSE 实时流式响应)
+    const resChat = await fetch(`http://localhost:${testPort}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'PING_TEST', botId: 'muse' }),
+    });
+    assert.strictEqual(resChat.status, 200);
+    assert.ok(resChat.headers.get('content-type')?.includes('text/event-stream'));
+    const reader = resChat.body?.getReader();
+    const chunk = await reader?.read();
+    const chunkText = new TextDecoder().decode(chunk?.value);
+    assert.ok(chunkText.includes('data:'));
+    console.log(`  -> /api/chat 对齐 /api/tasks 异步任务派发正常 (SSE 流式输出已建立)`);
 
     console.log('\n===============================================================');
     console.log('   🎉 MuseClaw 前端 Web UI 全栈落地 100% 验收通过！');

@@ -780,12 +780,12 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ success: deleted }));
     }
 
-    // E. Web 任务执行流式接口（多 Bot 路由与 @Mention 支持）
-    if (req.method === 'POST' && url.pathname === '/api/tasks') {
+    // E. Web 任务执行流式接口（多 Bot 路由、@Mention 支持与 /api/chat 双兼容）
+    if (req.method === 'POST' && (url.pathname === '/api/tasks' || url.pathname === '/api/chat')) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      const text = parsed.prompt || parsed.text || '';
+      const text = parsed.prompt || parsed.text || parsed.message || '';
       const userId = parsed.userId || parsed.user_id || 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
       const requestedBotId = parsed.botId || parsed.bot_id;
@@ -904,8 +904,10 @@ export function startGatewayServer(defaultPort = 8799) {
         '/index.html',
         '/chat',
         '/goals',
+        '/routines',
         '/memory',
         '/skills',
+        '/audit',
         '/artifacts',
         '/sessions',
         '/bots'

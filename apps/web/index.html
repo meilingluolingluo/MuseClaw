@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
     <title>MuseClaw - 企业级多 Agent 数字员工工作台</title>
+    <!-- Markdown & 代码高亮引擎 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -22,6 +26,11 @@
           <span class="nav-label">目标</span>
         </button>
 
+        <button class="nav-item" data-tab="routines" title="例行主动巡检与 Webhook">
+          <span class="nav-icon" id="icon-nav-routines"></span>
+          <span class="nav-label">巡检</span>
+        </button>
+
         <button class="nav-item" data-tab="memory" title="受控长期记忆">
           <span class="nav-icon" id="icon-nav-memory"></span>
           <span class="nav-label">记忆</span>
@@ -30,6 +39,11 @@
         <button class="nav-item" data-tab="skills" title="技能成本阶梯与微沙箱">
           <span class="nav-icon" id="icon-nav-ladder"></span>
           <span class="nav-label">阶梯</span>
+        </button>
+
+        <button class="nav-item" data-tab="audit" title="安全策略与合规审计">
+          <span class="nav-icon" id="icon-nav-audit"></span>
+          <span class="nav-label">审计</span>
         </button>
 
         <button class="nav-item" data-tab="artifacts" title="交付工件展台">
@@ -42,7 +56,7 @@
       <aside class="side-drawer">
         <div class="drawer-header">
           <span class="drawer-title">数字员工 (Bots)</span>
-          <span class="pill-badge pill-blue" id="bot-count-badge">4 个活跃</span>
+          <span class="pill-badge pill-blue" id="bot-count-badge">加载中...</span>
         </div>
         
         <div class="bot-list" id="bot-list-container">
@@ -65,7 +79,7 @@
         <!-- 顶部控制条 (Top Bar) -->
         <header class="top-bar">
           <div class="top-bar-left">
-            <div class="bot-title-badge">
+            <div class="bot-title-badge" id="btn-bot-detail" title="点击查看该数字员工详细配置与权限" style="cursor: pointer;">
               <span id="active-bot-avatar" style="font-size: 18px;">🤖</span>
               <span id="active-bot-name">加载中...</span>
               <span class="pill-badge pill-blue" id="active-bot-role">Coordinator</span>
@@ -83,10 +97,10 @@
           </div>
 
           <div class="top-bar-right">
-            <!-- OpenMausBot 风格：审批模式选择器 (Approval Mode Selector) -->
-            <div class="approval-selector" id="approval-mode-btn" title="调整此 Bot 的操作门禁级别">
+            <!-- OpenMausBot 风格：审批模式选择器 (Approval Mode Selector，可真实落盘保存) -->
+            <div class="approval-selector" id="approval-mode-btn" title="点击切换此 Bot 的门禁审批级别 (ASK / AUTO_EDITS / FULL)">
               <span id="icon-lock"></span>
-              <span id="current-approval-mode-text">Ask (严格模式)</span>
+              <span id="current-approval-mode-text">ASK 门禁</span>
               <span id="icon-dropdown"></span>
             </div>
           </div>
@@ -108,9 +122,10 @@
               ></textarea>
               <div class="composer-actions">
                 <div class="prompt-suggestions">
-                  <span class="prompt-pill" data-prompt="帮我巡检一下当前服务器运行状态与磁盘空间">⚡ 巡检服务器状态</span>
-                  <span class="prompt-pill" data-prompt="制定一个为期两周的前端组件库升级 React 19 长周期目标">🎯 制定长周期目标</span>
-                  <span class="prompt-pill" data-prompt="梳理并整理近期的长期记忆碎屑">🧠 整理常驻记忆</span>
+                  <span class="prompt-pill" data-prompt="帮我巡检一下当前服务器运行状态与磁盘空间">⚡ 服务器运行巡检</span>
+                  <span class="prompt-pill" data-prompt="梳理当前项目的交付物与报告并沉淀为交付工件">📋 整理交付工件</span>
+                  <span class="prompt-pill" data-prompt="规划一个为期两周的企业内部系统升级目标">🎯 规划长周期目标</span>
+                  <span class="prompt-pill" data-prompt="查看当前系统的安全策略与审计事件">🛡️ 检查合规审计</span>
                 </div>
                 <button class="btn-send" id="btn-send-message">
                   <span id="icon-send"></span> 发送
@@ -120,30 +135,65 @@
           </div>
         </section>
 
-        <!-- 视图 2: 🎯 长周期自驱目标 (nanoMuse GoalsScreen 风格) -->
+        <!-- 视图 2: 🎯 长周期目标 (Goals) -->
         <section class="view-stage" id="view-goals" style="display: none;">
           <div class="view-header">
             <div>
               <div class="view-heading"><span id="icon-goals-heading"></span> 长周期自驱目标 (Goals)</div>
-              <div class="view-sub">持久化多步骤目标管理，支持周期自然语言巡检（如 weekdays 09:30）与客观阻碍自动修订提案</div>
+              <div class="view-sub">跨天/周持久化目标，支持定时 Check-in 自主向前推演；受阻时向人类提出计划修订提案 (Proposal)</div>
             </div>
-            <button class="btn-primary" id="btn-create-goal">+ 规划新目标</button>
+            <button class="btn-primary" id="btn-create-goal">
+              <span id="icon-plus-goal"></span> 规划新目标
+            </button>
           </div>
           <div class="goals-grid" id="goals-container">
-            <!-- 动态渲染 Goals 列表 -->
+            <!-- 动态渲染目标卡片 -->
           </div>
         </section>
 
-        <!-- 视图 3: 🧠 受控长期记忆 (nanoMuse MemoryScreen 风格) -->
+        <!-- 视图 3: ⏰ 例行主动巡检与 Webhook (Routines) -->
+        <section class="view-stage" id="view-routines" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-routines-heading"></span> 例行主动巡检与外部触发 (Routines)</div>
+              <div class="view-sub">后台无人值守定期巡检，具备 NOTHING NEW 静默抑噪能力；支持专属 Webhook 外部系统集成</div>
+            </div>
+            <button class="btn-secondary" id="btn-refresh-routines">
+              <span id="icon-refresh-routines"></span> 刷新巡检状态
+            </button>
+          </div>
+          
+          <div style="display: grid; grid-template-columns: 1fr 340px; gap: 24px;">
+            <div>
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">配置的任务列表</div>
+              <div id="routines-list-container" style="display: flex; flex-direction: column; gap: 12px;">
+                <!-- 动态渲染 Routines 列表 -->
+              </div>
+            </div>
+            <div>
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">最近巡检简报日志</div>
+              <div id="routine-runs-container" style="display: flex; flex-direction: column; gap: 10px;">
+                <!-- 动态渲染执行日志 -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 视图 4: 🧠 受控长期记忆 (Memory) -->
         <section class="view-stage" id="view-memory" style="display: none;">
           <div class="view-header">
             <div>
               <div class="view-heading"><span id="icon-memory-heading"></span> 受控长期记忆库 (Memory)</div>
               <div class="view-sub">结构化 MEMORY.md 事实存储，[user] 声明严格受守卫保护，支持 20% 预算精简与一键 Undo 撤销</div>
             </div>
-            <button class="btn-secondary" id="btn-undo-memory" title="撤销上一次记忆自整理">
-              <span id="icon-undo"></span> 一键撤销 (Undo)
-            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-secondary" id="btn-edit-memory" title="直接编辑 MEMORY.md">
+                <span id="icon-edit-mem"></span> 编辑记忆
+              </button>
+              <button class="btn-secondary" id="btn-undo-memory" title="撤销上一次记忆自整理">
+                <span id="icon-undo"></span> 一键撤销 (Undo)
+              </button>
+            </div>
           </div>
           <div class="memory-layout">
             <div class="memory-items-box">
@@ -177,7 +227,7 @@
           </div>
         </section>
 
-        <!-- 视图 4: 🪜 技能成本阶梯与微沙箱 (nanoMuse SkillsScreen 风格) -->
+        <!-- 视图 5: 🪜 技能成本阶梯与微沙箱 (Ladder & MicroSandbox & MCP) -->
         <section class="view-stage" id="view-skills" style="display: none;">
           <div class="view-header">
             <div>
@@ -185,7 +235,7 @@
               <div class="view-sub">API (最低成本) ⟶ CLI (Linux 微沙箱) ⟶ Web ⟶ Browser ⟶ GUI (屏幕投屏)。优先低开销接口，禁止跳级滥用</div>
             </div>
             <button class="btn-secondary" id="btn-refresh-sandbox">
-              <span id="icon-refresh"></span> 刷新探测状态
+              <span id="icon-refresh"></span> 刷新状态
             </button>
           </div>
 
@@ -200,12 +250,84 @@
           </div>
 
           <!-- 5 级阶梯看板 -->
+          <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">Channel Ladder 技能成本阶梯</div>
           <div class="ladder-container" id="ladder-rungs-container">
             <!-- 动态渲染 5 级成本卡片 -->
           </div>
+
+          <!-- MCP 生态插件管理 -->
+          <div style="margin-top: 24px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+              <span>🔌 Model Context Protocol (MCP) 工具生态</span>
+              <span id="mcp-server-count" style="font-size: 12px; color: var(--text-muted);">已连接 0 个服务</span>
+            </div>
+            <div id="mcp-servers-list" style="font-size: 13px; color: var(--text-muted);">
+              暂无已挂载的 MCP 服务器
+            </div>
+          </div>
         </section>
 
-        <!-- 视图 5: 📦 交付工件展台 (Artifacts) -->
+        <!-- 视图 6: 🛡️ 安全策略与合规审计 (Security & Audit) -->
+        <section class="view-stage" id="view-audit" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-audit-heading"></span> 安全策略与合规审计 (Security & Audit)</div>
+              <div class="view-sub">声明式策略配置、已授予的复用权限 (Grants) 以及全生命周期追加式审计追踪流 (AuditLog)</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-secondary" id="btn-reload-policy">
+                <span id="icon-refresh-policy"></span> 重载安全策略
+              </button>
+              <button class="btn-secondary" id="btn-refresh-audit">
+                <span id="icon-refresh-aud"></span> 刷新审计流
+              </button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+            <!-- 声明式策略看板 -->
+            <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px;">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">🛡️ 声明式安全策略 (sentinel-policy.json)</div>
+              <div id="policy-details-container" style="font-size: 12px; line-height: 1.6; font-family: var(--font-mono); color: var(--text-muted);">
+                正在读取策略...
+              </div>
+            </div>
+
+            <!-- 授权复用清单 (Grants Store) -->
+            <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px;">
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; display: flex; justify-content: space-between;">
+                <span>📜 活跃复用授权 (Grants)</span>
+                <span style="font-size: 12px; color: var(--text-muted);" id="grants-count-badge">0 个授权</span>
+              </div>
+              <div id="grants-list-container" style="max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+                暂无活跃授权
+              </div>
+            </div>
+          </div>
+
+          <!-- 结构化审计日志实时流水 -->
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px;">
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">📋 结构化操作审计流水 (Audit Trail)</div>
+            <div id="audit-logs-table-wrap" style="max-height: 380px; overflow-y: auto;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-dim);">
+                    <th style="padding: 8px;">时间戳</th>
+                    <th style="padding: 8px;">事件类型</th>
+                    <th style="padding: 8px;">执行 Bot / 会话</th>
+                    <th style="padding: 8px;">涉及工具 / 目标</th>
+                    <th style="padding: 8px;">裁决 / 详情</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-table-body">
+                  <!-- 动态渲染审计行 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 视图 7: 📦 交付工件展台 (Artifacts) -->
         <section class="view-stage" id="view-artifacts" style="display: none;">
           <div class="view-header">
             <div>

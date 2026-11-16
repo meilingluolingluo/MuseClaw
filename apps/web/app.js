@@ -10,15 +10,22 @@ const state = {
   sessions: [],
   activeSessionId: null,
   isTainted: false,
+  taintReasons: [],
   messages: [],
   goals: [],
+  routines: [],
+  routineRuns: [],
+  hooks: [],
   memoryText: '',
   memoryItems: [],
   memoryReports: [],
   sandboxStatus: null,
   channelLadder: null,
+  mcpServers: [],
+  policy: {},
+  grants: [],
+  auditLogs: [],
   artifacts: [],
-  pendingApproval: null,
   isStreaming: false
 };
 
@@ -30,8 +37,10 @@ const dom = {
   views: {
     chat: document.getElementById('view-chat'),
     goals: document.getElementById('view-goals'),
+    routines: document.getElementById('view-routines'),
     memory: document.getElementById('view-memory'),
     skills: document.getElementById('view-skills'),
+    audit: document.getElementById('view-audit'),
     artifacts: document.getElementById('view-artifacts')
   },
   botList: document.getElementById('bot-list-container'),
@@ -41,6 +50,7 @@ const dom = {
   activeBotAvatar: document.getElementById('active-bot-avatar'),
   activeBotName: document.getElementById('active-bot-name'),
   activeBotRole: document.getElementById('active-bot-role'),
+  btnBotDetail: document.getElementById('btn-bot-detail'),
   taintBadgeContainer: document.getElementById('taint-badge-container'),
   approvalModeBtn: document.getElementById('approval-mode-btn'),
   approvalModeText: document.getElementById('current-approval-mode-text'),
@@ -50,8 +60,12 @@ const dom = {
   promptPills: document.querySelectorAll('.prompt-pill'),
   goalsContainer: document.getElementById('goals-container'),
   btnCreateGoal: document.getElementById('btn-create-goal'),
+  routinesListContainer: document.getElementById('routines-list-container'),
+  routineRunsContainer: document.getElementById('routine-runs-container'),
+  btnRefreshRoutines: document.getElementById('btn-refresh-routines'),
   memoryItemsList: document.getElementById('memory-items-list'),
   memoryMetaInfo: document.getElementById('memory-meta-info'),
+  btnEditMemory: document.getElementById('btn-edit-memory'),
   btnDryRunMemory: document.getElementById('btn-dry-run-memory'),
   btnRunConsolidate: document.getElementById('btn-run-consolidate'),
   btnUndoMemory: document.getElementById('btn-undo-memory'),
@@ -59,10 +73,42 @@ const dom = {
   sandboxDetails: document.getElementById('sandbox-details-container'),
   ladderContainer: document.getElementById('ladder-rungs-container'),
   btnRefreshSandbox: document.getElementById('btn-refresh-sandbox'),
+  mcpServerCount: document.getElementById('mcp-server-count'),
+  mcpServersList: document.getElementById('mcp-servers-list'),
+  policyDetails: document.getElementById('policy-details-container'),
+  grantsList: document.getElementById('grants-list-container'),
+  grantsCountBadge: document.getElementById('grants-count-badge'),
+  auditTableBody: document.getElementById('audit-table-body'),
+  btnReloadPolicy: document.getElementById('btn-reload-policy'),
+  btnRefreshAudit: document.getElementById('btn-refresh-audit'),
   artifactsContainer: document.getElementById('artifacts-container'),
   btnRefreshArtifacts: document.getElementById('btn-refresh-artifacts'),
   modalContainer: document.getElementById('modal-container')
 };
+
+// ============================================================================
+// Markdown 渲染器与安全转义
+// ============================================================================
+function renderMarkdown(text) {
+  if (!text) return '';
+  if (window.marked && typeof window.marked.parse === 'function') {
+    try {
+      return `<div class="markdown-body">${window.marked.parse(text)}</div>`;
+    } catch {
+      // fallback
+    }
+  }
+  return `<div class="markdown-body" style="white-space: pre-wrap;">${escapeHtml(text)}</div>`;
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 // ============================================================================
 // 图标注入初始化
@@ -70,8 +116,10 @@ const dom = {
 function initIcons() {
   document.getElementById('icon-nav-chat').innerHTML = Icons.chat(20);
   document.getElementById('icon-nav-goals').innerHTML = Icons.goals(20);
+  document.getElementById('icon-nav-routines').innerHTML = Icons.routines(20);
   document.getElementById('icon-nav-memory').innerHTML = Icons.memory(20);
   document.getElementById('icon-nav-ladder').innerHTML = Icons.ladder(20);
+  document.getElementById('icon-nav-audit').innerHTML = Icons.audit(20);
   document.getElementById('icon-nav-artifacts').innerHTML = Icons.artifacts(20);
 
   document.getElementById('icon-taint-clean').innerHTML = Icons.shield(12);
@@ -81,7 +129,13 @@ function initIcons() {
   document.getElementById('icon-send').innerHTML = Icons.send(14);
 
   document.getElementById('icon-goals-heading').innerHTML = Icons.goals(22);
+  document.getElementById('icon-plus-goal').innerHTML = Icons.plus(14);
+
+  document.getElementById('icon-routines-heading').innerHTML = Icons.routines(22);
+  document.getElementById('icon-refresh-routines').innerHTML = Icons.refresh(14);
+
   document.getElementById('icon-memory-heading').innerHTML = Icons.memory(22);
+  document.getElementById('icon-edit-mem').innerHTML = Icons.edit(14);
   document.getElementById('icon-undo').innerHTML = Icons.undo(14);
   document.getElementById('icon-sparkles-dry').innerHTML = Icons.sparkles(14);
   document.getElementById('icon-sparkles-run').innerHTML = Icons.sparkles(14);
@@ -89,6 +143,11 @@ function initIcons() {
   document.getElementById('icon-ladder-heading').innerHTML = Icons.ladder(22);
   document.getElementById('icon-shield-sandbox').innerHTML = Icons.shield(18);
   document.getElementById('icon-refresh').innerHTML = Icons.refresh(14);
+
+  document.getElementById('icon-audit-heading').innerHTML = Icons.audit(22);
+  document.getElementById('icon-refresh-policy').innerHTML = Icons.refresh(14);
+  document.getElementById('icon-refresh-aud').innerHTML = Icons.refresh(14);
+
   document.getElementById('icon-artifacts-heading').innerHTML = Icons.artifacts(22);
   document.getElementById('icon-refresh-art').innerHTML = Icons.refresh(14);
 }
@@ -107,6 +166,7 @@ function switchTab(tabName) {
   });
 
   Object.entries(dom.views).forEach(([name, el]) => {
+    if (!el) return;
     if (name === tabName) {
       el.style.display = name === 'chat' ? 'flex' : 'block';
     } else {
@@ -114,10 +174,11 @@ function switchTab(tabName) {
     }
   });
 
-  // 切换视窗时按需刷新数据
   if (tabName === 'goals') loadGoals();
+  if (tabName === 'routines') loadRoutines();
   if (tabName === 'memory') loadMemory();
   if (tabName === 'skills') loadSandboxStatus();
+  if (tabName === 'audit') loadAuditAndPolicy();
   if (tabName === 'artifacts') loadArtifacts();
 }
 
@@ -154,8 +215,8 @@ function renderBotList() {
     card.innerHTML = `
       <div class="bot-avatar">${bot.avatar || '🤖'}</div>
       <div class="bot-info">
-        <div class="bot-name">${bot.name}</div>
-        <div class="bot-desc">${bot.role || bot.description || '数字员工'}</div>
+        <div class="bot-name">${escapeHtml(bot.name)}</div>
+        <div class="bot-desc">${escapeHtml(bot.role || bot.description || '数字员工')}</div>
       </div>
       <span class="pill-badge ${levelBadge}" style="font-size: 9px; padding: 1px 5px;">${bot.approval_level || 'ask'}</span>
     `;
@@ -174,7 +235,6 @@ async function selectBot(botId) {
   dom.activeBotRole.textContent = bot.role || (bot.is_coordinator ? 'Coordinator' : 'Bot');
   dom.approvalModeText.textContent = `${(bot.approval_level || 'ask').toUpperCase()} 门禁`;
 
-  // 加载该 Bot 下的专属会话
   await loadSessionsForBot(botId);
 }
 
@@ -202,8 +262,8 @@ function renderSessionList() {
     item.className = `session-item ${s.id === state.activeSessionId ? 'active' : ''}`;
     item.onclick = () => selectSession(s.id);
     item.innerHTML = `
-      <span style="overflow: hidden; text-overflow: ellipsis;">${s.title || '新任务会话'}</span>
-      <span style="font-size: 10px; color: var(--text-dim);">${s.messageCount || 0}条</span>
+      <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(s.title || '新任务会话')}</span>
+      <span style="font-size: 10px; color: var(--text-dim); flex-shrink: 0;">${s.messageCount || 0}条</span>
     `;
     dom.sessionList.appendChild(item);
   });
@@ -241,7 +301,7 @@ function createNewSession() {
   renderChatMessages();
 }
 
-// 切换门禁级别 (Approval Mode Selector - OpenMausBot 风格)
+// 切换门禁级别并落盘保存至后端 (Approval Mode Selector)
 async function cycleApprovalMode() {
   const bot = state.bots.find((b) => b.id === state.activeBotId);
   if (!bot) return;
@@ -253,20 +313,32 @@ async function cycleApprovalMode() {
   bot.approval_level = nextMode;
   dom.approvalModeText.textContent = `${nextMode.toUpperCase()} 门禁`;
   renderBotList();
+
+  try {
+    await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approval_level: nextMode })
+    });
+  } catch (err) {
+    console.error('更新门禁模式失败:', err);
+  }
 }
 
 // 刷新污点状态徽标 (Taint Tracking Badge)
 function updateTaintBadge(isTainted, reason = '') {
   state.isTainted = isTainted;
+  if (reason) state.taintReasons.push(reason);
+
   if (isTainted) {
     dom.taintBadgeContainer.innerHTML = `
-      <span class="pill-badge pill-red" title="会话已读取敏感数据 (${reason})，凡试图进行外网出站或发信一律阻断审批">
+      <span class="pill-badge pill-red" title="会话已读取敏感数据 (${reason || state.taintReasons.join(';')})，凡试图进行外网出站或发信一律阻断审批">
         ${Icons.shieldAlert(12)} 污染态 (Tainted)
       </span>
     `;
   } else {
     dom.taintBadgeContainer.innerHTML = `
-      <span class="pill-badge pill-green" title="会话未读取内部私有涉密数据，网络安全">
+      <span class="pill-badge pill-green" title="会话未读取内部私有涉密数据，出网策略正常">
         ${Icons.shield(12)} 纯净态 (Untainted)
       </span>
     `;
@@ -274,15 +346,15 @@ function updateTaintBadge(isTainted, reason = '') {
 }
 
 // ============================================================================
-// 2. 实时流式对话工作台 (Chat & SSE Streaming & Approval Cards)
+// 2. 实时流式对话工作台 (Chat & SSE Streaming & Markdown)
 // ============================================================================
 function renderChatMessages() {
   dom.chatMessages.innerHTML = '';
   if (state.messages.length === 0) {
     dom.chatMessages.innerHTML = `
       <div style="text-align: center; color: var(--text-dim); margin: auto; padding: 40px;">
-        <div style="font-size: 32px; margin-bottom: 12px;">🐾</div>
-        <div style="font-size: 15px; font-weight: 600; color: var(--text-muted);">随时为您服务</div>
+        <div style="font-size: 36px; margin-bottom: 12px;">🐾</div>
+        <div style="font-size: 16px; font-weight: 600; color: var(--text-muted);">随时为您服务</div>
         <div style="font-size: 13px; margin-top: 6px;">输入指令即可调遣数字员工执行任务、自动分析或沉淀工件</div>
       </div>
     `;
@@ -290,23 +362,23 @@ function renderChatMessages() {
   }
 
   state.messages.forEach((msg) => {
-    appendMessageBubble(msg.role, msg.content, msg.extra);
+    appendMessageBubble(msg.role, msg.content);
   });
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 }
 
-function appendMessageBubble(role, content, extra = {}) {
+function appendMessageBubble(role, content) {
   const row = document.createElement('div');
   row.className = `message-row ${role}`;
 
   const bot = state.bots.find((b) => b.id === state.activeBotId);
   const avatar = role === 'user' ? '👤' : (bot ? bot.avatar || '🤖' : '🤖');
 
-  let bubbleHtml = `<div class="message-bubble">${escapeHtml(content || '')}</div>`;
+  const bubbleContent = role === 'user' ? `<div class="message-bubble">${escapeHtml(content || '')}</div>` : `<div class="message-bubble">${renderMarkdown(content || '')}</div>`;
 
   row.innerHTML = `
     <div class="message-avatar">${avatar}</div>
-    ${bubbleHtml}
+    ${bubbleContent}
   `;
   dom.chatMessages.appendChild(row);
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
@@ -348,15 +420,23 @@ async function sendMessage() {
   let fullAssistantText = '';
 
   try {
-    const response = await fetch('/api/chat', {
+    // 兼容 /api/tasks 和 /api/chat
+    const response = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        prompt: text,
+        text,
         message: text,
         session_id: state.activeSessionId,
-        bot_id: state.activeBotId
+        bot_id: state.activeBotId,
+        user_id: 'user_web'
       })
     });
+
+    if (!response.ok) {
+      throw new Error(`服务响应异常: ${response.status} ${response.statusText}`);
+    }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
@@ -368,7 +448,7 @@ async function sendMessage() {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n\n');
-      buffer = lines.pop(); // 保留不完整块
+      buffer = lines.pop();
 
       for (const block of lines) {
         const line = block.trim();
@@ -376,7 +456,7 @@ async function sendMessage() {
         const jsonStr = line.slice(6);
         try {
           const event = JSON.parse(jsonStr);
-          handleStreamEvent(event, { streamTextEl, activityContainer, planContainer });
+          handleStreamEvent(event, { streamTextEl, activityContainer, planContainer, assistantRow });
           if (event.type === 'stream:text-delta') {
             fullAssistantText += event.text;
           }
@@ -386,6 +466,8 @@ async function sendMessage() {
       }
     }
 
+    // 流式传输完毕后，以完整 Markdown 格式固化渲染
+    streamTextEl.innerHTML = renderMarkdown(fullAssistantText);
     state.messages.push({ role: 'assistant', content: fullAssistantText });
   } catch (err) {
     streamTextEl.innerHTML += `<div style="color: var(--accent-red); margin-top: 8px;">[通信失败: ${err.message}]</div>`;
@@ -397,6 +479,15 @@ async function sendMessage() {
 
 // 处理每个流式事件 (SSE Events)
 function handleStreamEvent(event, { streamTextEl, activityContainer, planContainer }) {
+  if (event.type === 'session:init') {
+    if (event.sessionId) state.activeSessionId = event.sessionId;
+    if (event.title) {
+      const cur = state.sessions.find((s) => s.id === state.activeSessionId);
+      if (cur) cur.title = event.title;
+      renderSessionList();
+    }
+  }
+
   if (event.type === 'stream:text-delta') {
     streamTextEl.innerText += event.text;
     dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
@@ -410,7 +501,7 @@ function handleStreamEvent(event, { streamTextEl, activityContainer, planContain
         ${event.steps.map((s, idx) => `
           <div style="font-size: 12px; margin: 3px 0; display: flex; align-items: center; gap: 6px;">
             <span style="color: ${s.status === 'done' ? 'var(--accent-green)' : 'var(--text-dim)'};">${s.status === 'done' ? '✓' : idx + 1 + '.'}</span>
-            <span style="color: ${s.status === 'done' ? 'var(--text-muted)' : 'var(--text-main)'}; text-decoration: ${s.status === 'done' ? 'line-through' : 'none'};">${s.description}</span>
+            <span style="color: ${s.status === 'done' ? 'var(--text-muted)' : 'var(--text-main)'}; text-decoration: ${s.status === 'done' ? 'line-through' : 'none'};">${escapeHtml(s.description)}</span>
           </div>
         `).join('')}
       </div>
@@ -424,7 +515,7 @@ function handleStreamEvent(event, { streamTextEl, activityContainer, planContain
     card.id = `tool-call-${event.toolName}`;
     card.innerHTML = `
       <div class="activity-header">
-        <span>⚡ 正在执行工具: <strong>${event.toolName}</strong></span>
+        <span>⚡ 正在执行工具: <strong>${escapeHtml(event.toolName)}</strong></span>
         <span class="pill-badge pill-blue">调用中...</span>
       </div>
       <div class="activity-content">${escapeHtml(JSON.stringify(event.input, null, 2))}</div>
@@ -438,8 +529,8 @@ function handleStreamEvent(event, { streamTextEl, activityContainer, planContain
     const existing = activityContainer.querySelector(`#tool-call-${event.toolName}`);
     if (existing) {
       existing.querySelector('.activity-header').innerHTML = `
-        <span>⚡ 工具调用完成: <strong>${event.toolName}</strong></span>
-        <span style="font-size: 11px; color: var(--text-dim);">${event.durationMs}ms</span>
+        <span>⚡ 工具调用完成: <strong>${escapeHtml(event.toolName)}</strong></span>
+        <span style="font-size: 11px; color: var(--text-dim);">${event.durationMs || 0}ms</span>
       `;
     }
   }
@@ -450,7 +541,7 @@ function handleStreamEvent(event, { streamTextEl, activityContainer, planContain
     sbBadge.style = 'margin: 6px 0; font-size: 11px; color: var(--accent-blue); display: flex; align-items: center; gap: 6px;';
     sbBadge.innerHTML = `
       ${Icons.shield(12)} 
-      <span>[Bubblewrap 微沙箱] 隔离执行 Shell: ${escapeHtml(event.command.slice(0, 30))} (网络阻断: ${event.networkBlocked ? '已激活' : '放行'})</span>
+      <span>[Bubblewrap 微沙箱] 隔离执行: ${escapeHtml(event.command?.slice(0, 30))} (网络隔离: ${event.networkBlocked ? '已激活' : '放行'})</span>
     `;
     activityContainer.appendChild(sbBadge);
   }
@@ -460,7 +551,7 @@ function handleStreamEvent(event, { streamTextEl, activityContainer, planContain
     updateTaintBadge(event.isTainted, event.reason);
   }
 
-  // Sentinel 门禁审批拦截卡片 (sentinel:approval_needed - OpenMausBot 风格)
+  // Sentinel 门禁审批拦截卡片 (sentinel:approval_needed)
   if (event.type === 'sentinel:approval_needed') {
     renderSentinelApprovalCard(event.request, activityContainer);
   }
@@ -485,8 +576,8 @@ function renderSentinelApprovalCard(request, container) {
     </div>
     <div class="approval-details-box">
       <div><strong>审批 ID:</strong> ${request.approvalId}</div>
-      ${request.targetDetails.command ? `<div><strong>目标命令:</strong> ${escapeHtml(request.targetDetails.command)}</div>` : ''}
-      ${request.targetDetails.parameters ? `<div><strong>操作参数:</strong> ${escapeHtml(JSON.stringify(request.targetDetails.parameters))}</div>` : ''}
+      ${request.targetDetails?.command ? `<div><strong>目标命令:</strong> ${escapeHtml(request.targetDetails.command)}</div>` : ''}
+      ${request.targetDetails?.parameters ? `<div><strong>操作参数:</strong> ${escapeHtml(JSON.stringify(request.targetDetails.parameters))}</div>` : ''}
     </div>
     <div class="approval-actions" id="actions-${request.approvalId}" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
       <select id="scope-${request.approvalId}" style="background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; font-size: 11px;">
@@ -496,10 +587,10 @@ function renderSentinelApprovalCard(request, container) {
         <option value="always">永久白名单 (Always)</option>
       </select>
       <button class="btn-reject" onclick="window.resolveApproval('${request.approvalId}', false)">
-        ${Icons.x(14)} 拒绝拦截 (Reject)
+        ${Icons.x(14)} 拒绝 (Reject)
       </button>
       <button class="btn-approve" onclick="window.resolveApproval('${request.approvalId}', true)">
-        ${Icons.check(14)} 批准执行 (Approve)
+        ${Icons.check(14)} 批准 (Approve)
       </button>
     </div>
   `;
@@ -508,7 +599,7 @@ function renderSentinelApprovalCard(request, container) {
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 }
 
-// 暴露全局解挂审批处理函数 (支持选择 once / session / 24h / always 作用域)
+// 暴露全局解挂审批处理函数
 window.resolveApproval = async function (approvalId, approved) {
   const scopeEl = document.getElementById(`scope-${approvalId}`);
   const scope = scopeEl ? scopeEl.value : 'once';
@@ -529,13 +620,13 @@ window.resolveApproval = async function (approvalId, approved) {
 };
 
 // ============================================================================
-// 3. 长周期目标管理 (Goals - nanoMuse 风格)
+// 3. 长周期目标管理 (Goals)
 // ============================================================================
 async function loadGoals() {
   try {
     const res = await fetch('/api/goals');
     const goals = await res.json();
-    state.goals = goals;
+    state.goals = Array.isArray(goals) ? goals : [];
     renderGoalsGrid();
   } catch (err) {
     console.error('加载 Goals 失败:', err);
@@ -572,14 +663,13 @@ function renderGoalsGrid() {
         <div class="goal-step-item">
           ${stepIcon}
           <div>
-            <div style="font-weight: 500; color: ${step.status === 'blocked' ? 'var(--accent-red)' : 'var(--text-main)'};">步骤 ${idx + 1}: ${step.title}</div>
-            <div style="font-size: 11px; color: var(--text-muted);">${step.description || ''}</div>
+            <div style="font-weight: 500; color: ${step.status === 'blocked' ? 'var(--accent-red)' : 'var(--text-main)'};">步骤 ${idx + 1}: ${escapeHtml(step.title)}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(step.description || '')}</div>
           </div>
         </div>
       `;
     }).join('');
 
-    // 如果处于 blocked 且有活跃提案 (Proposal)
     const activeProposal = goal.proposals?.find((p) => p.status === 'pending');
     let proposalHtml = '';
     if (activeProposal) {
@@ -606,14 +696,19 @@ function renderGoalsGrid() {
     card.innerHTML = `
       <div class="goal-card-top">
         <div>
-          <div class="goal-title">${goal.title}</div>
-          <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${goal.description || ''}</div>
+          <div class="goal-title">${escapeHtml(goal.title)}</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${escapeHtml(goal.description || '')}</div>
         </div>
-        <span class="pill-badge ${statusPill}">${goal.status.toUpperCase()}</span>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span class="pill-badge ${statusPill}">${goal.status.toUpperCase()}</span>
+          <button class="btn-secondary" style="padding: 2px 6px; font-size: 11px; color: var(--accent-red);" title="删除目标" onclick="window.deleteGoal('${goal.id}')">
+            ${Icons.trash(12)}
+          </button>
+        </div>
       </div>
 
       <div style="font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
-        ${Icons.clock(13)} 巡检周期: <strong style="color: var(--text-main);">${goal.cadence || '单次任务'}</strong>
+        ${Icons.clock(13)} 巡检周期: <strong style="color: var(--text-main);">${escapeHtml(goal.cadence || '单次任务')}</strong>
       </div>
 
       <div class="goal-steps-timeline">
@@ -623,7 +718,7 @@ function renderGoalsGrid() {
       ${proposalHtml}
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border-subtle);">
-        <span style="font-size: 11px; color: var(--text-dim);">责任 Bot: ${goal.botId}</span>
+        <span style="font-size: 11px; color: var(--text-dim);">责任 Bot: ${escapeHtml(goal.botId || '')}</span>
         ${goal.status !== 'done' ? `
           <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="window.advanceGoal('${goal.id}')">
             ${Icons.play(12)} 自驱向前推进
@@ -658,8 +753,147 @@ window.resolveProposal = async function (goalId, proposalId, accept) {
   }
 };
 
+window.deleteGoal = async function (goalId) {
+  if (!confirm('确定要删除该长周期目标吗？')) return;
+  try {
+    await fetch(`/api/goals/${encodeURIComponent(goalId)}`, { method: 'DELETE' });
+    loadGoals();
+  } catch (err) {
+    alert(`删除失败: ${err.message}`);
+  }
+};
+
 // ============================================================================
-// 4. 受控长期记忆与整理 (Memory & Consolidation - nanoMuse 风格)
+// 4. 例行主动巡检与 Webhook 模块 (Routines)
+// ============================================================================
+async function loadRoutines() {
+  try {
+    const [routinesRes, runsRes, hooksRes] = await Promise.all([
+      fetch('/api/routines'),
+      fetch('/api/routines/runs'),
+      fetch('/api/hooks')
+    ]);
+    state.routines = await routinesRes.json();
+    state.routineRuns = await runsRes.json();
+    state.hooks = await hooksRes.json();
+
+    renderRoutinesList();
+    renderRoutineRuns();
+  } catch (err) {
+    console.error('加载巡检任务失败:', err);
+  }
+}
+
+function renderRoutinesList() {
+  dom.routinesListContainer.innerHTML = '';
+  if (!state.routines || state.routines.length === 0) {
+    dom.routinesListContainer.innerHTML = '<div style="color: var(--text-dim); padding: 20px;">暂无配置的主动巡检任务</div>';
+    return;
+  }
+
+  state.routines.forEach((r) => {
+    const card = document.createElement('div');
+    card.className = 'routine-card';
+
+    const webhookUrl = `${window.location.origin}/api/hooks/${r.id}?token=${r.webhookToken || 'sec_token'}`;
+
+    card.innerHTML = `
+      <div class="routine-card-header">
+        <div>
+          <span style="font-weight: 600; font-size: 14px;">${escapeHtml(r.name)}</span>
+          <span class="pill-badge ${r.enabled ? 'pill-green' : 'pill-amber'}" style="margin-left: 8px;">
+            ${r.enabled ? '运行中 (Active)' : '已停用 (Paused)'}
+          </span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.runRoutineNow('${r.id}')">
+            ${Icons.play(11)} 立即触发
+          </button>
+          <button class="btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.toggleRoutine('${r.id}')">
+            ${r.enabled ? Icons.pause(11) : Icons.play(11)} ${r.enabled ? '停用' : '启用'}
+          </button>
+        </div>
+      </div>
+
+      <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+        ${escapeHtml(r.prompt)}
+      </div>
+
+      <div style="display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+        <span><strong>定时调度:</strong> <code>${escapeHtml(r.schedule || '手动作业')}</code></span>
+        <span><strong>执行 Bot:</strong> <code>${escapeHtml(r.agentId || 'ops_bot')}</code></span>
+      </div>
+
+      <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); color: var(--accent-blue);">
+          🔗 ${webhookUrl}
+        </span>
+        <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="navigator.clipboard.writeText('${webhookUrl}'); alert('已复制 Webhook 触发地址！');">
+          ${Icons.copy(10)} 复制
+        </button>
+      </div>
+    `;
+
+    dom.routinesListContainer.appendChild(card);
+  });
+}
+
+function renderRoutineRuns() {
+  dom.routineRunsContainer.innerHTML = '';
+  if (!state.routineRuns || state.routineRuns.length === 0) {
+    dom.routineRunsContainer.innerHTML = '<div style="color: var(--text-dim); font-size: 12px;">暂无历史巡检记录</div>';
+    return;
+  }
+
+  state.routineRuns.slice(-8).reverse().forEach((run) => {
+    const item = document.createElement('div');
+    item.className = 'routine-run-item';
+
+    const isQuiet = run.output?.includes('NOTHING NEW') || run.isQuiet;
+    const badge = isQuiet
+      ? '<span class="pill-badge pill-blue" style="font-size: 10px;">静默沉淀</span>'
+      : run.status === 'success'
+      ? '<span class="pill-badge pill-green" style="font-size: 10px;">顺利完成</span>'
+      : '<span class="pill-badge pill-red" style="font-size: 10px;">异常</span>';
+
+    item.innerHTML = `
+      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+        <strong style="color: var(--text-main);">${escapeHtml(run.routineName || '自动化作业')}</strong>
+        ${badge}
+      </div>
+      <div style="color: var(--text-dim); font-size: 11px;">
+        耗时: ${((run.durationMs || 0) / 1000).toFixed(1)}s | 时间: ${new Date(run.startedAt).toLocaleTimeString()}
+      </div>
+      <div style="margin-top: 6px; color: var(--text-muted); font-size: 11px; max-height: 40px; overflow: hidden; text-overflow: ellipsis;">
+        ${escapeHtml(run.output || '')}
+      </div>
+    `;
+
+    dom.routineRunsContainer.appendChild(item);
+  });
+}
+
+window.runRoutineNow = async function (routineId) {
+  try {
+    await fetch(`/api/routines/${encodeURIComponent(routineId)}/run`, { method: 'POST' });
+    alert('已触发例行任务执行，任务在后台沙箱中自驱运转！');
+    setTimeout(loadRoutines, 1000);
+  } catch (err) {
+    alert(`触发失败: ${err.message}`);
+  }
+};
+
+window.toggleRoutine = async function (routineId) {
+  try {
+    await fetch(`/api/routines/${encodeURIComponent(routineId)}/toggle`, { method: 'POST' });
+    loadRoutines();
+  } catch (err) {
+    alert(`切换状态失败: ${err.message}`);
+  }
+};
+
+// ============================================================================
+// 5. 受控长期记忆与整理 (Memory)
 // ============================================================================
 async function loadMemory() {
   if (!state.activeBotId) return;
@@ -699,7 +933,7 @@ function renderMemoryView() {
 
   dom.memoryItemsList.innerHTML = '';
   if (state.memoryItems.length === 0) {
-    dom.memoryItemsList.innerHTML = '<div style="color: var(--text-dim); padding: 20px; text-align: center;">当前 Bot 暂无常驻记忆条目</div>';
+    dom.memoryItemsList.innerHTML = '<div style="color: var(--text-dim); padding: 20px; text-align: center;">当前 Bot 暂无常驻记忆条目，可点击右上角【编辑记忆】手动写入</div>';
   } else {
     state.memoryItems.forEach((item) => {
       const row = document.createElement('div');
@@ -718,7 +952,6 @@ function renderMemoryView() {
     });
   }
 
-  // 渲染历史整理审计列表
   dom.consolidationHistoryList.innerHTML = '';
   if (state.memoryReports.length === 0) {
     dom.consolidationHistoryList.innerHTML = '暂无历史整理记录';
@@ -745,7 +978,7 @@ async function triggerConsolidation(dryRun = false) {
     });
     const data = await res.json();
     if (data.success) {
-      alert(`记忆整理完成！\n操作计划: 合并 ${data.report.merged_count} 条，清除 ${data.report.dropped_count} 条，受死线保护未变动项 ${data.report.rejected_count} 条`);
+      alert(`记忆受控整理预检/执行成功！\n操作计划: 合并 ${data.report.merged_count} 条，清除 ${data.report.dropped_count} 条，受死线保护未变动项 ${data.report.rejected_count} 条`);
       loadMemory();
     } else {
       alert(`整理失败: ${data.error}`);
@@ -773,18 +1006,58 @@ async function undoConsolidation() {
   }
 }
 
+function openEditMemoryModal() {
+  openModal(`编辑 ${state.activeBotId} 的长期记忆 (MEMORY.md)`, `
+    <div class="form-group">
+      <label class="form-label">记忆文本内容（每行一条 - 事实，支持 [user] 永久锚点）:</label>
+      <textarea id="modal-memory-text" class="form-control" rows="12" style="font-family: var(--font-mono); font-size: 12px; line-height: 1.5;">${escapeHtml(state.memoryText)}</textarea>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn-secondary" onclick="window.closeModal()">取消</button>
+      <button class="btn-primary" id="btn-save-memory">保存更改</button>
+    </div>
+  `);
+
+  document.getElementById('btn-save-memory').onclick = async () => {
+    const text = document.getElementById('modal-memory-text').value;
+    try {
+      const res = await fetch(`/api/bots/${encodeURIComponent(state.activeBotId)}/memory`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ memory: text })
+      });
+      if (res.ok) {
+        closeModal();
+        loadMemory();
+      } else {
+        const err = await res.json();
+        alert(`保存失败: ${err.error || '超出预算'}`);
+      }
+    } catch (err) {
+      alert(`保存失败: ${err.message}`);
+    }
+  };
+}
+
 // ============================================================================
-// 5. 技能成本阶梯与微沙箱看板 (Ladder & MicroSandbox)
+// 6. 技能成本阶梯、微沙箱与 MCP 模块 (Ladder & Sandbox & MCP)
 // ============================================================================
 async function loadSandboxStatus() {
   try {
-    const res = await fetch('/api/sandbox/status');
-    const data = await res.json();
-    state.sandboxStatus = data.microSandbox;
-    state.channelLadder = data.channelLadder;
+    const [sbRes, mcpRes] = await Promise.all([
+      fetch('/api/sandbox/status'),
+      fetch('/api/mcp/servers')
+    ]);
+
+    const sbData = await sbRes.json();
+    state.mcpServers = await mcpRes.json();
+
+    state.sandboxStatus = sbData.microSandbox;
+    state.channelLadder = sbData.channelLadder;
 
     renderSandboxDetails();
     renderLadderRungs();
+    renderMcpServers();
   } catch (err) {
     console.error('加载微沙箱状态失败:', err);
   }
@@ -808,9 +1081,6 @@ function renderSandboxDetails() {
 }
 
 function renderLadderRungs() {
-  if (!state.channelLadder) return;
-  const details = state.channelLadder.details || {};
-
   const rungs = [
     { rung: 1, key: 'api', name: 'Rung 1: API (结构化接口 / 本地数据)', cost: '~$0', latency: '~5ms', desc: '直接调用本地文件读取、数据库或 MCP 工具，零渲染开销，最稳定' },
     { rung: 2, key: 'cli', name: 'Rung 2: CLI (Linux Bubblewrap 微沙箱)', cost: '~$0.001', latency: '~15ms', desc: '在 bwrap 中执行轻量 Shell 脚本，文件系统严格只读，外网默认阻断' },
@@ -837,14 +1107,132 @@ function renderLadderRungs() {
   });
 }
 
+function renderMcpServers() {
+  dom.mcpServerCount.textContent = `已连接 ${state.mcpServers.length} 个服务`;
+  dom.mcpServersList.innerHTML = '';
+  if (state.mcpServers.length === 0) {
+    dom.mcpServersList.innerHTML = '暂无已挂载的 MCP 工具服务器';
+    return;
+  }
+
+  state.mcpServers.forEach((srv) => {
+    const item = document.createElement('div');
+    item.style = 'padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;';
+    item.innerHTML = `
+      <div>
+        <strong>${escapeHtml(srv.id || srv.name)}</strong>
+        <span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">(${srv.toolsCount || 0} 个可用工具)</span>
+      </div>
+      <span class="pill-badge pill-green" style="font-size: 10px;">Stdio Connected</span>
+    `;
+    dom.mcpServersList.appendChild(item);
+  });
+}
+
 // ============================================================================
-// 6. 交付工件与产出物展台 (Artifacts)
+// 7. 安全策略与合规审计模块 (Security & Audit)
+// ============================================================================
+async function loadAuditAndPolicy() {
+  try {
+    const [policyRes, grantsRes, auditRes] = await Promise.all([
+      fetch('/api/policy'),
+      fetch('/api/grants'),
+      fetch('/api/audit?limit=50')
+    ]);
+
+    state.policy = await policyRes.json();
+    state.grants = await grantsRes.json();
+    state.auditLogs = await auditRes.json();
+
+    renderPolicyView();
+    renderGrantsView();
+    renderAuditView();
+  } catch (err) {
+    console.error('加载安全审计失败:', err);
+  }
+}
+
+function renderPolicyView() {
+  dom.policyDetails.innerHTML = `
+    <div><strong>版本:</strong> ${state.policy.version || '1.0'}</div>
+    <div><strong>全局禁用工具:</strong> ${JSON.stringify(state.policy.deny_tools || [])}</div>
+    <div><strong>高危阻断模式:</strong> ${(state.policy.high_risk_patterns || []).slice(0, 5).join(', ')}...</div>
+    <div><strong>出网白名单:</strong> ${(state.policy.egress_allowlist || []).join(', ')}</div>
+    <div><strong>强制审批工具:</strong> ${(state.policy.always_ask_tools || []).join(', ')}</div>
+  `;
+}
+
+function renderGrantsView() {
+  dom.grantsCountBadge.textContent = `${state.grants.length} 个授权`;
+  dom.grantsList.innerHTML = '';
+  if (state.grants.length === 0) {
+    dom.grantsList.innerHTML = '<div style="color: var(--text-dim); font-size: 12px; padding: 10px;">暂无活跃的复用授权</div>';
+    return;
+  }
+
+  state.grants.forEach((g) => {
+    const item = document.createElement('div');
+    item.style = 'background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 12px;';
+    item.innerHTML = `
+      <div>
+        <div><strong>${escapeHtml(g.tool)}</strong> (${escapeHtml(g.target || '*')})</div>
+        <div style="font-size: 10px; color: var(--text-dim);">Scope: <code>${g.scope}</code> ${g.sessionId ? `| 会话: ${g.sessionId}` : ''}</div>
+      </div>
+      <button class="btn-secondary" style="padding: 2px 6px; font-size: 11px; color: var(--accent-red);" onclick="window.revokeGrant('${g.id}')">
+        撤销
+      </button>
+    `;
+    dom.grantsList.appendChild(item);
+  });
+}
+
+function renderAuditView() {
+  dom.auditTableBody.innerHTML = '';
+  if (state.auditLogs.length === 0) {
+    dom.auditTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 20px; color: var(--text-dim);">暂无审计事件</td></tr>';
+    return;
+  }
+
+  state.auditLogs.forEach((log) => {
+    const tr = document.createElement('tr');
+    tr.style = 'border-bottom: 1px solid var(--border-subtle);';
+
+    const eventBadge = log.event === 'SENTINEL_INTERCEPT'
+      ? 'pill-red'
+      : log.event === 'APPROVAL_DECISION'
+      ? (log.decision === 'approved' ? 'pill-green' : 'pill-red')
+      : log.event === 'TAINT_EVENT'
+      ? 'pill-amber'
+      : 'pill-blue';
+
+    tr.innerHTML = `
+      <td style="padding: 8px; font-family: var(--font-mono); color: var(--text-dim);">${new Date(log.ts).toLocaleTimeString()}</td>
+      <td style="padding: 8px;"><span class="pill-badge ${eventBadge}">${escapeHtml(log.event)}</span></td>
+      <td style="padding: 8px; color: var(--text-main); font-size: 11px;">${escapeHtml(log.botId || '')} / ${escapeHtml(log.sessionId?.slice(0, 16) || '-')}</td>
+      <td style="padding: 8px; font-family: var(--font-mono); font-size: 11px;">${escapeHtml(log.tool || '')} ${log.target ? `<code>${escapeHtml(log.target.slice(0, 30))}</code>` : ''}</td>
+      <td style="padding: 8px; color: var(--text-muted); font-size: 11px;">${escapeHtml(log.decision || log.details?.reason || JSON.stringify(log.details || {}))}</td>
+    `;
+    dom.auditTableBody.appendChild(tr);
+  });
+}
+
+window.revokeGrant = async function (grantId) {
+  try {
+    await fetch(`/api/grants/${encodeURIComponent(grantId)}/revoke`, { method: 'POST' });
+    loadAuditAndPolicy();
+  } catch (err) {
+    alert(`撤销失败: ${err.message}`);
+  }
+};
+
+// ============================================================================
+// 8. 交付工件与产出物展台 (Artifacts)
 // ============================================================================
 async function loadArtifacts() {
   try {
     const res = await fetch('/api/artifacts');
     const files = await res.json();
-    state.artifacts = files;
+    state.artifacts = Array.isArray(files) ? files : [];
     renderArtifactsGrid();
   } catch (err) {
     console.error('加载工件失败:', err);
@@ -865,28 +1253,105 @@ function renderArtifactsGrid() {
   state.artifacts.forEach((art) => {
     const card = document.createElement('div');
     card.className = 'artifact-card';
-    card.onclick = () => window.open(art.url, '_blank');
+    card.onclick = () => previewArtifact(art);
     card.innerHTML = `
       <div style="font-size: 24px;">📄</div>
-      <div style="font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis;">${art.name}</div>
-      <div style="font-size: 11px; color: var(--text-dim);">${art.size} 字节 | 点击查看或下载</div>
+      <div style="font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(art.name)}</div>
+      <div style="font-size: 11px; color: var(--text-dim);">${art.size} 字节 | 点击在线预览</div>
     `;
     dom.artifactsContainer.appendChild(card);
   });
 }
 
-// ============================================================================
-// 辅助工具与事件绑定
-// ============================================================================
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+async function previewArtifact(art) {
+  try {
+    const res = await fetch(art.url);
+    const content = await res.text();
+    openModal(`交付工件预览: ${art.name}`, `
+      <div style="max-height: 480px; overflow-y: auto; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 16px;">
+        ${art.name.endsWith('.md') ? renderMarkdown(content) : `<pre style="font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;">${escapeHtml(content)}</pre>`}
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px;">
+        <button class="btn-secondary" onclick="window.closeModal()">关闭</button>
+        <a href="${art.url}" download="${art.name}" class="btn-primary" style="text-decoration: none;">
+          ${Icons.download(13)} 下载工件
+        </a>
+      </div>
+    `);
+  } catch (err) {
+    alert(`加载工件失败: ${err.message}`);
+  }
 }
 
+// ============================================================================
+// 通用弹窗与 Bot 配置详情
+// ============================================================================
+function openModal(title, bodyHtml) {
+  dom.modalContainer.innerHTML = `
+    <div class="modal-overlay" onclick="if (event.target === this) window.closeModal()">
+      <div class="modal-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+          <strong style="font-size: 16px;">${escapeHtml(title)}</strong>
+          <button onclick="window.closeModal()" style="background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 18px;">&times;</button>
+        </div>
+        <div>${bodyHtml}</div>
+      </div>
+    </div>
+  `;
+}
+
+window.closeModal = function () {
+  dom.modalContainer.innerHTML = '';
+};
+
+function openBotDetailModal() {
+  const bot = state.bots.find((b) => b.id === state.activeBotId);
+  if (!bot) return;
+
+  openModal(`数字员工配置: ${bot.name}`, `
+    <div class="form-group">
+      <label class="form-label">标识与角色:</label>
+      <div style="font-size: 13px; color: var(--text-main);">ID: <code>${bot.id}</code> | 角色: <strong>${escapeHtml(bot.role || '数字员工')}</strong></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">系统人设 Prompt:</label>
+      <textarea id="modal-bot-prompt" class="form-control" rows="6" style="font-family: var(--font-mono); font-size: 12px;">${escapeHtml(bot.system_prompt || '')}</textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">当前门禁级别 (Approval Level):</label>
+      <select id="modal-bot-level" class="form-control">
+        <option value="ask" ${bot.approval_level === 'ask' ? 'selected' : ''}>ASK (严格模式: 高危全拦截)</option>
+        <option value="auto_edits" ${bot.approval_level === 'auto_edits' ? 'selected' : ''}>AUTO_EDITS (免批编辑与工件产出)</option>
+        <option value="full" ${bot.approval_level === 'full' ? 'selected' : ''}>FULL (免审批模式，底层破坏与污点外发仍阻断)</option>
+      </select>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn-secondary" onclick="window.closeModal()">取消</button>
+      <button class="btn-primary" id="btn-save-bot">保存配置</button>
+    </div>
+  `);
+
+  document.getElementById('btn-save-bot').onclick = async () => {
+    const system_prompt = document.getElementById('modal-bot-prompt').value;
+    const approval_level = document.getElementById('modal-bot-level').value;
+
+    try {
+      await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system_prompt, approval_level })
+      });
+      closeModal();
+      loadBots();
+    } catch (err) {
+      alert(`保存失败: ${err.message}`);
+    }
+  };
+}
+
+// ============================================================================
+// 事件绑定与启动入口
+// ============================================================================
 function initEventHandlers() {
   dom.navItems.forEach((btn) => {
     btn.onclick = () => switchTab(btn.dataset.tab);
@@ -894,6 +1359,7 @@ function initEventHandlers() {
 
   dom.btnNewSession.onclick = createNewSession;
   dom.approvalModeBtn.onclick = cycleApprovalMode;
+  dom.btnBotDetail.onclick = openBotDetailModal;
 
   dom.btnSendMessage.onclick = sendMessage;
   dom.composerInput.onkeydown = (e) => {
@@ -910,34 +1376,77 @@ function initEventHandlers() {
     };
   });
 
+  dom.btnEditMemory.onclick = openEditMemoryModal;
   dom.btnDryRunMemory.onclick = () => triggerConsolidation(true);
   dom.btnRunConsolidate.onclick = () => triggerConsolidation(false);
   dom.btnUndoMemory.onclick = undoConsolidation;
 
+  dom.btnRefreshRoutines.onclick = loadRoutines;
   dom.btnRefreshSandbox.onclick = loadSandboxStatus;
   dom.btnRefreshArtifacts.onclick = loadArtifacts;
 
+  dom.btnReloadPolicy.onclick = async () => {
+    await fetch('/api/policy/reload', { method: 'POST' });
+    alert('已成功重载外部安全策略配置 (sentinel-policy.json)！');
+    loadAuditAndPolicy();
+  };
+  dom.btnRefreshAudit.onclick = loadAuditAndPolicy;
+
   // 创建新长周期目标模态框
   dom.btnCreateGoal.onclick = () => {
-    const title = prompt('请输入新目标名称 (例如: 企业前端核心库升级 React 19):');
-    if (!title) return;
-    const cadence = prompt('请输入巡检推进周期 (例如: weekdays 09:30 或 daily 09:00):', 'weekdays 09:30');
-    if (!cadence) return;
+    openModal('规划长周期多步自驱目标', `
+      <div class="form-group">
+        <label class="form-label">目标标题:</label>
+        <input id="modal-goal-title" class="form-control" placeholder="例如: 企业前端核心库升级 React 19" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">巡检推进周期 (Cadence):</label>
+        <select id="modal-goal-cadence" class="form-control">
+          <option value="weekdays 09:30">工作日 09:30 (weekdays 09:30)</option>
+          <option value="daily 09:00">每天 09:00 (daily 09:00)</option>
+          <option value="weekly mon 10:00">每周一 10:00 (weekly mon 10:00)</option>
+          <option value="manual">仅手动推进 (manual)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">责任数字员工 (Bot):</label>
+        <select id="modal-goal-bot" class="form-control">
+          ${state.bots.map((b) => `<option value="${b.id}">${b.name} (${b.id})</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">执行步骤说明:</label>
+        <textarea id="modal-goal-steps" class="form-control" rows="4">阶段调研与依赖排查
+核心模块适配与功能验证
+生产灰度发布与监控巡检</textarea>
+        <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">每行一个步骤</div>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn-secondary" onclick="window.closeModal()">取消</button>
+        <button class="btn-primary" id="btn-submit-goal">创建目标</button>
+      </div>
+    `);
 
-    fetch('/api/goals', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        cadence,
-        bot_id: state.activeBotId || 'ops_bot',
-        steps: [
-          { title: '阶段调研与依赖排查', description: '梳理现有依赖并确认版本兼容性' },
-          { title: '核心模块适配与功能验证', description: '修改核心接口并执行单元测试' },
-          { title: '生产灰度发布与监控巡检', description: '小流量灰度观察报警并全量上线' }
-        ]
-      })
-    }).then(() => loadGoals());
+    document.getElementById('btn-submit-goal').onclick = async () => {
+      const title = document.getElementById('modal-goal-title').value.trim();
+      if (!title) return alert('请输入目标标题');
+      const cadence = document.getElementById('modal-goal-cadence').value;
+      const bot_id = document.getElementById('modal-goal-bot').value;
+      const stepsText = document.getElementById('modal-goal-steps').value.trim();
+      const steps = stepsText.split('\n').filter(Boolean).map((t) => ({ title: t.trim(), description: t.trim() }));
+
+      try {
+        await fetch('/api/goals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, cadence, bot_id, steps })
+        });
+        closeModal();
+        loadGoals();
+      } catch (err) {
+        alert(`创建失败: ${err.message}`);
+      }
+    };
   };
 }
 
