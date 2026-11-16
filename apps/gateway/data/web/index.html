@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
     <title>MuseClaw - 企业级多 Agent 数字员工工作台</title>
+    <!-- nanoMuse / Meta Muse Figtree 字体与系统排版 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,300..900;1,300..900&display=swap" rel="stylesheet" />
     <!-- Markdown & 代码高亮引擎 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
@@ -49,6 +53,14 @@
         <button class="nav-item" data-tab="artifacts" title="交付工件展台">
           <span class="nav-icon" id="icon-nav-artifacts"></span>
           <span class="nav-label">工件</span>
+        </button>
+
+        <div class="nav-rail-spacer"></div>
+
+        <!-- nanoMuse 风格主题切换按钮 -->
+        <button class="nav-item nav-theme-toggle" id="btn-theme-toggle" title="切换浅色 / 深色主题">
+          <span class="nav-icon" id="icon-theme-toggle"></span>
+          <span class="nav-label" id="label-theme">深色</span>
         </button>
       </nav>
 
@@ -127,8 +139,8 @@
                   <span class="prompt-pill" data-prompt="规划一个为期两周的企业内部系统升级目标">🎯 规划长周期目标</span>
                   <span class="prompt-pill" data-prompt="查看当前系统的安全策略与审计事件">🛡️ 检查合规审计</span>
                 </div>
-                <button class="btn-send" id="btn-send-message">
-                  <span id="icon-send"></span> 发送
+                <button class="btn-send" id="btn-send-message" title="发送指令 (Enter)" aria-label="发送">
+                  <span id="icon-send"></span>
                 </button>
               </div>
             </div>

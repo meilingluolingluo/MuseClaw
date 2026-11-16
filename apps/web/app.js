@@ -111,6 +111,39 @@ function escapeHtml(str) {
 }
 
 // ============================================================================
+// 主题切换管理 (nanoMuse 风格深色/浅色切换)
+// ============================================================================
+function initTheme() {
+  const saved = localStorage.getItem('museclaw_theme') || 'light';
+  document.documentElement.dataset.theme = saved;
+  updateThemeUI(saved);
+
+  const btn = document.getElementById('btn-theme-toggle');
+  if (btn) {
+    btn.onclick = toggleTheme;
+  }
+}
+
+function updateThemeUI(theme) {
+  const icon = document.getElementById('icon-theme-toggle');
+  const label = document.getElementById('label-theme');
+  if (icon) {
+    icon.innerHTML = theme === 'dark' ? Icons.sun(18) : Icons.moon(18);
+  }
+  if (label) {
+    label.textContent = theme === 'dark' ? '浅色' : '深色';
+  }
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme || 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('museclaw_theme', next);
+  updateThemeUI(next);
+}
+
+// ============================================================================
 // 图标注入初始化
 // ============================================================================
 function initIcons() {
@@ -122,11 +155,17 @@ function initIcons() {
   document.getElementById('icon-nav-audit').innerHTML = Icons.audit(20);
   document.getElementById('icon-nav-artifacts').innerHTML = Icons.artifacts(20);
 
+  const themeToggle = document.getElementById('icon-theme-toggle');
+  if (themeToggle) {
+    const currentTheme = document.documentElement.dataset.theme || 'light';
+    themeToggle.innerHTML = currentTheme === 'dark' ? Icons.sun(18) : Icons.moon(18);
+  }
+
   document.getElementById('icon-taint-clean').innerHTML = Icons.shield(12);
   document.getElementById('icon-sandbox').innerHTML = Icons.terminal(12);
   document.getElementById('icon-lock').innerHTML = Icons.lock(12);
   document.getElementById('icon-dropdown').innerHTML = Icons.chevronDown(12);
-  document.getElementById('icon-send').innerHTML = Icons.send(14);
+  document.getElementById('icon-send').innerHTML = Icons.arrowUp(16);
 
   document.getElementById('icon-goals-heading').innerHTML = Icons.goals(22);
   document.getElementById('icon-plus-goal').innerHTML = Icons.plus(14);
@@ -1451,6 +1490,7 @@ function initEventHandlers() {
 }
 
 // 启动入口
+initTheme();
 initIcons();
 initEventHandlers();
 loadBots();

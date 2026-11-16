@@ -45,10 +45,11 @@ async function runWebUiTests() {
     assert.strictEqual(resCss.status, 200);
     assert.ok(resCss.headers.get('content-type')?.includes('text/css'));
     const cssText = await resCss.text();
-    assert.ok(cssText.includes('--bg-primary: #0d1117'));
+    assert.ok(cssText.includes('--om-bg'));
+    assert.ok(cssText.includes('--bg-primary: var(--om-bg)'));
     assert.ok(cssText.includes('.approval-card-hazard'));
     assert.ok(cssText.includes('.ladder-rung-card'));
-    console.log('  -> [PASS] styles.css 成功返回深色科技风设计系统与 OpenMausBot 风格审批卡片样式');
+    console.log('  -> [PASS] styles.css 成功返回 nanoMuse 经典设计系统与双主题/审批卡片样式');
 
     // =========================================================================
     // 3. 前端 ES Modules 脚本与图标库 (GET /app.js & /icons.js)

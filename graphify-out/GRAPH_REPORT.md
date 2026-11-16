@@ -1,17 +1,17 @@
 # Graph Report - MuseClaw  (2026-11-16)
 
 ## Corpus Check
-- 73 files · ~47,921 words
+- 73 files · ~48,386 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: .css 2, .example 1, (none) 1)
 
 ## Summary
-- 723 nodes · 1606 edges · 34 communities (29 shown, 5 thin omitted)
+- 729 nodes · 1616 edges · 34 communities (30 shown, 4 thin omitted)
 - Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 127 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `43172cac`
+- Built from commit: `952924cd`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -36,9 +36,9 @@
 - 审批动作解析
 - verify-taint-tracking.ts
 - sentinel/src/index.ts
-- GatewayRelay
 - loop.ts
-- SentinelPolicyManager
+- loop.ts
+- tools.ts
 - verify-hardened-security.ts
 - data/web/app.js
 - client.ts
@@ -82,7 +82,7 @@
 - **MuseClaw 四层分层解耦分布式架构 (Access / Relay Hub / Sandbox / Data & Learning)** — readme_access_layer, readme_relay_hub, readme_sandbox_layer, readme_data_learning_layer [EXTRACTED 1.00]
 - **薄核四阶段交付物 (Phase 1-4 代码文件)** — docs_implementation_plan_loop_ts, docs_implementation_plan_guard_ts, docs_implementation_plan_server_ts, docs_implementation_plan_loader_ts, docs_implementation_plan_trajectory_ts [EXTRACTED 1.00]
 
-## Communities (34 total, 5 thin omitted)
+## Communities (34 total, 4 thin omitted)
 
 ### Community 0 - "server.ts"
 Cohesion: 0.06
@@ -101,8 +101,8 @@ Cohesion: 0.26
 Nodes (12): 原生操作确认卡片 (confirm-card, 允许/拒绝), renderActionConfirmation(req), 跨端 Sentinel 审批流 (Cross-Channel Sentinel Approval Flow), 1.2 中控与安全调度层 (Control & Relay Hub), Sentinel 确定性安全哨兵引擎, Session & State Relay 会话与状态中继, 挂起与求证状态机 (NORMAL_RUNNING -> TRIGGER_MUTATION -> STATE_SUSPENDED -> DISPATCH_APPROVAL_REQUEST -> USER_CONFIRMED -> RESUME_EXECUTION), 挂起凭证 ApprovalId (+4 more)
 
 ### Community 4 - "app.js"
-Cohesion: 0.10
-Nodes (45): appendMessageBubble(), createNewSession(), cycleApprovalMode(), dom, escapeHtml(), handleStreamEvent(), initEventHandlers(), loadArtifacts() (+37 more)
+Cohesion: 0.09
+Nodes (48): appendMessageBubble(), createNewSession(), cycleApprovalMode(), dom, escapeHtml(), handleStreamEvent(), initEventHandlers(), initTheme() (+40 more)
 
 ### Community 5 - "sendTask"
 Cohesion: 0.21
@@ -118,7 +118,7 @@ Nodes (27): applyConsolidation(), buildTidyPrompt(), CONNECTIVE_CHARS, CONNECTIV
 
 ### Community 8 - "SentinelPolicyManager"
 Cohesion: 0.06
-Nodes (15): AuditLog, GrantStore, SentinelPolicyManager, CHANNEL_DETAILS, CHANNEL_RANK, ChannelLadderPolicy, classifyToolChannel(), EscalationEvaluation (+7 more)
+Nodes (19): AuditLog, GrantStore, SentinelPolicyManager, CHANNEL_DETAILS, CHANNEL_RANK, ChannelLadderPolicy, classifyToolChannel(), EscalationEvaluation (+11 more)
 
 ### Community 9 - "verify-long-horizon-goals.ts"
 Cohesion: 0.09
@@ -152,21 +152,25 @@ Nodes (28): BotRegistry, SessionRouter, SessionStore, AgentProfile, InboundMessa
 Cohesion: 0.08
 Nodes (22): checkArtifact, checkBrowserEgress, checkEmailEgress, checkInternalApi, checkLocalEcho, checkReadFile, checkShellCatEnv, checkShellCurl (+14 more)
 
-### Community 22 - "loop.ts"
-Cohesion: 0.18
-Nodes (15): ChannelLadderStep, ExecutionChannel, MuseEvent, SessionTrajectory, TrajectoryStep, createDeepSeekCaller(), DeepSeekOptions, LLMCaller (+7 more)
+### Community 21 - "loop.ts"
+Cohesion: 0.22
+Nodes (7): GatewayRelay, ChannelLadderStep, ExecutionChannel, MuseEvent, TrajectoryStep, SentinelHook, defaultVault
 
-### Community 23 - "SentinelPolicyManager"
-Cohesion: 0.18
-Nodes (9): commandNeedsNetwork(), execAsync, ExecutionOptions, getSanitizedEnv(), MicroSandbox, MicroSandboxConfig, MicroSandboxExecutionResult, MicroSandboxStatus (+1 more)
+### Community 22 - "loop.ts"
+Cohesion: 0.26
+Nodes (10): SessionTrajectory, createDeepSeekCaller(), DeepSeekOptions, LLMCaller, LLMMessage, runAgentLoop(), createDefaultTools(), exportToShareGPT() (+2 more)
+
+### Community 23 - "tools.ts"
+Cohesion: 0.29
+Nodes (5): ExecutionOptions, MicroSandboxConfig, MicroSandboxExecutionResult, MicroSandboxStatus, NETWORK_PROGRAMS
 
 ### Community 24 - "verify-hardened-security.ts"
 Cohesion: 0.17
 Nodes (9): checkBrowser, checkMetadata, checkNormal, checkRsa, checkShadow, errorLoop, repeatLoop, sentinel (+1 more)
 
 ### Community 25 - "data/web/app.js"
-Cohesion: 0.10
-Nodes (45): appendMessageBubble(), createNewSession(), cycleApprovalMode(), dom, escapeHtml(), handleStreamEvent(), initEventHandlers(), loadArtifacts() (+37 more)
+Cohesion: 0.09
+Nodes (48): appendMessageBubble(), createNewSession(), cycleApprovalMode(), dom, escapeHtml(), handleStreamEvent(), initEventHandlers(), initTheme() (+40 more)
 
 ### Community 26 - "client.ts"
 Cohesion: 0.22
@@ -177,8 +181,8 @@ Cohesion: 0.22
 Nodes (8): description, name, private, scripts, build, dev, type, version
 
 ### Community 28 - "guard.ts"
-Cohesion: 0.13
-Nodes (18): __dirname, __dirname, AuditEvent, defaultAuditLog, __dirname, __dirname, Grant, GrantScope (+10 more)
+Cohesion: 0.14
+Nodes (17): __dirname, __dirname, AuditEvent, defaultAuditLog, __dirname, __dirname, Grant, GrantScope (+9 more)
 
 ### Community 29 - "数据飞轮 (任务执行轨迹收集与微调沉淀)"
 Cohesion: 0.27
@@ -203,22 +207,22 @@ Nodes (6): Chromium Profile 持久化 (Cookie / LocalStorage) 与 /workspace 工
 ## Knowledge Gaps
 - **15 isolated node(s):** `resolveAction(approvalId, approved)`, `企业 IM 网关 (Feishu / WeCom / DingTalk / Slack)`, `1. 统一接入层 (Access Layer)`, `Phase 3 packages/skills-registry/src/loader.ts (动态加载任务专属工具脚本)`, `模型调用层 (统一大模型流式调用与 Function Calling 转换)` (+10 more)
   These have ≤1 connection - possible missing edges. (Counts symbols only; 246 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **5 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `SentinelPolicyManager` connect `SentinelPolicyManager` to `server.ts`, `Infoflow 通道与审批桥`, `主动例行任务调度`, `飞书通道与卡片审批`, `verify-long-horizon-goals.ts`, `verify-multi-bot.ts`, `verify-taint-tracking.ts`, `loop.ts`, `verify-hardened-security.ts`, `guard.ts`?**
-  _High betweenness centrality (0.123) - this node is a cross-community bridge._
+- **Why does `SentinelPolicyManager` connect `SentinelPolicyManager` to `server.ts`, `Infoflow 通道与审批桥`, `主动例行任务调度`, `飞书通道与卡片审批`, `verify-long-horizon-goals.ts`, `verify-multi-bot.ts`, `verify-taint-tracking.ts`, `loop.ts`, `loop.ts`, `verify-hardened-security.ts`, `guard.ts`?**
+  _High betweenness centrality (0.121) - this node is a cross-community bridge._
 - **What connects `resolveAction(approvalId, approved)`, `企业 IM 网关 (Feishu / WeCom / DingTalk / Slack)`, `1. 统一接入层 (Access Layer)` to the rest of the system?**
   _15 weakly-connected nodes found - possible missing edges._
 - **Should `server.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.0636734693877551 - nodes in this community are weakly interconnected._
 - **Why does `ProactiveManager` connect `主动例行任务调度` to `SentinelPolicyManager`, `verify-long-horizon-goals.ts`, `guard.ts`, `loop.ts`?**
-  _High betweenness centrality (0.029) - this node is a cross-community bridge._
+  _High betweenness centrality (0.028) - this node is a cross-community bridge._
 - **Should `主动例行任务调度` be split into smaller, more focused modules?**
   _Cohesion score 0.08773784355179703 - nodes in this community are weakly interconnected._
 - **Why does `@larksuiteoapi/node-sdk` connect `gateway 包配置` to `飞书通道与卡片审批`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.10204081632653061 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0942684766214178 - nodes in this community are weakly interconnected._
