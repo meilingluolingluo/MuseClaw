@@ -50,14 +50,17 @@ export class SessionStore {
     }
   }
 
-  public get(id: string): Session | undefined {
-    return this.sessions.get(id);
+  public get(id: string, userId?: string): Session | undefined {
+    const s = this.sessions.get(id);
+    if (!s) return undefined;
+    if (userId && s.userId && s.userId !== userId) return undefined;
+    return s;
   }
 
   /**
-   * 创建新会话（强绑定指定 bot_id）
+   * 创建新会话（强绑定指定 bot_id 与归属用户）
    */
-  public create(id: string, botId: string, title = '新会话'): Session {
+  public create(id: string, botId: string, title = '新会话', userId?: string): Session {
     if (!botId) {
       throw new Error('创建会话必须指定归属的 bot_id');
     }
@@ -69,6 +72,7 @@ export class SessionStore {
           `禁止将已有会话换绑到另一 Bot (已有归属: ${existing.bot_id}, 请求归属: ${botId})`
         );
       }
+      if (userId && !existing.userId) existing.userId = userId;
       return existing;
     }
 
@@ -77,6 +81,7 @@ export class SessionStore {
       id,
       bot_id: botId,
       botId,
+      userId,
       title,
       created_at: now,
       updated_at: now,
@@ -91,7 +96,7 @@ export class SessionStore {
   /**
    * 保存或更新会话（严格校验 bot_id 不可变更）
    */
-  public save(session: Session) {
+  public save(session: Session, userId?: string) {
     if (!session.bot_id && !session.botId) {
       throw new Error('会话数据缺少必填字段 bot_id');
     }
@@ -106,6 +111,7 @@ export class SessionStore {
 
     session.bot_id = targetBotId;
     session.botId = targetBotId;
+    if (userId && !session.userId) session.userId = userId;
     session.updated_at = Date.now();
 
     this.sessions.set(session.id, session);
@@ -113,11 +119,16 @@ export class SessionStore {
   }
 
   /**
-   * 列出所有会话，可选按 botId 过滤 (默认过滤掉无消息的空会话)
+   * 列出所有会话，可选按 botId 和 userId 过滤 (默认过滤掉无消息的空会话)
    */
-  public list(botId?: string, includeEmpty = false): Session[] {
+  public list(botId?: string, userId?: string, includeEmpty = false): Session[] {
     const all = Array.from(this.sessions.values()).filter(
-      (s) => includeEmpty || (s.messages && s.messages.length > 0)
+      (s) => {
+        const hasMsg = includeEmpty || (s.messages && s.messages.length > 0);
+        if (!hasMsg) return false;
+        if (userId && s.userId && s.userId !== userId) return false;
+        return true;
+      }
     );
     if (!botId) {
       return all.sort((a, b) => b.updated_at - a.updated_at);
@@ -125,7 +136,10 @@ export class SessionStore {
     return all.filter((s) => s.bot_id === botId).sort((a, b) => b.updated_at - a.updated_at);
   }
 
-  public delete(id: string): boolean {
+  public delete(id: string, userId?: string): boolean {
+    const s = this.sessions.get(id);
+    if (!s) return false;
+    if (userId && s.userId && s.userId !== userId) return false;
     const res = this.sessions.delete(id);
     if (res) this.saveAll();
     return res;

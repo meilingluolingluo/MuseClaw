@@ -1680,6 +1680,48 @@ html[data-theme="dark"] .pill-red {
   transform: translateY(-1px);
 }
 
+.user-profile-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  padding: 5px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--om-fg);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.user-profile-capsule:hover {
+  background-color: var(--om-surface-3);
+  border-color: var(--om-border-hover);
+  transform: translateY(-1px);
+}
+
+.user-profile-capsule .user-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--om-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.user-profile-capsule .user-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .model-status-icon {
   display: flex;
   align-items: center;

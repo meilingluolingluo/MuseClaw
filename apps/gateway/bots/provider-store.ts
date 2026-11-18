@@ -213,8 +213,8 @@ export class ModelProviderStore {
     }
   }
 
-  public resolveEffectiveLocalModel(provider: ModelProviderConfig): ModelProviderConfig {
-    const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents();
+  public resolveEffectiveLocalModel(provider: ModelProviderConfig, userId?: string): ModelProviderConfig {
+    const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(userId);
     const remote = remoteAgents.find((r) => r.id === provider.id);
     const remoteModels = remote?.candidateModels || [];
 
@@ -269,14 +269,14 @@ export class ModelProviderStore {
     return provider;
   }
 
-  public getActiveProvider(): ModelProviderConfig {
+  public getActiveProvider(userId?: string): ModelProviderConfig {
     const p = this.providers.get(this.activeProviderId);
     const provider = p || this.providers.get('deepseek') || DEFAULT_PRESETS[0];
-    return this.resolveEffectiveLocalModel(provider);
+    return this.resolveEffectiveLocalModel(provider, userId);
   }
 
   public getActiveCaller(options?: { userId?: string }): LLMCaller {
-    const active = this.getActiveProvider();
+    const active = this.getActiveProvider(options?.userId);
     if (active.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(active.id)) {
       if (options?.userId) {
         return createLocalAgentCaller(active, { userId: options.userId });
@@ -315,7 +315,7 @@ export class ModelProviderStore {
     return `${key.slice(0, 3)}••••••${key.slice(-3)}`;
   }
 
-  public async getPublicConfig(): Promise<{
+  public async getPublicConfig(userId?: string): Promise<{
     activeProviderId: string;
     providers: Array<ModelProviderConfig & { hasKey: boolean; maskedKey: string }>;
   }> {
@@ -336,7 +336,7 @@ export class ModelProviderStore {
         let candidateModels: string[] = [];
 
         if (isLocal) {
-          const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents();
+          const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(userId);
           const remote = remoteAgents.find((r) => r.id === p.id);
           const models = Array.from(new Set([
             ...(remote?.candidateModels || []),

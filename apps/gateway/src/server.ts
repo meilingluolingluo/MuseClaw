@@ -14,6 +14,15 @@ import { ProactiveManager } from '../proactive/index.ts';
 import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager } from '../bots/index.ts';
 import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
+import {
+  getUuapConfig,
+  getCurrentUser,
+  handleAuthFailure,
+  decryptTicketToSToken,
+  validateUuapSession,
+  buildUuapLoginUrl,
+  parseCookies
+} from '../auth/uuap.ts';
 import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -90,13 +99,13 @@ botMemory.ensureDefaultMemory(
   '# Muse 核心记忆与准则\n- 企业自动化总协调助手。\n- 优先调用工具解决问题，回答清晰精炼。'
 );
 
-function getOrCreateSession(sessionId?: string, botId?: string): Session {
+function getOrCreateSession(sessionId?: string, botId?: string, userId?: string): Session {
   const id = sessionId || `sess_${Date.now()}`;
-  let session = sessionStore.get(id);
+  let session = sessionStore.get(id, userId);
   if (!session) {
     const defaultBot = botRegistry.getCoordinator() || botRegistry.list()[0];
     const targetBotId = botId || (defaultBot ? defaultBot.id : 'muse');
-    session = sessionStore.create(id, targetBotId, '新对话');
+    session = sessionStore.create(id, targetBotId, '新对话', userId);
   }
   return session;
 }
@@ -264,6 +273,7 @@ const goalEngine = new GoalEngine({
  */
 export function startGatewayServer(defaultPort = 8799) {
   const port = Number(process.env.PORT) || defaultPort;
+  const uuapConfig = getUuapConfig();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
@@ -274,6 +284,101 @@ export function startGatewayServer(defaultPort = 8799) {
     // A2. 优先处理飞书 Webhook (Challenge / 交互卡片按钮 / 消息事件)
     const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
     if (handledByFeishu) return;
+
+    // A3. 解析当前请求的用户登录身份 (支持 UUAP SSO Cookie、零信任网关 JWT、本地回环开发免密)
+    const currentUser = await getCurrentUser(req, uuapConfig, url.searchParams.get('ticket') || undefined);
+
+    // A4. 企业统一身份认证 (UUAP SSO) 相关接口
+    if (req.method === 'GET' && (url.pathname === '/api/v1/loginUser' || url.pathname === '/api/auth/me')) {
+      if (!currentUser) {
+        return handleAuthFailure(req, res, uuapConfig, url.searchParams.get('originalUrl') || undefined);
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+      });
+      return res.end(JSON.stringify({
+        ok: true,
+        code: 200,
+        data: currentUser,
+        user: currentUser
+      }));
+    }
+
+    if (req.method === 'GET' && (url.pathname === '/api/v1/callbackUrl' || url.pathname === '/api/auth/callback')) {
+      const ticket = url.searchParams.get('ticket');
+      const originalUrl = url.searchParams.get('originalUrl') || '/chat';
+      const cookies = parseCookies(req.headers.cookie);
+      const pToken = cookies['SECURE_UUAP_P_TOKEN'] || cookies['SECURE_UUAP_P_TOKEN_OFFLINE'];
+
+      let sToken: string | null = null;
+      if (ticket) {
+        sToken = await decryptTicketToSToken(uuapConfig.serverUrl, uuapConfig.appKey, ticket);
+      }
+
+      if (sToken) {
+        if (pToken) {
+          await validateUuapSession(uuapConfig, pToken, sToken);
+        }
+
+        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https') ||
+                        Boolean(req.headers.host?.includes('baidu-int.com'));
+        const sTokenCookieName = uuapConfig.env === 'develop' ? 'UUAP_S_TOKEN' : 'SECURE_UUAP_S_TOKEN';
+        const cookieVal = `${sTokenCookieName}=${encodeURIComponent(sToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 3600}${isHttps ? '; Secure' : ''}`;
+
+        res.writeHead(302, {
+          Location: originalUrl,
+          'Set-Cookie': cookieVal,
+          'Cache-Control': 'no-cache'
+        });
+        return res.end();
+      }
+
+      return handleAuthFailure(req, res, uuapConfig, originalUrl);
+    }
+
+    if (req.method === 'GET' && (url.pathname === '/login' || url.pathname === '/api/v1/login')) {
+      const loginUrl = buildUuapLoginUrl(req, uuapConfig, url.searchParams.get('originalUrl') || undefined);
+      res.writeHead(302, { Location: loginUrl, 'Cache-Control': 'no-cache' });
+      return res.end();
+    }
+
+    if ((req.method === 'POST' || req.method === 'GET') && (url.pathname === '/api/v1/logout' || url.pathname === '/api/auth/logout')) {
+      const clearCookies = [
+        'SECURE_UUAP_S_TOKEN=; Path=/; HttpOnly; Max-Age=0',
+        'UUAP_S_TOKEN=; Path=/; HttpOnly; Max-Age=0',
+        'SECURE_UUAP_P_TOKEN=; Path=/; HttpOnly; Max-Age=0',
+        'SECURE_UUAP_P_TOKEN_OFFLINE=; Path=/; HttpOnly; Max-Age=0'
+      ];
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': clearCookies
+      });
+      return res.end(JSON.stringify({ ok: true, message: 'Logged out successfully' }));
+    }
+
+    // A5. 企业 SSO 模式下的未登录请求拦截与引导
+    const isPublicPath = [
+      '/api/v1/loginUser',
+      '/api/auth/me',
+      '/api/v1/callbackUrl',
+      '/api/auth/callback',
+      '/api/v1/login',
+      '/login',
+      '/api/v1/logout',
+      '/api/auth/logout',
+      '/api/multica/status',
+      '/api/runner/register',
+      '/api/runner/poll',
+      '/runner/client.js'
+    ].includes(url.pathname) ||
+    url.pathname.startsWith('/api/runner/tasks/') ||
+    url.pathname.startsWith('/api/infoflow') ||
+    url.pathname.startsWith('/api/feishu');
+
+    if (uuapConfig.enableSso && !currentUser && url.pathname.startsWith('/api/') && !isPublicPath) {
+      return handleAuthFailure(req, res, uuapConfig);
+    }
 
     // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 apps/web，回退兼容 data/web 或旧版 ui.html)
     if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/index.html')) {
@@ -329,7 +434,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/sessions')) {
       const id = url.pathname.replace('/api/bots/', '').replace('/sessions', '');
-      const sessions = sessionStore.list(id);
+      const sessions = sessionStore.list(id, currentUser?.username);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(sessions));
     }
@@ -413,7 +518,8 @@ export function startGatewayServer(defaultPort = 8799) {
       }
 
       const targetSessionId = session_id || `api_${botId}_${Date.now()}`;
-      const session = sessionStore.create(targetSessionId, bot.id, `[API] ${message.slice(0, 16)}`);
+      const apiUserId = currentUser?.username || 'external_api';
+      const session = sessionStore.create(targetSessionId, bot.id, `[API] ${message.slice(0, 16)}`, apiUserId);
 
       const botWithMemory: AgentProfile = {
         ...bot,
@@ -426,7 +532,7 @@ export function startGatewayServer(defaultPort = 8799) {
         refreshTools(),
         sentinel,
         callLLM,
-        { sessionId: session.id, userId: 'external_api', botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+        { sessionId: session.id, userId: apiUserId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
       );
 
       let output = '';
@@ -450,7 +556,7 @@ export function startGatewayServer(defaultPort = 8799) {
       if (session.messages) {
         session.messages.push({ role: 'user', content: message });
         if (output) session.messages.push({ role: 'assistant', content: output });
-        sessionStore.save(session);
+        sessionStore.save(session, apiUserId);
       }
 
       if (needsApproval && pendingApprovalReq) {
@@ -552,15 +658,17 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ success }));
     }
 
-    // C. 会话列表接口 (默认过滤无消息的空会话)
+    // C. 会话列表接口 (按当前登录员工隔离，默认过滤无消息的空会话)
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
       const includeEmpty = url.searchParams.get('include_empty') === 'true';
-      const list = sessionStore.list(botIdParam, includeEmpty).map(s => ({
+      const targetUserId = currentUser?.username;
+      const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map(s => ({
         id: s.id,
         title: s.title,
         botId: s.bot_id,
         bot_id: s.bot_id,
+        userId: s.userId,
         createdAt: s.created_at,
         updatedAt: s.updated_at,
         messageCount: s.messages ? s.messages.length : 0
@@ -571,7 +679,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
-      const s = sessionStore.get(id);
+      const s = sessionStore.get(id, currentUser?.username);
       if (!s) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Session not found' }));
@@ -582,7 +690,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
-      const success = sessionStore.delete(id);
+      const success = sessionStore.delete(id, currentUser?.username);
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success, id }));
     }
@@ -656,15 +764,17 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // D1.4 AI 大模型提供商与服务接入接口 (AI Model Providers API)
     if (req.method === 'GET' && url.pathname === '/api/models/config') {
-      const config = await globalModelStore.getPublicConfig();
+      const config = await globalModelStore.getPublicConfig(currentUser?.username);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(config));
     }
 
     if (req.method === 'GET' && url.pathname === '/api/models/local-agents') {
       const agents = await probeLocalAgents();
+      const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(currentUser?.username);
+      const allAgents = Array.from(new Set([...agents, ...remoteAgents]));
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true, agents }));
+      return res.end(JSON.stringify({ ok: true, agents: allAgents }));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/models/config') {
@@ -703,8 +813,8 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // D1.5 远程计算节点 Mesh 伴侣接口 (Remote Runner Mesh API)
     if (req.method === 'GET' && url.pathname === '/api/runner/machines') {
-      const userId = url.searchParams.get('userId') || undefined;
-      const machines = globalRunnerMesh.listMachines(userId);
+      const targetUserId = currentUser?.username || url.searchParams.get('userId') || undefined;
+      const machines = globalRunnerMesh.listMachines(targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: true, machines }));
     }
@@ -761,7 +871,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'GET' && url.pathname === '/runner/install.sh') {
       const host = req.headers.host || 'localhost:8799';
-      const defaultToken = url.searchParams.get('token') || '';
+      const defaultToken = url.searchParams.get('token') || currentUser?.username || '';
       const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0].trim() || 'http';
       const script = `#!/usr/bin/env bash
 set -e
@@ -871,7 +981,8 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
     if (req.method === 'GET' && url.pathname === '/api/goals') {
       const botId = url.searchParams.get('bot_id') || undefined;
       const status = (url.searchParams.get('status') as any) || undefined;
-      const goals = goalStore.list({ botId, status });
+      const targetUserId = currentUser?.username || url.searchParams.get('userId') || undefined;
+      const goals = goalStore.list({ botId, status, userId: targetUserId });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(goals));
     }
@@ -889,7 +1000,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
         title: data.title,
         description: data.description || data.title,
         botId: data.botId || data.bot_id || 'ops_bot',
-        userId: data.userId || data.user_id || 'admin',
+        userId: currentUser?.username || data.userId || data.user_id || 'admin',
         category: data.category,
         cadence: data.cadence,
         steps: data.steps
@@ -977,7 +1088,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
       const text = parsed.prompt || parsed.text || parsed.message || '';
-      const userId = parsed.userId || parsed.user_id || 'user_web';
+      const userId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
       const requestedBotId = parsed.botId || parsed.bot_id;
 
@@ -1054,7 +1165,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
         if (fullAssistantText) {
           session.messages.push({ role: 'assistant', content: fullAssistantText });
         }
-        sessionStore.save(session);
+        sessionStore.save(session, userId);
       } catch (err: any) {
         res.write(`data: ${JSON.stringify({
           type: 'stream:text-delta',

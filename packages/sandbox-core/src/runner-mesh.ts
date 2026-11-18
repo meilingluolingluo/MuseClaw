@@ -317,14 +317,17 @@ export class RunnerMeshManager extends EventEmitter {
   }
 
   /**
-   * 聚合所有在线远程节点报告的 Agent 列表
+   * 聚合在线远程节点报告的 Agent 列表 (支持按用户过滤)
    */
-  public getAggregatedRemoteAgents(): LocalAgentInfo[] {
+  public getAggregatedRemoteAgents(userId?: string): LocalAgentInfo[] {
     const agentsMap = new Map<string, LocalAgentInfo>();
     const now = Date.now();
 
     for (const machine of this.machines.values()) {
       if (machine.status === 'online' && now - machine.lastHeartbeat <= 45000) {
+        if (userId && machine.userId && machine.userId !== userId) {
+          continue;
+        }
         for (const r of machine.runtimes) {
           const existing = agentsMap.get(r.id);
           const models = Array.from(new Set([...(existing?.candidateModels || []), ...r.models]));

@@ -1,10 +1,38 @@
 import { Icons } from './icons.js';
 
+// 全局 Fetch 拦截器：统一附加 withCredentials (credentials: 'include') 与 x-original-url 请求头，并处理 401 UUAP 跳转
+const originalFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
+  const options = { ...init };
+  if (!options.credentials) {
+    options.credentials = 'include';
+  }
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('x-original-url')) {
+    headers.set('x-original-url', window.location.href);
+  }
+  options.headers = headers;
+
+  const res = await originalFetch(resource, options);
+
+  // 如果遇到 401 且包含 UUAP 重定向头，自动跳转到企业统一登录认证
+  if (res.status === 401) {
+    const uuapLocation = res.headers.get('Uuap-Location') || res.headers.get('location');
+    if (uuapLocation) {
+      window.location.href = uuapLocation;
+      return res;
+    }
+  }
+
+  return res;
+};
+
 // ============================================================================
 // 全局响应式状态模型 (Global State)
 // ============================================================================
 const state = {
   currentTab: 'chat',
+  currentUser: null,
   bots: [],
   activeBotId: null,
   sessions: [],
@@ -39,6 +67,9 @@ const dom = {
   btnTopModelBadge: document.getElementById('btn-top-model-badge'),
   topModelName: document.getElementById('top-model-name'),
   topModelIcon: document.getElementById('top-model-icon'),
+  btnTopUserProfile: document.getElementById('btn-top-user-profile'),
+  topUserAvatar: document.getElementById('top-user-avatar'),
+  topUserName: document.getElementById('top-user-name'),
   views: {
     chat: document.getElementById('view-chat'),
     goals: document.getElementById('view-goals'),
@@ -2266,7 +2297,125 @@ async function loadModelsConfig() {
   }
 }
 
+function updateUserUI(user) {
+  if (!dom.topUserName || !dom.topUserAvatar) return;
+  if (user && user.username) {
+    const name = user.displayName || user.username;
+    dom.topUserName.textContent = name;
+    dom.topUserName.title = `${name} (${user.username})`;
+    dom.topUserAvatar.textContent = name.slice(0, 1).toUpperCase();
+    if (user.isDev) {
+      dom.topUserAvatar.style.backgroundColor = 'var(--om-success, #10b981)';
+    }
+  } else {
+    dom.topUserName.textContent = '未登录';
+    dom.topUserAvatar.textContent = '👤';
+  }
+}
+
+async function getLoginUser() {
+  try {
+    const res = await fetch(`/api/v1/loginUser?originalUrl=${encodeURIComponent(window.location.href)}`);
+    if (res.status === 401) {
+      const uuapLoc = res.headers.get('Uuap-Location') || res.headers.get('location');
+      if (uuapLoc) {
+        window.location.href = uuapLoc;
+        return null;
+      }
+      try {
+        const data = await res.json();
+        if (data && (data.location || data.uuapLocation)) {
+          window.location.href = data.location || data.uuapLocation;
+          return null;
+        }
+      } catch {
+        // 忽略解析异常
+      }
+    }
+    if (res.ok) {
+      const json = await res.json();
+      const user = json.data || json.user || json;
+      state.currentUser = user;
+      updateUserUI(user);
+      return user;
+    }
+  } catch (err) {
+    console.warn('[Auth] 获取员工登录身份异常:', err);
+  }
+  return null;
+}
+
+function openUserProfileModal() {
+  const user = state.currentUser || { username: '未登录', displayName: '访客' };
+  const isDev = Boolean(user.isDev);
+
+  const bodyHtml = `
+    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--om-border);">
+      <div style="width: 52px; height: 52px; border-radius: 50%; background: ${isDev ? 'var(--om-success, #10b981)' : 'var(--om-accent)'}; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 650; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        ${escapeHtml((user.displayName || user.username || 'U').slice(0, 1).toUpperCase())}
+      </div>
+      <div>
+        <div style="font-size: 16px; font-weight: 650; color: var(--om-fg); display: flex; align-items: center; gap: 8px;">
+          <span>${escapeHtml(user.displayName || user.username)}</span>
+          ${isDev ? '<span class="pill-badge pill-green" style="font-size: 11px;">开发免密</span>' : '<span class="pill-badge pill-blue" style="font-size: 11px;">企业 UUAP</span>'}
+        </div>
+        <div style="font-size: 13px; color: var(--om-muted); margin-top: 3px;">
+          员工账号: <code style="color: var(--om-fg);">${escapeHtml(user.username)}</code>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; margin-bottom: 24px;">
+      ${user.email ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--om-muted);">企业邮箱</span>
+          <span style="color: var(--om-fg); font-family: var(--font-mono);">${escapeHtml(user.email)}</span>
+        </div>` : ''}
+      ${user.department ? `
+        <div style="display: flex; justify-content: space-between;">
+          <span style="color: var(--om-muted);">所属部门</span>
+          <span style="color: var(--om-fg);">${escapeHtml(user.department)}</span>
+        </div>` : ''}
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--om-muted);">个人数据隔离</span>
+        <span style="color: var(--om-success, #10b981); font-weight: 550;">● 独立存储就绪</span>
+      </div>
+      <div style="display: flex; justify-content: space-between;">
+        <span style="color: var(--om-muted);">伴侣接入 Token</span>
+        <span style="color: var(--om-fg); font-family: var(--font-mono);">${escapeHtml(user.username)}</span>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+      <button type="button" class="btn-secondary" onclick="closeModal();">关闭</button>
+      <button type="button" class="btn-danger" id="btn-modal-logout" style="padding: 7px 14px; border-radius: 8px; font-size: 12.5px; cursor: pointer;">
+        退出当前登录
+      </button>
+    </div>
+  `;
+
+  openModal('员工个人中心与身份信息', bodyHtml);
+
+  const btnLogout = document.getElementById('btn-modal-logout');
+  if (btnLogout) {
+    btnLogout.onclick = async () => {
+      try {
+        await fetch('/api/v1/logout', { method: 'POST' });
+        showToast('已安全退出登录', 'info');
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } catch (err) {
+        showToast(`退出异常: ${err.message}`, 'error');
+      }
+    };
+  }
+}
+
 function getOrCreateUserId() {
+  if (state.currentUser && state.currentUser.username) {
+    return state.currentUser.username;
+  }
   try {
     let uid = localStorage.getItem('museclaw_user_id');
     if (!uid) {
@@ -2907,6 +3056,9 @@ function initEventHandlers() {
   if (dom.btnTopModelBadge) {
     dom.btnTopModelBadge.onclick = openModelSettingsModal;
   }
+  if (dom.btnTopUserProfile) {
+    dom.btnTopUserProfile.onclick = openUserProfileModal;
+  }
 
   dom.btnNewSession.onclick = createNewSession;
   dom.approvalModeBtn.onclick = cycleApprovalMode;
@@ -3021,7 +3173,9 @@ function initEventHandlers() {
 initTheme();
 initIcons();
 initEventHandlers();
+getLoginUser().finally(() => {
+  loadBots();
+  loadModelsConfig();
+});
 const initialTab = getTabFromLocation();
 switchTab(initialTab, true);
-loadBots();
-loadModelsConfig();

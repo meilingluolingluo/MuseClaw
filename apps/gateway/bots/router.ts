@@ -50,11 +50,11 @@ export class SessionRouter {
         } else {
           // 切到新 Bot 或无该会话 -> 为新 Bot 创建独立新 session，不修改旧 session
           targetSessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          this.sessionStore.create(targetSessionId, targetBot.id, '新会话');
+          this.sessionStore.create(targetSessionId, targetBot.id, '新会话', inbound.user_id);
         }
       } else {
         targetSessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-        this.sessionStore.create(targetSessionId, targetBot.id, '新会话');
+        this.sessionStore.create(targetSessionId, targetBot.id, '新会话', inbound.user_id);
       }
 
       return {
@@ -66,7 +66,7 @@ export class SessionRouter {
 
     // 规则 2: 否则若带 session_id：加载会话，使用会话上的 bot_id；若同时带了与会话不一致的 bot_id，则切到新 session
     if (inbound.session_id) {
-      const existingSession = this.sessionStore.get(inbound.session_id);
+      const existingSession = this.sessionStore.get(inbound.session_id, inbound.user_id);
       if (existingSession) {
         // 如果同时指定了与现有 session 不一致的 bot_id，视为切换 Bot
         if (inbound.bot_id && inbound.bot_id !== existingSession.bot_id) {
@@ -75,7 +75,7 @@ export class SessionRouter {
             throw new Error(`目标 Bot [${inbound.bot_id}] 不存在或已禁用`);
           }
           const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-          this.sessionStore.create(newSessionId, targetBot.id, '新会话');
+          this.sessionStore.create(newSessionId, targetBot.id, '新会话', inbound.user_id);
           return { bot: targetBot, session_id: newSessionId };
         }
 
@@ -97,7 +97,7 @@ export class SessionRouter {
         bot = this.getFallbackBot();
       }
 
-      this.sessionStore.create(inbound.session_id, bot.id, '新会话');
+      this.sessionStore.create(inbound.session_id, bot.id, '新会话', inbound.user_id);
       return { bot, session_id: inbound.session_id };
     }
 
@@ -108,14 +108,14 @@ export class SessionRouter {
         throw new Error(`指定的 Bot [${inbound.bot_id}] 不存在或已禁用`);
       }
       const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      this.sessionStore.create(newSessionId, bot.id, '新会话');
+      this.sessionStore.create(newSessionId, bot.id, '新会话', inbound.user_id);
       return { bot, session_id: newSessionId };
     }
 
     // 规则 4: 否则：使用 is_coordinator=true 的 Bot；若无则任意一个 enabled；若无 Bot 则 ensureDefault
     const bot = this.getFallbackBot();
     const newSessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    this.sessionStore.create(newSessionId, bot.id, '新会话');
+    this.sessionStore.create(newSessionId, bot.id, '新会话', inbound.user_id);
     return { bot, session_id: newSessionId };
   }
 
