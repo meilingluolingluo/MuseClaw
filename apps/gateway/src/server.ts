@@ -2,10 +2,11 @@ import { createServer } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runAgentLoop, type LLMMessage } from '../../../packages/sandbox-core/src/loop.ts';
+import { runAgentLoop, type LLMMessage, type LLMCaller } from '../../../packages/sandbox-core/src/loop.ts';
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
-import { MicroSandbox, CHANNEL_RANK, CHANNEL_DETAILS } from '../../../packages/sandbox-core/src/index.ts';
+import { globalModelStore } from '../bots/provider-store.ts';
+import { MicroSandbox, CHANNEL_RANK, CHANNEL_DETAILS, probeLocalAgents, globalRunnerMesh, globalMulticaBridge } from '../../../packages/sandbox-core/src/index.ts';
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
@@ -17,20 +18,34 @@ import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@musec
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// 自动加载根目录 .env 文件
+// 自动加载本地环境变量文件 (.env.local 与 .env)
 function loadEnv() {
-  const envPath = path.resolve(__dirname, '../../../.env');
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const idx = trimmed.indexOf('=');
-      if (idx !== -1) {
-        const key = trimmed.slice(0, idx).trim();
-        const val = trimmed.slice(idx + 1).trim();
-        if (!process.env[key]) {
-          process.env[key] = val.replace(/^["']|["']$/g, '');
+  const envFiles = [
+    path.resolve(__dirname, '../../../.env.local'),
+    path.resolve(__dirname, '../../../.env')
+  ];
+
+  for (const envPath of envFiles) {
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf-8').trim();
+      if (content.startsWith('sk-') && !content.includes('=')) {
+        if (!process.env.DEEPSEEK_API_KEY) {
+          process.env.DEEPSEEK_API_KEY = content;
+        }
+        continue;
+      }
+
+      const lines = content.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf('=');
+        if (idx !== -1) {
+          const key = trimmed.slice(0, idx).trim();
+          const val = trimmed.slice(idx + 1).trim();
+          if (!process.env[key]) {
+            process.env[key] = val.replace(/^["']|["']$/g, '');
+          }
         }
       }
     }
@@ -56,7 +71,10 @@ function refreshTools() {
   return tools;
 }
 
-const callLLM = createDeepSeekCaller();
+const callLLM: LLMCaller = async (messages, tools, onChunk) => {
+  const caller = globalModelStore.getActiveCaller();
+  return caller(messages, tools, onChunk);
+};
 
 // 1. 多 Bot 注册中心与会话存储 (BotRegistry, SessionStore, SessionRouter, BotMemoryManager)
 const botRegistry = new BotRegistry();
@@ -253,11 +271,11 @@ export function startGatewayServer(defaultPort = 8799) {
     const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
     if (handledByFeishu) return;
 
-    // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 data/web 或 apps/web，平滑兼容旧版 ui.html)
+    // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 apps/web，回退兼容 data/web 或旧版 ui.html)
     if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/index.html')) {
       const modernWebCandidates = [
-        path.resolve(__dirname, '../data/web/index.html'),
         path.resolve(__dirname, '../../web/index.html'),
+        path.resolve(__dirname, '../data/web/index.html'),
       ];
       const modernWebPath = modernWebCandidates.find((p) => fs.existsSync(p));
       const htmlPath = modernWebPath || path.join(__dirname, 'ui.html');
@@ -463,7 +481,9 @@ export function startGatewayServer(defaultPort = 8799) {
         const stat = fs.statSync(path.join(artifactsDir, file));
         return {
           filename: file,
+          name: file,
           sizeBytes: stat.size,
+          size: stat.size,
           updatedAt: stat.mtimeMs,
           url: `/api/artifacts/${encodeURIComponent(file)}`
         };
@@ -528,10 +548,11 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ success }));
     }
 
-    // C. 会话列表接口
+    // C. 会话列表接口 (默认过滤无消息的空会话)
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
-      const list = sessionStore.list(botIdParam).map(s => ({
+      const includeEmpty = url.searchParams.get('include_empty') === 'true';
+      const list = sessionStore.list(botIdParam, includeEmpty).map(s => ({
         id: s.id,
         title: s.title,
         botId: s.bot_id,
@@ -553,6 +574,13 @@ export function startGatewayServer(defaultPort = 8799) {
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(s));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/sessions/')) {
+      const id = url.pathname.replace('/api/sessions/', '');
+      const success = sessionStore.delete(id);
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success, id }));
     }
 
     // C2. 沙箱与技能阶梯状态接口 (Sandbox & Channel Ladder Status)
@@ -620,6 +648,165 @@ export function startGatewayServer(defaultPort = 8799) {
       sentinel.loadPolicy();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, policy: sentinel.getPolicyConfig() }));
+    }
+
+    // D1.4 AI 大模型提供商与服务接入接口 (AI Model Providers API)
+    if (req.method === 'GET' && url.pathname === '/api/models/config') {
+      const config = await globalModelStore.getPublicConfig();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(config));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/models/local-agents') {
+      const agents = await probeLocalAgents();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, agents }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/models/config') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const result = globalModelStore.updateConfig(data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/models/test') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const result = await globalModelStore.testProvider(data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/models/ollama/probe') {
+      const probeUrl = url.searchParams.get('url') || undefined;
+      const result = await globalModelStore.probeOllama(probeUrl);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/models/fetch-models') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const result = await globalModelStore.fetchModelsForProvider(data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    // D1.5 远程计算节点 Mesh 伴侣接口 (Remote Runner Mesh API)
+    if (req.method === 'GET' && url.pathname === '/api/runner/machines') {
+      const userId = url.searchParams.get('userId') || undefined;
+      const machines = globalRunnerMesh.listMachines(userId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, machines }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/multica/status') {
+      const status = globalMulticaBridge.getStatus();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, multica: status }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/runner/register') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
+      const result = globalRunnerMesh.registerMachine({ ...data, ip });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/runner/poll') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const machineId = data.machineId || req.headers['x-runner-machine-id']?.toString();
+      if (!machineId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Missing machineId' }));
+      }
+      const task = await globalRunnerMesh.pollTask(machineId, 25000);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(task || { hasTask: false }));
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/runner/tasks/') && url.pathname.endsWith('/stream')) {
+      const taskId = url.pathname.replace('/api/runner/tasks/', '').replace('/stream', '');
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      globalRunnerMesh.streamTaskChunk(taskId, data.chunk || '');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/runner/tasks/') && url.pathname.endsWith('/complete')) {
+      const taskId = url.pathname.replace('/api/runner/tasks/', '').replace('/complete', '');
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      globalRunnerMesh.completeTask(taskId, data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/runner/install.sh') {
+      const host = req.headers.host || 'localhost:8799';
+      const defaultToken = url.searchParams.get('token') || '';
+      const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0].trim() || 'http';
+      const script = `#!/usr/bin/env bash
+set -e
+# MuseClaw Remote Mesh Runner 一键接入守护脚本
+SERVER_URL="\${MUSECLAW_SERVER_URL:-${proto}://${host}}"
+TOKEN="\${MUSECLAW_TOKEN:-${defaultToken}}"
+
+while [[ \$# -gt 0 ]]; do
+  case \$1 in
+    --server) SERVER_URL="\$2"; shift 2 ;;
+    --token) TOKEN="\$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+echo "==========================================================="
+echo "🐾 正在启动 MuseClaw 远程计算节点 (Mesh Runner)..."
+echo "🌐 接入网关: \$SERVER_URL"
+echo "==========================================================="
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "❌ 错误: 未检测到 Node.js，请先安装 Node.js (推荐 v18+)"
+  exit 1
+fi
+
+export MUSECLAW_SERVER_URL="\$SERVER_URL"
+if [ -n "\$TOKEN" ]; then export MUSECLAW_TOKEN="\$TOKEN"; fi
+
+curl -fsSL "\$SERVER_URL/runner/client.js" | node -
+`;
+      res.writeHead(200, {
+        'Content-Type': 'application/x-sh; charset=utf-8',
+        'Content-Disposition': 'inline'
+      });
+      return res.end(script);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/runner/client.js') {
+      const candidates = [
+        path.resolve(__dirname, '../../runner/client.js'),
+        path.resolve(__dirname, '../../runner/dist/client.js'),
+      ];
+      const clientPath = candidates.find((p) => fs.existsSync(p));
+      if (clientPath) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+        return res.end(fs.readFileSync(clientPath, 'utf8'));
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      return res.end('Client script not found');
     }
 
     // D2. 例行自动化任务管理接口 (Routines)
@@ -835,12 +1022,17 @@ export function startGatewayServer(defaultPort = 8799) {
         memory: botMemory.getMemory(bot.id)
       };
 
+      const userScopedCaller: LLMCaller = async (messages, tools, onChunk) => {
+        const caller = globalModelStore.getActiveCaller({ userId });
+        return caller(messages, tools, onChunk);
+      };
+
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
         text,
         refreshTools(),
         sentinel,
-        callLLM,
+        userScopedCaller,
         { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
       );
 
@@ -873,10 +1065,10 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // 静态前端资源托管 (SPA 模式: 提供 MuseClaw 数字员工工作台 Web UI)
     const webDirCandidates = [
-      path.resolve(__dirname, '../data/web'),
       path.resolve(__dirname, '../../web'),
+      path.resolve(__dirname, '../data/web'),
     ];
-    const webDir = webDirCandidates.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) || path.resolve(__dirname, '../data/web');
+    const webDir = webDirCandidates.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) || path.resolve(__dirname, '../../web');
     if (fs.existsSync(webDir) && (req.method === 'GET' || req.method === 'HEAD')) {
       // 路径遍历攻击防御
       if (req.url && (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E'))) {

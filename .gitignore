@@ -4,6 +4,7 @@ node_modules/
 
 # Build outputs
 dist/
+!apps/runner/dist/client.js
 build/
 *.tsbuildinfo
 
@@ -21,6 +22,7 @@ logs/
 # IDE & OS
 .vscode/
 .idea/
+.workbuddy/
 .DS_Store
 Thumbs.db
 

@@ -6,6 +6,10 @@ export * from './vault.ts';
 export * from './tools.ts';
 export * from './loop.ts';
 export * from './llm.ts';
+export * from './local-agent-prober.ts';
+export * from './local-agent-runner.ts';
+export * from './runner-mesh.ts';
+export * from './multica-bridge.ts';
 
 /**
  * SandboxCore

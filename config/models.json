@@ -1,0 +1,118 @@
+{
+  "activeProviderId": "deepseek",
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek 官方",
+      "baseUrl": "https://api.deepseek.com/chat/completions",
+      "model": "deepseek-flash",
+      "candidateModels": [
+        "deepseek-flash",
+        "deepseek-v4-pro"
+      ],
+      "description": "国内最强原生推理与 Coding 模型，性价比极高",
+      "apiKey": "",
+      "isLocalAgent": false
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI 官方",
+      "baseUrl": "https://api.openai.com/v1/chat/completions",
+      "model": "",
+      "candidateModels": [],
+      "description": "行业标准旗舰模型，支持原生 Tool Calling"
+    },
+    {
+      "id": "ollama",
+      "name": "本地 Ollama (Local)",
+      "baseUrl": "http://localhost:11434/v1/chat/completions",
+      "model": "",
+      "candidateModels": [],
+      "description": "无需联网与 API Key，完全在本地硬件私有化运行"
+    },
+    {
+      "id": "codex",
+      "name": "OpenAI Codex (本地 Agent)",
+      "baseUrl": "local://codex",
+      "model": "",
+      "candidateModels": [],
+      "isLocalAgent": true,
+      "protocol": "acp-stdio",
+      "description": "本地 OpenAI Codex 终端编码 Agent，支持 headless stdio 交互"
+    },
+    {
+      "id": "pi",
+      "name": "Pi Coding Agent (本地 Agent)",
+      "baseUrl": "local://pi",
+      "model": "ERNIE-5.5-Flash-Preview-baidu-oneapi",
+      "candidateModels": [],
+      "isLocalAgent": true,
+      "protocol": "json-rpc-stdio",
+      "description": "极简高性能终端 Coding Agent，支持 stdio JSON-RPC 与多模型驱动"
+    },
+    {
+      "id": "dsh",
+      "name": "DeepSeek Harness (本地 dsh)",
+      "baseUrl": "local://dsh",
+      "model": "",
+      "candidateModels": [],
+      "isLocalAgent": true,
+      "protocol": "acp-stdio",
+      "description": "DeepSeek 官方开源本地终端 Harness 编码 Agent，支持 ACP 协议"
+    },
+    {
+      "id": "ducc",
+      "name": "Baidu CC (本地 ducc)",
+      "baseUrl": "local://ducc",
+      "model": "GLM-5.3-Flash-内部",
+      "candidateModels": [],
+      "isLocalAgent": true,
+      "protocol": "acp-stdio",
+      "description": "Baidu 内部 Claude Code 深度编码 Agent，免 Key 直连内网大模型"
+    },
+    {
+      "id": "ducx",
+      "name": "Baidu CX (本地 ducx)",
+      "baseUrl": "local://ducx",
+      "model": "",
+      "candidateModels": [],
+      "isLocalAgent": true,
+      "protocol": "acp-stdio",
+      "description": "Baidu 内部 Codex 架构高级编码 Agent，支持多模型与高阶推理"
+    },
+    {
+      "id": "siliconflow",
+      "name": "硅基流动 (SiliconFlow)",
+      "baseUrl": "https://api.siliconflow.cn/v1/chat/completions",
+      "model": "",
+      "candidateModels": [],
+      "description": "高并发 DeepSeek 与开源大模型托管云服务"
+    },
+    {
+      "id": "moonshot",
+      "name": "月之暗面 Kimi",
+      "baseUrl": "https://api.moonshot.cn/v1/chat/completions",
+      "model": "",
+      "candidateModels": [],
+      "description": "超长上下文中文原生模型"
+    },
+    {
+      "id": "qwen",
+      "name": "通义千问 (DashScope)",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "model": "",
+      "candidateModels": [],
+      "description": "阿里云官方模型服务，兼容 OpenAI 协议"
+    },
+    {
+      "id": "custom",
+      "name": "企业内部专有网关 (Custom)",
+      "baseUrl": "https://internal-ai.corp/v1/chat/completions",
+      "model": "",
+      "candidateModels": [],
+      "isCustom": true,
+      "description": "支持任意企业内网代理、中转或私有大模型网关"
+    }
+  ],
+  "updatedAt": 1794920483350
+}

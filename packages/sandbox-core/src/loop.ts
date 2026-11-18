@@ -38,7 +38,11 @@ export interface LLMMessage {
   tool_call_id?: string;
 }
 
-export type LLMCaller = (messages: LLMMessage[], tools: ToolDefinition[]) => Promise<{
+export type LLMCaller = (
+  messages: LLMMessage[],
+  tools: ToolDefinition[],
+  onChunk?: (delta: string) => void
+) => Promise<{
   content: string;
   toolCalls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
 }>;
@@ -103,10 +107,63 @@ export async function* runAgentLoop(
     if (isLoopGuarded) break;
     step++;
 
-    // 3. 调用大模型进行下一步推理 (使用生效的工具子集)
-    const response = await callLLM(messages, effectiveTools);
+    // 3. 调用大模型进行下一步推理 (支持真流式 SSE 逐 token 实时推送)
+    const chunkQueue: string[] = [];
+    let notifyChunk: (() => void) | null = null;
+    let isFinished = false;
+    let callerError: any = null;
+    let streamedChunkCount = 0;
 
-    if (response.content) {
+    const onDelta = (delta: string) => {
+      if (!delta) return;
+      chunkQueue.push(delta);
+      if (notifyChunk) {
+        notifyChunk();
+        notifyChunk = null;
+      }
+    };
+
+    const callPromise = callLLM(messages, effectiveTools, onDelta)
+      .then((res) => {
+        isFinished = true;
+        if (notifyChunk) {
+          notifyChunk();
+          notifyChunk = null;
+        }
+        return res;
+      })
+      .catch((err) => {
+        callerError = err;
+        isFinished = true;
+        if (notifyChunk) {
+          notifyChunk();
+          notifyChunk = null;
+        }
+      });
+
+    while (!isFinished || chunkQueue.length > 0) {
+      if (chunkQueue.length > 0) {
+        const text = chunkQueue.shift()!;
+        streamedChunkCount++;
+        yield { type: 'stream:text-delta', text, bot_id: context.botId, session_id: context.sessionId };
+      } else if (!isFinished) {
+        await new Promise<void>((resolve) => {
+          notifyChunk = resolve;
+        });
+      }
+    }
+
+    if (callerError) {
+      throw callerError;
+    }
+
+    const response = await callPromise;
+    if (!response) {
+      break;
+    }
+
+    // 若底座模型未接入流式回调，保底产出完整内容
+    if (response.content && streamedChunkCount === 0) {
       yield { type: 'stream:text-delta', text: response.content, bot_id: context.botId, session_id: context.sessionId };
     }
 

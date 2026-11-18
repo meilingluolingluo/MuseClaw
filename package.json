@@ -10,6 +10,7 @@
     "dev:web": "pnpm --filter @museclaw/web dev",
     "typecheck": "tsc -b",
     "lint": "biome check .",
+    "runner": "node apps/runner/dist/client.js",
     "build": "pnpm -r build"
   },
   "devDependencies": {

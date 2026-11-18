@@ -20,7 +20,10 @@ export class SessionStore {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         const list: Session[] = JSON.parse(raw);
         for (const item of list) {
-          this.sessions.set(item.id, item);
+          // 仅恢复包含有效消息记录的正式会话，自动滤除遗留的历史空会话
+          if (item.messages && item.messages.length > 0) {
+            this.sessions.set(item.id, item);
+          }
         }
       } catch (err: any) {
         console.warn(`[SessionStore] 加载 sessions.json 异常: ${err.message}`);
@@ -34,7 +37,11 @@ export class SessionStore {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      const data = JSON.stringify(Array.from(this.sessions.values()), null, 2);
+      // 仅持久化包含实际消息记录的会话
+      const dataToSave = Array.from(this.sessions.values()).filter(
+        (s) => s.messages && s.messages.length > 0
+      );
+      const data = JSON.stringify(dataToSave, null, 2);
       const tmpPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tmpPath, data, 'utf-8');
       fs.renameSync(tmpPath, this.filePath);
@@ -106,10 +113,12 @@ export class SessionStore {
   }
 
   /**
-   * 列出所有会话，可选按 botId 过滤
+   * 列出所有会话，可选按 botId 过滤 (默认过滤掉无消息的空会话)
    */
-  public list(botId?: string): Session[] {
-    const all = Array.from(this.sessions.values());
+  public list(botId?: string, includeEmpty = false): Session[] {
+    const all = Array.from(this.sessions.values()).filter(
+      (s) => includeEmpty || (s.messages && s.messages.length > 0)
+    );
     if (!botId) {
       return all.sort((a, b) => b.updated_at - a.updated_at);
     }

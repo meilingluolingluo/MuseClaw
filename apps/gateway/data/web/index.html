@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
     <title>MuseClaw - 企业级多 Agent 数字员工工作台</title>
+    <meta name="theme-color" content="#ffffff" />
+    <script>
+      (function () {
+        try {
+          var setting = localStorage.getItem('museclaw_theme') || 'system';
+          var isDark =
+            setting === 'dark' ||
+            (setting === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var resolved = isDark ? 'dark' : 'light';
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.dataset.themeSetting = setting;
+        } catch (e) {}
+      })();
+    </script>
     <!-- nanoMuse / Meta Muse Figtree 字体与系统排版 -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -57,17 +71,51 @@
 
         <div class="nav-rail-spacer"></div>
 
-        <!-- nanoMuse 风格主题切换按钮 -->
-        <button class="nav-item nav-theme-toggle" id="btn-theme-toggle" title="切换浅色 / 深色主题">
-          <span class="nav-icon" id="icon-theme-toggle"></span>
-          <span class="nav-label" id="label-theme">深色</span>
+        <!-- AI 模型服务接入设置 -->
+        <button class="nav-item" id="btn-model-settings" type="button" title="AI 模型服务配置 (DeepSeek / OpenAI / Ollama 等)">
+          <span class="nav-icon" id="icon-nav-model"></span>
+          <span class="nav-label">模型</span>
         </button>
+
+        <!-- 外观主题切换 (浅色 / 深色 / 跟随系统) -->
+        <div class="theme-picker-container" id="theme-picker-container">
+          <button class="nav-item nav-theme-toggle" id="btn-theme-toggle" type="button" aria-haspopup="menu" aria-expanded="false" title="外观设置: 浅色 / 深色 / 跟随系统">
+            <span class="nav-icon" id="icon-theme-toggle"></span>
+            <span class="nav-label" id="label-theme">系统</span>
+          </button>
+
+          <div class="theme-menu" id="theme-menu" role="menu">
+            <div class="theme-menu-header">外观模式</div>
+            <button class="theme-menu-item" data-theme-value="light" type="button" role="menuitem">
+              <span class="theme-menu-icon" id="icon-theme-light"></span>
+              <div class="theme-menu-text">
+                <span class="theme-menu-label">浅色模式</span>
+              </div>
+              <span class="theme-menu-check" id="check-theme-light"></span>
+            </button>
+            <button class="theme-menu-item" data-theme-value="dark" type="button" role="menuitem">
+              <span class="theme-menu-icon" id="icon-theme-dark"></span>
+              <div class="theme-menu-text">
+                <span class="theme-menu-label">深色模式</span>
+              </div>
+              <span class="theme-menu-check" id="check-theme-dark"></span>
+            </button>
+            <button class="theme-menu-item" data-theme-value="system" type="button" role="menuitem">
+              <span class="theme-menu-icon" id="icon-theme-system"></span>
+              <div class="theme-menu-text">
+                <span class="theme-menu-label">跟随系统</span>
+                <span class="theme-menu-sub" id="theme-system-status">当前: 检测中</span>
+              </div>
+              <span class="theme-menu-check" id="check-theme-system"></span>
+            </button>
+          </div>
+        </div>
       </nav>
 
       <!-- 2. 二级抽屉 (多 Bot 列表与会话管理) -->
-      <aside class="side-drawer">
-        <div class="drawer-header">
-          <span class="drawer-title">数字员工 (Bots)</span>
+      <aside class="side-drawer" id="side-drawer">
+        <div class="drawer-header" id="drawer-header">
+          <span class="drawer-title" id="drawer-title">数字员工 (Bots)</span>
           <span class="pill-badge pill-blue" id="bot-count-badge">加载中...</span>
         </div>
         
@@ -75,7 +123,7 @@
           <!-- 动态渲染 Bot 列表 -->
         </div>
 
-        <div class="session-section">
+        <div class="session-section" id="session-section">
           <div class="session-header">
             <span>会话历史 (SESSIONS)</span>
             <button class="btn-secondary" id="btn-new-session" style="padding: 2px 8px; font-size: 11px;">+ 新建</button>
@@ -91,6 +139,9 @@
         <!-- 顶部控制条 (Top Bar) -->
         <header class="top-bar">
           <div class="top-bar-left">
+            <button class="btn-toggle-drawer" id="btn-toggle-drawer" title="收起/展开中间栏">
+              <span id="icon-toggle-drawer"></span>
+            </button>
             <div class="bot-title-badge" id="btn-bot-detail" title="点击查看该数字员工详细配置与权限" style="cursor: pointer;">
               <span id="active-bot-avatar" style="font-size: 18px;">🤖</span>
               <span id="active-bot-name">加载中...</span>
@@ -106,14 +157,32 @@
             <span class="pill-badge pill-blue" id="sandbox-status-badge">
               <span id="icon-sandbox"></span> bwrap 隔离
             </span>
+
+            <!-- 全局视图专属标题栏 (在非 Chat/Memory 模式下展示) -->
+            <div id="global-view-title-container" style="display: none; align-items: center; gap: 8px;">
+              <span id="global-view-icon" style="font-size: 16px;"></span>
+              <span id="global-view-title" style="font-weight: 600; font-size: 14.5px;"></span>
+              <span class="pill-badge pill-blue" id="global-view-tag" style="font-size: 11px;"></span>
+            </div>
           </div>
 
           <div class="top-bar-right">
+            <!-- 激活大模型服务指示胶囊 (点击打开配置) -->
+            <button class="model-status-capsule" id="btn-top-model-badge" type="button" title="点击配置 AI 大模型服务 (DeepSeek / OpenAI / Ollama 等)">
+              <span class="model-status-icon" id="top-model-icon" aria-label="AI Provider"></span>
+              <span class="model-status-name" id="top-model-name">DeepSeek</span>
+              <span class="model-status-dot"></span>
+            </button>
+
             <!-- OpenMausBot 风格：审批模式选择器 (Approval Mode Selector，可真实落盘保存) -->
             <div class="approval-selector" id="approval-mode-btn" title="点击切换此 Bot 的门禁审批级别 (ASK / AUTO_EDITS / FULL)">
               <span id="icon-lock"></span>
               <span id="current-approval-mode-text">ASK 门禁</span>
               <span id="icon-dropdown"></span>
+            </div>
+            <!-- 全局视图状态标识 -->
+            <div id="global-top-status" style="display: none; align-items: center; gap: 8px;">
+              <span class="pill-badge pill-green" id="global-system-badge">系统就绪</span>
             </div>
           </div>
         </header>
@@ -195,7 +264,7 @@
         <section class="view-stage" id="view-memory" style="display: none;">
           <div class="view-header">
             <div>
-              <div class="view-heading"><span id="icon-memory-heading"></span> 受控长期记忆库 (Memory)</div>
+              <div class="view-heading"><span id="icon-memory-heading"></span> 受控长期记忆库 (Memory) <span id="memory-active-bot-name" style="color: var(--om-accent); font-weight: 600; margin-left: 6px;"></span></div>
               <div class="view-sub">结构化 MEMORY.md 事实存储，[user] 声明严格受守卫保护，支持 20% 预算精简与一键 Undo 撤销</div>
             </div>
             <div style="display: flex; gap: 8px;">
@@ -357,8 +426,9 @@
       </main>
     </div>
 
-    <!-- 通用弹窗容器 (Modal Container) -->
+    <!-- 通用弹窗与 Toast 消息通知容器 -->
     <div id="modal-container"></div>
+    <div id="toast-container" class="toast-container"></div>
 
     <script type="module" src="/app.js"></script>
   </body>
