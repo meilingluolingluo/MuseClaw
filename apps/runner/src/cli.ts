@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import os, { homedir, hostname } from 'node:os';
 import path, { delimiter, join } from 'node:path';
@@ -54,6 +54,25 @@ function findExecutable(command: string): string | null {
   return null;
 }
 
+function queryCliModels(binPath: string, cmdArgs: string[] = ['models']): string[] {
+  try {
+    const out = execSync(`"${binPath}" ${cmdArgs.join(' ')}`, {
+      timeout: 3000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: Object.assign({}, process.env, { PATH: getAugmentedPath() })
+    });
+    const match = out.match(/Available Models:\s*([\s\S]+)/i);
+    if (match && match[1]) {
+      return match[1]
+        .split(',')
+        .map((m) => m.trim())
+        .filter((m) => m && !m.includes('自定义模型组'));
+    }
+  } catch {}
+  return [];
+}
+
 function detectLocalRuntimes(): RuntimeDef[] {
   const home = homedir();
   const runtimes: RuntimeDef[] = [];
@@ -69,21 +88,28 @@ function detectLocalRuntimes(): RuntimeDef[] {
         if (raw.env?.ANTHROPIC_MODEL) activeModel = raw.env.ANTHROPIC_MODEL;
       } catch {}
     }
+    const detectedModels = queryCliModels(duccPath, ['models']);
+    const fallbackModels = [
+      'GLM-5.3-Flash-内部',
+      'Opus 4.8',
+      'Opus 5.5',
+      'Claude Sonnet 5.5',
+      'ERNIE-5.5-Flash-Preview-内部',
+      'DeepSeek-V4.1-Flash-内部',
+      'gpt-6.1-sol',
+      'gpt-5.6-sol'
+    ];
+    const models = Array.from(new Set([
+      ...(activeModel ? [activeModel] : []),
+      ...detectedModels,
+      ...fallbackModels
+    ]));
     runtimes.push({
       id: 'ducc',
       name: 'Baidu CC (本地 ducc)',
       executablePath: duccPath,
-      models: [
-        'GLM-5.3-Flash-内部',
-        'Opus 4.8',
-        'Opus 5.5',
-        'Claude Sonnet 5.5',
-        'ERNIE-5.5-Flash-Preview-内部',
-        'DeepSeek-V4.1-Flash-内部',
-        'gpt-6.1-sol',
-        'gpt-5.6-sol'
-      ],
-      defaultModel: activeModel
+      models,
+      defaultModel: activeModel || models[0]
     });
   }
 
@@ -99,19 +125,26 @@ function detectLocalRuntimes(): RuntimeDef[] {
         if (match && match[1]) activeModel = match[1];
       } catch {}
     }
+    const detectedModels = queryCliModels(ducxPath, ['models']);
+    const fallbackModels = [
+      'gpt-5.6-sol',
+      'DeepSeek-V4.1-Flash',
+      'ERNIE-5.5-Flash-Preview-内部',
+      'GLM-5.3-Flash',
+      'gpt-6.1-sol',
+      'DeepSeek-V4-Pro'
+    ];
+    const models = Array.from(new Set([
+      ...(activeModel ? [activeModel] : []),
+      ...detectedModels,
+      ...fallbackModels
+    ]));
     runtimes.push({
       id: 'ducx',
       name: 'Baidu CX (本地 ducx)',
       executablePath: ducxPath,
-      models: [
-        'gpt-5.6-sol',
-        'DeepSeek-V4.1-Flash',
-        'ERNIE-5.5-Flash-Preview-内部',
-        'GLM-5.3-Flash',
-        'gpt-6.1-sol',
-        'DeepSeek-V4-Pro'
-      ],
-      defaultModel: activeModel
+      models,
+      defaultModel: activeModel || models[0]
     });
   }
 
@@ -275,7 +308,9 @@ class MuseClawRunnerClient {
                      Boolean(process.env.SUDO_USER) ||
                      Boolean(process.env.SUDO_UID) ||
                      process.env.UID === '0';
-      args = isRoot ? ['-p'] : ['-p', '--dangerously-skip-permissions'];
+      args = isRoot
+        ? ['-p', '--output-format=stream-json', '--verbose']
+        : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
       if (task.model) args.push('--model', task.model);
     } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
       args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
@@ -311,13 +346,48 @@ class MuseClawRunnerClient {
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line.trim());
-            if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message' && parsed.item.text) {
-              const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
-              if (clean) {
-                this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: clean });
+            if (parsed.type === 'item.completed' && parsed.item) {
+              if (parsed.item.type === 'reasoning' && parsed.item.text) {
+                const reasoning = parsed.item.text.trim();
+                if (reasoning) {
+                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', {
+                    chunk: `> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`
+                  });
+                }
+              } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
+                const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
+                if (clean) {
+                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: clean });
+                }
               }
             }
           } catch {}
+        }
+      } else if (task.agentId === 'ducc') {
+        streamBuffer += text;
+        const lines = streamBuffer.split('\n');
+        streamBuffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+              for (const c of parsed.message.content) {
+                if (c.type === 'thinking' && c.thinking) {
+                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', {
+                    chunk: `> 💭 **思考推理**：\n> ${c.thinking.trim().replace(/\n/g, '\n> ')}\n\n`
+                  });
+                } else if (c.type === 'text' && c.text) {
+                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: c.text });
+                }
+              }
+            }
+          } catch {
+            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+              this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: trimmed + '\n' });
+            }
+          }
         }
       } else {
         this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: text });
@@ -338,6 +408,40 @@ class MuseClawRunnerClient {
       let extractedText = stdout.trim();
 
       if (task.agentId === 'ducx' || task.agentId === 'codex') {
+        const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+        const msgs: string[] = [];
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message' && parsed.item.text) {
+              msgs.push(parsed.item.text);
+            }
+          } catch {}
+        }
+        if (msgs.length > 0) {
+          extractedText = msgs.join('\n\n').replace(/\n\nSkipped:[\s\S]*$/, '').trim();
+        }
+      } else if (task.agentId === 'ducc') {
+        const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+        const textParts: string[] = [];
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line.trim());
+            if (parsed.type === 'result' && typeof parsed.result === 'string') {
+              extractedText = parsed.result.trim();
+              break;
+            }
+            if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+              for (const c of parsed.message.content) {
+                if (c.type === 'text' && c.text) textParts.push(c.text);
+              }
+            }
+          } catch {}
+        }
+        if (!extractedText && textParts.length > 0) {
+          extractedText = textParts.join('\n').trim();
+        }
+      }
         const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
         const msgs: string[] = [];
         for (const line of lines) {

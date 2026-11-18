@@ -887,7 +887,12 @@ async function sendMessage() {
     <div class="message-bubble" id="streaming-bubble">
       <div id="plan-steps-container"></div>
       <div id="activity-container"></div>
-      <div id="stream-text" style="line-height: 1.6;"></div>
+      <div id="stream-text" style="line-height: 1.6;">
+        <div class="agent-thinking-pulse" style="display: flex; align-items: center; gap: 8px; color: var(--om-muted); font-size: 13px; padding: 4px 0;">
+          <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid var(--om-border); border-top-color: var(--om-fg); border-radius: 50%; animation: om-spin 0.8s linear infinite;"></span>
+          <span>正在连接并调度 Agent 推理执行...</span>
+        </div>
+      </div>
     </div>
   `;
   dom.chatMessages.appendChild(assistantRow);
@@ -898,6 +903,48 @@ async function sendMessage() {
   const planContainer = assistantRow.querySelector('#plan-steps-container');
 
   let fullAssistantText = '';
+  let rawAccumulatedText = '';
+  let renderedCharCount = 0;
+  let typeTimer = null;
+  let isStreamFinished = false;
+
+  const removeThinkingPulse = () => {
+    const pulse = streamTextEl.querySelector('.agent-thinking-pulse');
+    if (pulse) pulse.remove();
+  };
+
+  const tickTyping = () => {
+    if (renderedCharCount < rawAccumulatedText.length) {
+      removeThinkingPulse();
+      const remaining = rawAccumulatedText.length - renderedCharCount;
+      const step = isStreamFinished
+        ? Math.max(1, Math.ceil(remaining / 3))
+        : Math.max(1, Math.min(14, Math.ceil(remaining / 5)));
+      renderedCharCount += step;
+      if (renderedCharCount > rawAccumulatedText.length) {
+        renderedCharCount = rawAccumulatedText.length;
+      }
+      const partial = rawAccumulatedText.slice(0, renderedCharCount);
+      streamTextEl.innerHTML = renderMarkdown(partial);
+      dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+    }
+
+    if (renderedCharCount < rawAccumulatedText.length || !isStreamFinished) {
+      typeTimer = setTimeout(tickTyping, 16);
+    } else {
+      typeTimer = null;
+      streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
+      dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+    }
+  };
+
+  const pushDeltaText = (delta) => {
+    if (!delta) return;
+    rawAccumulatedText += delta;
+    if (!typeTimer) {
+      tickTyping();
+    }
+  };
 
   try {
     // 兼容 /api/tasks 和 /api/chat
@@ -936,7 +983,7 @@ async function sendMessage() {
         const jsonStr = line.slice(6);
         try {
           const event = JSON.parse(jsonStr);
-          handleStreamEvent(event, { streamTextEl, activityContainer, planContainer, assistantRow });
+          handleStreamEvent(event, { streamTextEl, activityContainer, planContainer, assistantRow, pushDeltaText });
           if (event.type === 'stream:text-delta') {
             fullAssistantText += event.text;
           }
@@ -946,8 +993,13 @@ async function sendMessage() {
       }
     }
 
-    // 流式传输完毕后，以完整 Markdown 格式固化渲染
-    streamTextEl.innerHTML = renderMarkdown(fullAssistantText);
+    isStreamFinished = true;
+    while (renderedCharCount < rawAccumulatedText.length) {
+      renderedCharCount = rawAccumulatedText.length;
+      streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
+    }
+    removeThinkingPulse();
+    fullAssistantText = rawAccumulatedText;
     state.messages.push({ role: 'assistant', content: fullAssistantText });
     if (curSession) {
       curSession.messageCount = state.messages.length;
@@ -955,6 +1007,7 @@ async function sendMessage() {
       renderSessionList();
     }
   } catch (err) {
+    removeThinkingPulse();
     streamTextEl.innerHTML += `<div style="color: var(--accent-red); margin-top: 8px;">[通信失败: ${err.message}]</div>`;
   } finally {
     state.isStreaming = false;
@@ -963,7 +1016,7 @@ async function sendMessage() {
 }
 
 // 处理每个流式事件 (SSE Events)
-function handleStreamEvent(event, { streamTextEl, activityContainer, planContainer }) {
+function handleStreamEvent(event, { streamTextEl, activityContainer, planContainer, pushDeltaText }) {
   if (event.type === 'session:init') {
     if (event.sessionId) state.activeSessionId = event.sessionId;
     if (event.title) {
@@ -974,8 +1027,12 @@ function handleStreamEvent(event, { streamTextEl, activityContainer, planContain
   }
 
   if (event.type === 'stream:text-delta') {
-    streamTextEl.innerText += event.text;
-    dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+    if (typeof pushDeltaText === 'function') {
+      pushDeltaText(event.text);
+    } else {
+      streamTextEl.innerText += event.text;
+      dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+    }
   }
 
   // 任务计划清单 (task:plan)

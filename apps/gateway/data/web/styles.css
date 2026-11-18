@@ -1817,3 +1817,11 @@ html[data-theme="dark"] .pill-red {
   font-size: 12.5px;
   margin-bottom: 14px;
 }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes om-spin {
+  to { transform: rotate(360deg); }
+}

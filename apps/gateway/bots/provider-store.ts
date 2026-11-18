@@ -16,7 +16,8 @@ import {
   discoverPiModels,
   discoverDuccModels,
   discoverDucxModels,
-  fetchRemoteModels
+  fetchRemoteModels,
+  globalRunnerMesh
 } from '../../../packages/sandbox-core/src/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -213,12 +214,16 @@ export class ModelProviderStore {
   }
 
   public resolveEffectiveLocalModel(provider: ModelProviderConfig): ModelProviderConfig {
+    const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents();
+    const remote = remoteAgents.find((r) => r.id === provider.id);
+    const remoteModels = remote?.candidateModels || [];
+
     if (provider.id === 'codex') {
       const codexInfo = discoverCodexModels();
-      const candidateModels = codexInfo.models.length > 0 ? codexInfo.models : (provider.candidateModels || []);
+      const candidateModels = Array.from(new Set([...remoteModels, ...codexInfo.models, ...(provider.candidateModels || [])]));
       const effectiveModel = (provider.model && candidateModels.includes(provider.model) && provider.model !== 'gpt-4o')
         ? provider.model
-        : (codexInfo.defaultModel || candidateModels[0] || 'Claude Sonnet 5.5-baidu-oneapi');
+        : (codexInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Claude Sonnet 5.5-baidu-oneapi');
       return {
         ...provider,
         model: effectiveModel,
@@ -227,10 +232,10 @@ export class ModelProviderStore {
     }
     if (provider.id === 'pi') {
       const piInfo = discoverPiModels();
-      const candidateModels = piInfo.models.length > 0 ? piInfo.models : (provider.candidateModels || []);
+      const candidateModels = Array.from(new Set([...remoteModels, ...piInfo.models, ...(provider.candidateModels || [])]));
       const effectiveModel = (provider.model && candidateModels.includes(provider.model) && provider.model !== 'anthropic/claude-3-7-sonnet')
         ? provider.model
-        : (piInfo.defaultModel || candidateModels[0] || 'Opus 5.5-baidu-oneapi');
+        : (piInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Opus 5.5-baidu-oneapi');
       return {
         ...provider,
         model: effectiveModel,
@@ -239,10 +244,10 @@ export class ModelProviderStore {
     }
     if (provider.id === 'ducc') {
       const duccInfo = discoverDuccModels();
-      const candidateModels = duccInfo.models.length > 0 ? duccInfo.models : (provider.candidateModels || []);
+      const candidateModels = Array.from(new Set([...remoteModels, ...duccInfo.models, ...(provider.candidateModels || [])]));
       const effectiveModel = (provider.model && candidateModels.includes(provider.model))
         ? provider.model
-        : (duccInfo.defaultModel || candidateModels[0] || 'GLM-5.3-Flash-内部');
+        : (duccInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'GLM-5.3-Flash-内部');
       return {
         ...provider,
         model: effectiveModel,
@@ -251,10 +256,10 @@ export class ModelProviderStore {
     }
     if (provider.id === 'ducx') {
       const ducxInfo = discoverDucxModels();
-      const candidateModels = ducxInfo.models.length > 0 ? ducxInfo.models : (provider.candidateModels || []);
+      const candidateModels = Array.from(new Set([...remoteModels, ...ducxInfo.models, ...(provider.candidateModels || [])]));
       const effectiveModel = (provider.model && candidateModels.includes(provider.model))
         ? provider.model
-        : (ducxInfo.defaultModel || candidateModels[0] || 'gpt-5.6-sol');
+        : (ducxInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'gpt-5.6-sol');
       return {
         ...provider,
         model: effectiveModel,
@@ -331,9 +336,15 @@ export class ModelProviderStore {
         let candidateModels: string[] = [];
 
         if (isLocal) {
-          candidateModels = (localInfo?.candidateModels && localInfo.candidateModels.length > 0)
-            ? localInfo.candidateModels
-            : (p.candidateModels || []);
+          const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents();
+          const remote = remoteAgents.find((r) => r.id === p.id);
+          const models = Array.from(new Set([
+            ...(remote?.candidateModels || []),
+            ...(localInfo?.candidateModels || []),
+            ...(p.candidateModels || [])
+          ]));
+          candidateModels = models;
+          p.candidateModels = models;
         } else if (p.id === 'ollama') {
           candidateModels = p.candidateModels || [];
         } else {
@@ -441,21 +452,21 @@ export class ModelProviderStore {
     const providerId = input.providerId;
     const provider = providerId ? this.providers.get(providerId) : undefined;
 
-    if (providerId === 'codex') {
-      const info = discoverCodexModels();
-      return { ok: true, models: info.models };
-    }
-    if (providerId === 'pi') {
-      const info = discoverPiModels();
-      return { ok: true, models: info.models };
-    }
-    if (providerId === 'ducc') {
-      const info = discoverDuccModels();
-      return { ok: true, models: info.models };
-    }
-    if (providerId === 'ducx') {
-      const info = discoverDucxModels();
-      return { ok: true, models: info.models };
+    if (providerId === 'codex' || providerId === 'pi' || providerId === 'ducc' || providerId === 'ducx') {
+      let localModels: string[] = [];
+      if (providerId === 'codex') localModels = discoverCodexModels().models;
+      else if (providerId === 'pi') localModels = discoverPiModels().models;
+      else if (providerId === 'ducc') localModels = discoverDuccModels().models;
+      else if (providerId === 'ducx') localModels = discoverDucxModels().models;
+
+      const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents();
+      const remote = remoteAgents.find((r) => r.id === providerId);
+      const combined = Array.from(new Set([...(remote?.candidateModels || []), ...localModels]));
+      if (provider && combined.length > 0) {
+        provider.candidateModels = combined;
+        this.save();
+      }
+      return { ok: true, models: combined };
     }
     if (providerId === 'ollama') {
       return this.probeOllama(input.baseUrl || provider?.baseUrl);

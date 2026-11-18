@@ -136,7 +136,9 @@ export async function runLocalAgent(
                    Boolean(process.env.SUDO_USER) ||
                    Boolean(process.env.SUDO_UID) ||
                    process.env.UID === '0';
-    args = isRoot ? ['-p'] : ['-p', '--dangerously-skip-permissions'];
+    args = isRoot
+      ? ['-p', '--output-format=stream-json', '--verbose']
+      : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
     let targetModel = options.model;
     if (!targetModel) {
       const duccInfo = discoverDuccModels();
@@ -229,6 +231,26 @@ export async function runLocalAgent(
               extractedText = (tokensIdx !== -1 ? after.slice(0, tokensIdx) : after).trim();
             }
           }
+        } else if (agentId === 'ducc') {
+          const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+          const textParts: string[] = [];
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line.trim());
+              if (parsed.type === 'result' && typeof parsed.result === 'string') {
+                extractedText = parsed.result.trim();
+                break;
+              }
+              if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+                for (const c of parsed.message.content) {
+                  if (c.type === 'text' && c.text) textParts.push(c.text);
+                }
+              }
+            } catch {}
+          }
+          if (!extractedText && textParts.length > 0) {
+            extractedText = textParts.join('\n').trim();
+          }
         }
 
         resolve({ ok: true, text: extractedText, latencyMs });
@@ -290,12 +312,43 @@ export function createLocalAgentCaller(
           for (const line of lines) {
             try {
               const parsed = JSON.parse(line.trim());
-              if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message' && parsed.item.text) {
-                const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
-                if (clean) onChunk(clean);
+              if (parsed.type === 'item.completed' && parsed.item) {
+                if (parsed.item.type === 'reasoning' && parsed.item.text) {
+                  const reasoning = parsed.item.text.trim();
+                  if (reasoning) {
+                    onChunk(`> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`);
+                  }
+                } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
+                  const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
+                  if (clean) onChunk(clean);
+                }
               }
             } catch {
               // 容错处理非 JSON 行
+            }
+          }
+        } else if (config.id === 'ducc') {
+          streamBuffer += chunk;
+          const lines = streamBuffer.split('\n');
+          streamBuffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+                for (const c of parsed.message.content) {
+                  if (c.type === 'thinking' && c.thinking) {
+                    onChunk(`> 💭 **思考推理**：\n> ${c.thinking.trim().replace(/\n/g, '\n> ')}\n\n`);
+                  } else if (c.type === 'text' && c.text) {
+                    onChunk(c.text);
+                  }
+                }
+              }
+            } catch {
+              if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+                onChunk(trimmed + '\n');
+              }
             }
           }
         } else {

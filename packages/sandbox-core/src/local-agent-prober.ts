@@ -223,6 +223,28 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
     modelsSet.add(activeModel);
   }
 
+  const ducxBin = findExecutableInPath('ducx');
+  if (ducxBin) {
+    try {
+      const output = execSync(`"${ducxBin}" models`, {
+        timeout: 2500,
+        env: { ...process.env, PATH: getAugmentedPath() },
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf8'
+      });
+      const match = output.match(/Available Models:\s*([\s\S]+)/i);
+      if (match && match[1]) {
+        const parsed = match[1]
+          .split(',')
+          .map((m) => m.trim())
+          .filter(Boolean);
+        parsed.forEach((m) => modelsSet.add(m));
+      }
+    } catch {
+      // 容错回退
+    }
+  }
+
   if (existsSync(catalogPath)) {
     try {
       const raw = JSON.parse(readFileSync(catalogPath, 'utf8'));
@@ -486,13 +508,12 @@ export async function probeLocalAgents(): Promise<LocalAgentInfo[]> {
   for (const remote of remoteAgents) {
     const existing = results.find((r) => r.id === remote.id);
     if (existing) {
-      if (!existing.installed) {
-        existing.installed = true;
-        existing.version = remote.version;
-        existing.description = `${existing.description} [由远程节点 ${remote.name} 提供]`;
-        existing.candidateModels = remote.candidateModels.length > 0 ? remote.candidateModels : existing.candidateModels;
-        existing.defaultModel = remote.defaultModel || existing.defaultModel;
-      }
+      existing.installed = true;
+      existing.version = remote.version || existing.version;
+      existing.description = `${existing.description} [由远程节点 ${remote.name} 提供]`;
+      const merged = Array.from(new Set([...(remote.candidateModels || []), ...(existing.candidateModels || [])]));
+      existing.candidateModels = merged.length > 0 ? merged : existing.candidateModels;
+      if (!existing.defaultModel) existing.defaultModel = remote.defaultModel;
     } else {
       results.push(remote);
     }
