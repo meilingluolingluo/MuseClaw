@@ -857,7 +857,9 @@ function renderChatMessages() {
   if (state.messages.length === 0) {
     dom.chatMessages.innerHTML = `
       <div style="text-align: center; color: var(--text-dim); margin: auto; padding: 40px;">
-        <div style="font-size: 36px; margin-bottom: 12px;">🐾</div>
+        <div style="display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 18px; background: #ffffff; border: 1px solid var(--om-border); box-shadow: 0 4px 14px rgba(0, 100, 212, 0.1); margin-bottom: 16px;">
+          ${Icons.claw ? Icons.claw(28, 'var(--om-accent)') : '<span style="font-size: 26px; color: var(--om-accent);">🐾</span>'}
+        </div>
         <div style="font-size: 16px; font-weight: 600; color: var(--text-muted);">随时为您服务</div>
         <div style="font-size: 13px; margin-top: 6px;">输入指令即可调遣数字员工执行任务、自动分析或沉淀工件</div>
       </div>
