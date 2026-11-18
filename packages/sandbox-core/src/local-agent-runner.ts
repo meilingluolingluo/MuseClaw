@@ -111,18 +111,18 @@ export async function runLocalAgent(
   if (agentId === 'codex') {
     args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
     let targetModel = options.model;
-    if (!targetModel || targetModel === 'gpt-4o') {
+    if (!targetModel) {
       const codexInfo = discoverCodexModels();
       targetModel = codexInfo.defaultModel;
     }
-    if (targetModel && targetModel !== 'gpt-4o') {
+    if (targetModel) {
       args.push('--model', targetModel);
     }
     args.push('-');
   } else if (agentId === 'pi') {
     args = ['-p', '--no-session'];
     let targetModel = options.model;
-    if (!targetModel || targetModel === 'anthropic/claude-3-7-sonnet') {
+    if (!targetModel) {
       const piInfo = discoverPiModels();
       targetModel = piInfo.defaultModel;
     }

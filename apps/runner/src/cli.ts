@@ -92,12 +92,36 @@ function detectLocalRuntimes(): RuntimeDef[] {
     const fallbackModels = [
       'GLM-5.3-Flash-内部',
       'Opus 4.8',
+      'Opus 5',
       'Opus 5.5',
+      'Claude Sonnet 5',
       'Claude Sonnet 5.5',
+      'Claude Haiku 5.5',
       'ERNIE-5.5-Flash-Preview-内部',
+      'ERNIE-Light-DT-1.0-内部',
       'DeepSeek-V4.1-Flash-内部',
+      'DeepSeek-V4-Flash-内部',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
       'gpt-6.1-sol',
-      'gpt-5.6-sol'
+      'gpt-6.2-sol',
+      'gpt-5.6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'gpt-6-luna',
+      'gpt-6-astra',
+      'gpt-6.2-astra',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'GLM-5.2',
+      'Grok-4.7',
+      'Grok-4.6',
+      'Kimi-K2.7-Code-内部',
+      'Kimi K3',
+      'Kimi K2.6',
+      'MiniMax-M3',
+      'Fable 5.2 尝鲜',
+      'auto-内部'
     ];
     const models = Array.from(new Set([
       ...(activeModel ? [activeModel] : []),
@@ -114,7 +138,7 @@ function detectLocalRuntimes(): RuntimeDef[] {
   }
 
   // 2. ducx (Baidu CX)
-  const ducxPath = findExecutable('ducx');
+  const ducxPath = findExecutable('ducx') || findExecutable('baidu-cx');
   if (ducxPath) {
     let activeModel = 'gpt-5.6-sol';
     const configToml = join(home, '.baidu-cx', 'config.toml');
@@ -126,17 +150,38 @@ function detectLocalRuntimes(): RuntimeDef[] {
       } catch {}
     }
     const detectedModels = queryCliModels(ducxPath, ['models']);
+    const dynamicModels: string[] = [];
+    const oneapiCat = join(home, '.baidu-cx', 'model-catalogs', 'oneapi-models.json');
+    if (existsSync(oneapiCat)) {
+      try {
+        const raw = JSON.parse(readFileSync(oneapiCat, 'utf8'));
+        if (Array.isArray(raw.models)) {
+          for (const m of raw.models) {
+            const id = m.id || m.slug || m.name || m.display_name;
+            if (id && typeof id === 'string') dynamicModels.push(id);
+          }
+        }
+      } catch {}
+    }
     const fallbackModels = [
       'gpt-5.6-sol',
-      'DeepSeek-V4.1-Flash',
-      'ERNIE-5.5-Flash-Preview-内部',
-      'GLM-5.3-Flash',
       'gpt-6.1-sol',
-      'DeepSeek-V4-Pro'
+      'gpt-6.2-sol',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'DeepSeek-V4-Flash-Vision-Exp',
+      'ERNIE-5.5-Flash-Preview-内部'
     ];
     const models = Array.from(new Set([
       ...(activeModel ? [activeModel] : []),
       ...detectedModels,
+      ...dynamicModels,
       ...fallbackModels
     ]));
     runtimes.push({
@@ -151,24 +196,151 @@ function detectLocalRuntimes(): RuntimeDef[] {
   // 3. codex
   const codexPath = findExecutable('codex');
   if (codexPath) {
+    let activeModel = '';
+    const dynamicModels: string[] = [];
+    const configToml = join(home, '.codex', 'config.toml');
+    if (existsSync(configToml)) {
+      try {
+        const content = readFileSync(configToml, 'utf8');
+        const match = content.match(/^model\s*=\s*["']([^"']+)["']/m);
+        if (match && match[1]) activeModel = match[1].trim();
+
+        const catalogMatch = content.match(/^model_catalog_json\s*=\s*["']([^"']+)["']/m);
+        if (catalogMatch && catalogMatch[1] && existsSync(catalogMatch[1])) {
+          try {
+            const catalogRaw = JSON.parse(readFileSync(catalogMatch[1], 'utf8'));
+            if (Array.isArray(catalogRaw.models)) {
+              for (const m of catalogRaw.models) {
+                const id = m.id || m.slug || m.name || m.display_name;
+                if (id && typeof id === 'string') dynamicModels.push(id);
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
+    const mixinCat = join(home, '.codex', 'model-catalogs', 'mixin-models.json');
+    if (existsSync(mixinCat)) {
+      try {
+        const raw = JSON.parse(readFileSync(mixinCat, 'utf8'));
+        if (Array.isArray(raw.models)) {
+          for (const m of raw.models) {
+            const id = m.id || m.slug || m.name || m.display_name;
+            if (id && typeof id === 'string') dynamicModels.push(id);
+          }
+        }
+      } catch {}
+    }
+
+    const oneapiCat = join(home, '.baidu-cx', 'model-catalogs', 'oneapi-models.json');
+    if (existsSync(oneapiCat)) {
+      try {
+        const raw = JSON.parse(readFileSync(oneapiCat, 'utf8'));
+        if (Array.isArray(raw.models)) {
+          for (const m of raw.models) {
+            const id = m.id || m.slug || m.name || m.display_name;
+            if (id && typeof id === 'string') dynamicModels.push(id);
+          }
+        }
+      } catch {}
+    }
+
+    const fallbackModels = [
+      'Grok-4.7-baidu-oneapi',
+      'Claude Sonnet 5.5-baidu-oneapi',
+      'Opus 5.5-baidu-oneapi',
+      'DeepSeek-V4.1-Flash-baidu-oneapi',
+      'Kimi-K2.7-Code-baidu-oneapi',
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
+      'gpt-6.1-sol',
+      'gpt-6.1-terra',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.5',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'ERNIE-5.5-Flash-Preview-内部',
+      'gpt-4o',
+      'gpt-4.5-preview',
+      'o3-mini',
+      'o1',
+      'o1-mini'
+    ];
+
+    const models = Array.from(new Set([
+      ...(activeModel ? [activeModel] : []),
+      ...dynamicModels,
+      ...fallbackModels
+    ]));
+
     runtimes.push({
       id: 'codex',
       name: 'OpenAI Codex (本地 Agent)',
       executablePath: codexPath,
-      models: ['gpt-4o', 'o3-mini', 'o1'],
-      defaultModel: 'gpt-4o'
+      models,
+      defaultModel: activeModel || models[0] || 'Grok-4.7-baidu-oneapi'
     });
   }
 
   // 4. pi
   const piPath = findExecutable('pi');
   if (piPath) {
+    const dynamicModels: string[] = [];
+    const modelsJson = join(home, '.pi', 'agent', 'models.json');
+    if (existsSync(modelsJson)) {
+      try {
+        const raw = JSON.parse(readFileSync(modelsJson, 'utf8'));
+        if (raw.providers && typeof raw.providers === 'object') {
+          for (const provider of Object.values(raw.providers as Record<string, any>)) {
+            if (Array.isArray(provider.models)) {
+              for (const m of provider.models) {
+                const id = m.id || m.name;
+                if (id && typeof id === 'string') dynamicModels.push(id);
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const fallbackModels = [
+      'Opus 5.5-baidu-oneapi',
+      'Claude Sonnet 5.5-baidu-oneapi',
+      'Claude Haiku 5.5-baidu-oneapi',
+      'Opus 5-baidu-oneapi',
+      'Claude Sonnet 5-baidu-oneapi',
+      'Opus 4.8-baidu-oneapi',
+      'DeepSeek-V4.1-Flash-baidu-oneapi',
+      'DeepSeek-V4-Flash-baidu-oneapi',
+      'DeepSeek-V4-Pro-baidu-oneapi',
+      'ERNIE-5.5-Flash-Preview-baidu-oneapi',
+      'gpt-6.1-sol-baidu-oneapi',
+      'gpt-5.6-sol-baidu-oneapi',
+      'anthropic/claude-3-7-sonnet',
+      'anthropic/claude-3-5-sonnet',
+      'openai/gpt-4o',
+      'openai/o3-mini'
+    ];
+
+    const models = Array.from(new Set([
+      ...dynamicModels,
+      ...fallbackModels
+    ]));
+
     runtimes.push({
       id: 'pi',
       name: 'Pi Coding Agent (本地 Agent)',
       executablePath: piPath,
-      models: ['anthropic/claude-3-7-sonnet', 'openai/gpt-4o'],
-      defaultModel: 'anthropic/claude-3-7-sonnet'
+      models,
+      defaultModel: models[0] || 'Opus 5.5-baidu-oneapi'
     });
   }
 

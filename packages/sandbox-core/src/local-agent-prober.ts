@@ -25,52 +25,99 @@ export function discoverCodexModels(): { models: string[]; defaultModel: string 
   const home = homedir();
   const configPath = join(home, '.codex', 'config.toml');
   const fallback = {
-    models: ['gpt-4o', 'gpt-4.5-preview', 'o3-mini', 'o1'],
-    defaultModel: 'gpt-4o',
+    models: [
+      'Grok-4.7-baidu-oneapi',
+      'Claude Sonnet 5.5-baidu-oneapi',
+      'Opus 5.5-baidu-oneapi',
+      'DeepSeek-V4.1-Flash-baidu-oneapi',
+      'Kimi-K2.7-Code-baidu-oneapi',
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
+      'gpt-6.1-sol',
+      'gpt-6.1-terra',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.5',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'ERNIE-5.5-Flash-Preview-内部',
+      'gpt-4o',
+      'gpt-4.5-preview',
+      'o3-mini',
+      'o1',
+      'o1-mini'
+    ],
+    defaultModel: 'Grok-4.7-baidu-oneapi',
   };
 
-  if (!existsSync(configPath)) {
-    return fallback;
-  }
+  const modelsSet = new Set<string>();
+  let activeModel = '';
 
-  try {
-    const content = readFileSync(configPath, 'utf8');
-    const modelMatch = content.match(/^model\s*=\s*["']([^"']+)["']/m);
-    const activeModel = modelMatch ? modelMatch[1].trim() : '';
+  if (existsSync(configPath)) {
+    try {
+      const content = readFileSync(configPath, 'utf8');
+      const modelMatch = content.match(/^model\s*=\s*["']([^"']+)["']/m);
+      if (modelMatch && modelMatch[1]) {
+        activeModel = modelMatch[1].trim();
+      }
 
-    const modelsSet = new Set<string>();
-    if (activeModel) {
-      modelsSet.add(activeModel);
-    }
-
-    // 检查是否有 model_catalog_json (如 codex-mixin 或企业自定义目录)
-    const catalogMatch = content.match(/^model_catalog_json\s*=\s*["']([^"']+)["']/m);
-    if (catalogMatch && catalogMatch[1] && existsSync(catalogMatch[1])) {
-      try {
-        const catalogRaw = JSON.parse(readFileSync(catalogMatch[1], 'utf8'));
-        if (Array.isArray(catalogRaw.models)) {
-          for (const m of catalogRaw.models) {
-            const id = m.id || m.slug || m.name || m.display_name;
-            if (id && typeof id === 'string') {
-              modelsSet.add(id);
+      const catalogMatch = content.match(/^model_catalog_json\s*=\s*["']([^"']+)["']/m);
+      if (catalogMatch && catalogMatch[1] && existsSync(catalogMatch[1])) {
+        try {
+          const catalogRaw = JSON.parse(readFileSync(catalogMatch[1], 'utf8'));
+          if (Array.isArray(catalogRaw.models)) {
+            for (const m of catalogRaw.models) {
+              const id = m.id || m.slug || m.name || m.display_name;
+              if (id && typeof id === 'string') {
+                modelsSet.add(id);
+              }
             }
           }
-        }
-      } catch {
-        // 忽略 catalog 解析异常
+        } catch {}
       }
-    }
-
-    ['gpt-4o', 'o3-mini', 'o1'].forEach((m) => modelsSet.add(m));
-
-    const list = Array.from(modelsSet);
-    return {
-      models: list.length > 0 ? list : fallback.models,
-      defaultModel: activeModel || list[0] || fallback.defaultModel,
-    };
-  } catch {
-    return fallback;
+    } catch {}
   }
+
+  const mixinCat = join(home, '.codex', 'model-catalogs', 'mixin-models.json');
+  if (existsSync(mixinCat)) {
+    try {
+      const raw = JSON.parse(readFileSync(mixinCat, 'utf8'));
+      if (Array.isArray(raw.models)) {
+        for (const m of raw.models) {
+          const id = m.id || m.slug || m.name || m.display_name;
+          if (id && typeof id === 'string') modelsSet.add(id);
+        }
+      }
+    } catch {}
+  }
+
+  const oneapiCat = join(home, '.baidu-cx', 'model-catalogs', 'oneapi-models.json');
+  if (existsSync(oneapiCat)) {
+    try {
+      const raw = JSON.parse(readFileSync(oneapiCat, 'utf8'));
+      if (Array.isArray(raw.models)) {
+        for (const m of raw.models) {
+          const id = m.id || m.slug || m.name || m.display_name;
+          if (id && typeof id === 'string') modelsSet.add(id);
+        }
+      }
+    } catch {}
+  }
+
+  fallback.models.forEach((m) => modelsSet.add(m));
+  if (activeModel) modelsSet.add(activeModel);
+
+  const list = Array.from(modelsSet);
+  return {
+    models: list.length > 0 ? list : fallback.models,
+    defaultModel: activeModel || list[0] || fallback.defaultModel,
+  };
 }
 
 /**
@@ -80,42 +127,52 @@ export function discoverPiModels(): { models: string[]; defaultModel: string } {
   const home = homedir();
   const modelsPath = join(home, '.pi', 'agent', 'models.json');
   const fallback = {
-    models: ['anthropic/claude-3-7-sonnet', 'openai/gpt-4o', 'deepseek/deepseek-chat'],
+    models: [
+      'anthropic/claude-3-7-sonnet',
+      'Opus 5.5-baidu-oneapi',
+      'Claude Sonnet 5.5-baidu-oneapi',
+      'Claude Haiku 5.5-baidu-oneapi',
+      'Opus 5-baidu-oneapi',
+      'Claude Sonnet 5-baidu-oneapi',
+      'Opus 4.8-baidu-oneapi',
+      'DeepSeek-V4.1-Flash-baidu-oneapi',
+      'DeepSeek-V4-Flash-baidu-oneapi',
+      'DeepSeek-V4-Pro-baidu-oneapi',
+      'Kimi-K2.7-Code-baidu-oneapi',
+      'openai/gpt-4o',
+      'deepseek/deepseek-chat',
+      'gpt-5.6-sol',
+      'GLM-5.3-Flash'
+    ],
     defaultModel: 'anthropic/claude-3-7-sonnet',
   };
 
-  if (!existsSync(modelsPath)) {
-    return fallback;
-  }
+  const modelsSet = new Set<string>();
 
-  try {
-    const raw = JSON.parse(readFileSync(modelsPath, 'utf8'));
-    const modelsSet = new Set<string>();
-
-    if (raw.providers && typeof raw.providers === 'object') {
-      for (const provider of Object.values(raw.providers as Record<string, any>)) {
-        if (Array.isArray(provider.models)) {
-          for (const m of provider.models) {
-            const id = m.id || m.name;
-            if (id && typeof id === 'string') {
-              modelsSet.add(id);
+  if (existsSync(modelsPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(modelsPath, 'utf8'));
+      if (raw.providers && typeof raw.providers === 'object') {
+        for (const provider of Object.values(raw.providers as Record<string, any>)) {
+          if (Array.isArray(provider.models)) {
+            for (const m of provider.models) {
+              const id = m.id || m.name;
+              if (id && typeof id === 'string') {
+                modelsSet.add(id);
+              }
             }
           }
         }
       }
-    }
-
-    const list = Array.from(modelsSet);
-    if (list.length > 0) {
-      return {
-        models: list,
-        defaultModel: list[0],
-      };
-    }
-    return fallback;
-  } catch {
-    return fallback;
+    } catch {}
   }
+
+  fallback.models.forEach((m) => modelsSet.add(m));
+  const list = Array.from(modelsSet);
+  return {
+    models: list.length > 0 ? list : fallback.models,
+    defaultModel: list[0] || fallback.defaultModel,
+  };
 }
 
 /**
@@ -128,13 +185,36 @@ export function discoverDuccModels(): { models: string[]; defaultModel: string }
     models: [
       'GLM-5.3-Flash-内部',
       'Opus 4.8',
+      'Opus 5',
       'Opus 5.5',
+      'Claude Sonnet 5',
       'Claude Sonnet 5.5',
+      'Claude Haiku 5.5',
       'ERNIE-5.5-Flash-Preview-内部',
+      'ERNIE-Light-DT-1.0-内部',
       'DeepSeek-V4.1-Flash-内部',
+      'DeepSeek-V4-Flash-内部',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
       'gpt-6.1-sol',
+      'gpt-6.2-sol',
       'gpt-5.6-sol',
-      'Kimi-K2.7-Code-内部'
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'gpt-6-luna',
+      'gpt-6-astra',
+      'gpt-6.2-astra',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'GLM-5.2',
+      'Grok-4.7',
+      'Grok-4.6',
+      'Kimi-K2.7-Code-内部',
+      'Kimi K3',
+      'Kimi K2.6',
+      'MiniMax-M3',
+      'Fable 5.2 尝鲜',
+      'auto-内部'
     ],
     defaultModel: 'GLM-5.3-Flash-内部'
   };
@@ -146,9 +226,7 @@ export function discoverDuccModels(): { models: string[]; defaultModel: string }
       if (data.env?.ANTHROPIC_MODEL) {
         activeModel = data.env.ANTHROPIC_MODEL.trim();
       }
-    } catch {
-      // 容错处理
-    }
+    } catch {}
   }
 
   const modelsSet = new Set<string>();
@@ -173,9 +251,7 @@ export function discoverDuccModels(): { models: string[]; defaultModel: string }
           .filter((m) => m && !m.includes('自定义模型组'));
         parsed.forEach((m) => modelsSet.add(m));
       }
-    } catch {
-      // 容错回退
-    }
+    } catch {}
   }
 
   fallback.models.forEach((m) => modelsSet.add(m));
@@ -196,11 +272,18 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
   const fallback = {
     models: [
       'gpt-5.6-sol',
-      'DeepSeek-V4.1-Flash',
-      'ERNIE-5.5-Flash-Preview-内部',
-      'GLM-5.3-Flash',
       'gpt-6.1-sol',
-      'DeepSeek-V4-Pro'
+      'gpt-6.2-sol',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'DeepSeek-V4-Flash-Vision-Exp',
+      'ERNIE-5.5-Flash-Preview-内部'
     ],
     defaultModel: 'gpt-5.6-sol'
   };
@@ -213,9 +296,7 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
       if (modelMatch && modelMatch[1]) {
         activeModel = modelMatch[1].trim();
       }
-    } catch {
-      // 容错处理
-    }
+    } catch {}
   }
 
   const modelsSet = new Set<string>();
@@ -223,7 +304,7 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
     modelsSet.add(activeModel);
   }
 
-  const ducxBin = findExecutableInPath('ducx');
+  const ducxBin = findExecutableInPath('ducx') || findExecutableInPath('baidu-cx');
   if (ducxBin) {
     try {
       const output = execSync(`"${ducxBin}" models`, {
@@ -240,9 +321,7 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
           .filter(Boolean);
         parsed.forEach((m) => modelsSet.add(m));
       }
-    } catch {
-      // 容错回退
-    }
+    } catch {}
   }
 
   if (existsSync(catalogPath)) {
@@ -256,9 +335,7 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
           }
         }
       }
-    } catch {
-      // 容错处理
-    }
+    } catch {}
   }
 
   fallback.models.forEach((m) => modelsSet.add(m));
@@ -482,7 +559,7 @@ export async function probeLocalAgents(): Promise<LocalAgentInfo[]> {
   });
 
   // 6. Baidu CX (`ducx`)
-  const ducxPath = findExecutableInPath('ducx');
+  const ducxPath = findExecutableInPath('ducx') || findExecutableInPath('baidu-cx');
   let ducxVersion: string | undefined;
   if (ducxPath) {
     const probe = await executeVersionProbe(ducxPath, ['--version']);

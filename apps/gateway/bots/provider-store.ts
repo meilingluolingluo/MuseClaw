@@ -35,31 +35,58 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     name: 'DeepSeek 官方',
     baseUrl: 'https://api.deepseek.com/chat/completions',
     model: 'deepseek-flash',
-    candidateModels: [],
+    candidateModels: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
     description: '国内最强原生推理与 Coding 模型，性价比极高'
   },
   {
     id: 'openai',
     name: 'OpenAI 官方',
     baseUrl: 'https://api.openai.com/v1/chat/completions',
-    model: '',
-    candidateModels: [],
+    model: 'gpt-4o',
+    candidateModels: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'gpt-4.5-preview'],
     description: '行业标准旗舰模型，支持原生 Tool Calling'
   },
   {
     id: 'ollama',
     name: '本地 Ollama (Local)',
     baseUrl: 'http://localhost:11434/v1/chat/completions',
-    model: '',
-    candidateModels: [],
+    model: 'llama3.2',
+    candidateModels: ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral'],
     description: '无需联网与 API Key，完全在本地硬件私有化运行'
   },
   {
     id: 'codex',
     name: 'OpenAI Codex (本地 Agent)',
     baseUrl: 'local://codex',
-    model: '',
-    candidateModels: [],
+    model: 'Grok-4.7-baidu-oneapi',
+    candidateModels: [
+      'Grok-4.7-baidu-oneapi',
+      'Claude Sonnet 5.5-baidu-oneapi',
+      'Opus 5.5-baidu-oneapi',
+      'DeepSeek-V4.1-Flash-baidu-oneapi',
+      'Kimi-K2.7-Code-baidu-oneapi',
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
+      'gpt-6.1-sol',
+      'gpt-6.1-terra',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.5',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'ERNIE-5.5-Flash-Preview-内部',
+      'gpt-4o',
+      'gpt-4.5-preview',
+      'o3-mini',
+      'o1',
+      'o1-mini'
+    ],
     isLocalAgent: true,
     protocol: 'acp-stdio',
     description: '本地 OpenAI Codex 终端编码 Agent，支持 headless stdio 交互'
@@ -68,8 +95,25 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     id: 'pi',
     name: 'Pi Coding Agent (本地 Agent)',
     baseUrl: 'local://pi',
-    model: '',
-    candidateModels: [],
+    model: 'Opus 5.5-baidu-oneapi',
+    candidateModels: [
+      'Opus 5.5-baidu-oneapi',
+      'Claude Sonnet 5.5-baidu-oneapi',
+      'Claude Haiku 5.5-baidu-oneapi',
+      'Opus 5-baidu-oneapi',
+      'Claude Sonnet 5-baidu-oneapi',
+      'Opus 4.8-baidu-oneapi',
+      'DeepSeek-V4.1-Flash-baidu-oneapi',
+      'DeepSeek-V4-Flash-baidu-oneapi',
+      'DeepSeek-V4-Pro-baidu-oneapi',
+      'ERNIE-5.5-Flash-Preview-baidu-oneapi',
+      'gpt-6.1-sol-baidu-oneapi',
+      'gpt-5.6-sol-baidu-oneapi',
+      'anthropic/claude-3-7-sonnet',
+      'anthropic/claude-3-5-sonnet',
+      'openai/gpt-4o',
+      'openai/o3-mini'
+    ],
     isLocalAgent: true,
     protocol: 'json-rpc-stdio',
     description: '极简高性能终端 Coding Agent，支持 stdio JSON-RPC 与多模型驱动'
@@ -78,8 +122,8 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     id: 'dsh',
     name: 'DeepSeek Harness (本地 dsh)',
     baseUrl: 'local://dsh',
-    model: '',
-    candidateModels: [],
+    model: 'deepseek-official/deepseek-chat',
+    candidateModels: ['deepseek-official/deepseek-chat', 'deepseek-official/deepseek-reasoner'],
     isLocalAgent: true,
     protocol: 'acp-stdio',
     description: 'DeepSeek 官方开源本地终端 Harness 编码 Agent，支持 ACP 协议'
@@ -88,8 +132,41 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     id: 'ducc',
     name: 'Baidu CC (本地 ducc)',
     baseUrl: 'local://ducc',
-    model: '',
-    candidateModels: [],
+    model: 'GLM-5.3-Flash-内部',
+    candidateModels: [
+      'GLM-5.3-Flash-内部',
+      'Opus 4.8',
+      'Opus 5',
+      'Opus 5.5',
+      'Claude Sonnet 5',
+      'Claude Sonnet 5.5',
+      'Claude Haiku 5.5',
+      'ERNIE-5.5-Flash-Preview-内部',
+      'ERNIE-Light-DT-1.0-内部',
+      'DeepSeek-V4.1-Flash-内部',
+      'DeepSeek-V4-Flash-内部',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'gpt-6.1-sol',
+      'gpt-6.2-sol',
+      'gpt-5.6-sol',
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'gpt-6-luna',
+      'gpt-6-astra',
+      'gpt-6.2-astra',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'GLM-5.2',
+      'Grok-4.7',
+      'Grok-4.6',
+      'Kimi-K2.7-Code-内部',
+      'Kimi K3',
+      'Kimi K2.6',
+      'MiniMax-M3',
+      'Fable 5.2 尝鲜',
+      'auto-内部'
+    ],
     isLocalAgent: true,
     protocol: 'acp-stdio',
     description: 'Baidu 内部 Claude Code 深度编码 Agent，免 Key 直连内网大模型'
@@ -98,8 +175,22 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     id: 'ducx',
     name: 'Baidu CX (本地 ducx)',
     baseUrl: 'local://ducx',
-    model: '',
-    candidateModels: [],
+    model: 'gpt-5.6-sol',
+    candidateModels: [
+      'gpt-5.6-sol',
+      'gpt-6.1-sol',
+      'gpt-6.2-sol',
+      'gpt-6-astra',
+      'gpt-6-luna',
+      'gpt-5.6-luna',
+      'gpt-5.6-terra',
+      'GLM-5.3-Flash',
+      'GLM-5.3',
+      'DeepSeek-V4-Pro',
+      'DeepSeek-V4.1-Flash',
+      'DeepSeek-V4-Flash-Vision-Exp',
+      'ERNIE-5.5-Flash-Preview-内部'
+    ],
     isLocalAgent: true,
     protocol: 'acp-stdio',
     description: 'Baidu 内部 Codex 架构高级编码 Agent，支持多模型与高阶推理'
@@ -108,24 +199,24 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     id: 'siliconflow',
     name: '硅基流动 (SiliconFlow)',
     baseUrl: 'https://api.siliconflow.cn/v1/chat/completions',
-    model: '',
-    candidateModels: [],
+    model: 'deepseek-ai/DeepSeek-V3',
+    candidateModels: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct'],
     description: '高并发 DeepSeek 与开源大模型托管云服务'
   },
   {
     id: 'moonshot',
     name: '月之暗面 Kimi',
     baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
-    model: '',
-    candidateModels: [],
+    model: 'moonshot-v1-32k',
+    candidateModels: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k', 'kimi-latest'],
     description: '超长上下文中文原生模型'
   },
   {
     id: 'qwen',
     name: '通义千问 (DashScope)',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-    model: '',
-    candidateModels: [],
+    model: 'qwen-plus',
+    candidateModels: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen2.5-72b-instruct'],
     description: '阿里云官方模型服务，兼容 OpenAI 协议'
   },
   {
@@ -221,9 +312,9 @@ export class ModelProviderStore {
     if (provider.id === 'codex') {
       const codexInfo = discoverCodexModels();
       const candidateModels = Array.from(new Set([...remoteModels, ...codexInfo.models, ...(provider.candidateModels || [])]));
-      const effectiveModel = (provider.model && candidateModels.includes(provider.model) && provider.model !== 'gpt-4o')
+      const effectiveModel = (provider.model && candidateModels.includes(provider.model))
         ? provider.model
-        : (codexInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Claude Sonnet 5.5-baidu-oneapi');
+        : (codexInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Grok-4.7-baidu-oneapi');
       return {
         ...provider,
         model: effectiveModel,
@@ -233,7 +324,7 @@ export class ModelProviderStore {
     if (provider.id === 'pi') {
       const piInfo = discoverPiModels();
       const candidateModels = Array.from(new Set([...remoteModels, ...piInfo.models, ...(provider.candidateModels || [])]));
-      const effectiveModel = (provider.model && candidateModels.includes(provider.model) && provider.model !== 'anthropic/claude-3-7-sonnet')
+      const effectiveModel = (provider.model && candidateModels.includes(provider.model))
         ? provider.model
         : (piInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Opus 5.5-baidu-oneapi');
       return {
@@ -319,7 +410,7 @@ export class ModelProviderStore {
     activeProviderId: string;
     providers: Array<ModelProviderConfig & { hasKey: boolean; maskedKey: string }>;
   }> {
-    let localAgents: Array<{ id: string; installed: boolean; version?: string; executablePath?: string }> = [];
+    let localAgents: any[] = [];
     try {
       localAgents = await probeLocalAgents();
     } catch {
@@ -334,19 +425,26 @@ export class ModelProviderStore {
         const resolved = resolveApiKey(p.apiKey, p.id);
 
         let candidateModels: string[] = [];
+        const remoteAgents = isLocal ? globalRunnerMesh.getAggregatedRemoteAgents(userId) : [];
+        const remote = remoteAgents.find((r) => r.id === p.id);
 
         if (isLocal) {
-          const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(userId);
-          const remote = remoteAgents.find((r) => r.id === p.id);
+          let dynamicDiscovered: string[] = [];
+          if (p.id === 'codex') dynamicDiscovered = discoverCodexModels().models;
+          else if (p.id === 'pi') dynamicDiscovered = discoverPiModels().models;
+          else if (p.id === 'ducc') dynamicDiscovered = discoverDuccModels().models;
+          else if (p.id === 'ducx') dynamicDiscovered = discoverDucxModels().models;
+
           const models = Array.from(new Set([
             ...(remote?.candidateModels || []),
             ...(localInfo?.candidateModels || []),
+            ...dynamicDiscovered,
             ...(p.candidateModels || [])
           ]));
           candidateModels = models;
           p.candidateModels = models;
         } else if (p.id === 'ollama') {
-          candidateModels = p.candidateModels || [];
+          candidateModels = p.candidateModels && p.candidateModels.length > 0 ? p.candidateModels : ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral'];
         } else {
           const cached = this.getRemoteModelsCache(p.id, p.baseUrl, resolved || '');
           if (cached && cached.length > 0) {
@@ -356,8 +454,9 @@ export class ModelProviderStore {
               const res = await fetchRemoteModels(p.baseUrl, resolved, 3000);
               if (res.ok && res.models.length > 0) {
                 this.setRemoteModelsCache(p.id, p.baseUrl, resolved, res.models);
-                candidateModels = res.models;
-                p.candidateModels = res.models;
+                const merged = Array.from(new Set([...res.models, ...(p.candidateModels || [])]));
+                candidateModels = merged;
+                p.candidateModels = merged;
               }
             } catch {
               // 容错处理
@@ -372,9 +471,12 @@ export class ModelProviderStore {
           ? (p.model && candidateModels.includes(p.model) ? p.model : candidateModels[0])
           : p.model;
 
-        const hasKey = isLocal ? Boolean(localInfo?.installed) : Boolean(resolved);
+        const isInstalled = isLocal ? Boolean(localInfo?.installed || remote?.installed) : undefined;
+        const hasKey = isLocal ? Boolean(isInstalled) : Boolean(resolved);
+        const effectiveVersion = localInfo?.version || remote?.version || p.version;
+        const effectiveExecutable = localInfo?.executablePath || p.executablePath;
         const maskedKey = isLocal
-          ? (localInfo?.installed ? (localInfo.version || '已就绪') : '未安装')
+          ? (isInstalled ? (effectiveVersion || (localInfo?.installed ? '本地就绪' : '远程就绪')) : '未检测到')
           : this.maskKey(resolved);
 
         return {
@@ -382,9 +484,9 @@ export class ModelProviderStore {
           model: effectiveModel,
           candidateModels,
           isLocalAgent: isLocal,
-          installed: isLocal ? Boolean(localInfo?.installed) : undefined,
-          version: localInfo?.version || p.version,
-          executablePath: localInfo?.executablePath || p.executablePath,
+          installed: isInstalled,
+          version: effectiveVersion,
+          executablePath: effectiveExecutable,
           hasKey,
           maskedKey,
           apiKey: undefined // 安全考虑不向前端明文回传完整 Key

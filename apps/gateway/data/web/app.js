@@ -940,8 +940,8 @@ async function sendMessage() {
       removeThinkingPulse();
       const remaining = rawAccumulatedText.length - renderedCharCount;
       const step = isStreamFinished
-        ? Math.max(1, Math.ceil(remaining / 3))
-        : Math.max(1, Math.min(14, Math.ceil(remaining / 5)));
+        ? Math.max(1, Math.min(8, Math.ceil(remaining / 6)))
+        : Math.max(1, Math.min(4, Math.ceil(remaining / 4)));
       renderedCharCount += step;
       if (renderedCharCount > rawAccumulatedText.length) {
         renderedCharCount = rawAccumulatedText.length;
@@ -951,12 +951,15 @@ async function sendMessage() {
       dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
     }
 
-    if (renderedCharCount < rawAccumulatedText.length || !isStreamFinished) {
+    if (renderedCharCount < rawAccumulatedText.length) {
       typeTimer = setTimeout(tickTyping, 16);
     } else {
       typeTimer = null;
-      streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
-      dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+      if (isStreamFinished) {
+        removeThinkingPulse();
+        streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
+        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+      }
     }
   };
 
@@ -1016,9 +1019,11 @@ async function sendMessage() {
     }
 
     isStreamFinished = true;
+    if (!typeTimer && renderedCharCount < rawAccumulatedText.length) {
+      tickTyping();
+    }
     while (renderedCharCount < rawAccumulatedText.length) {
-      renderedCharCount = rawAccumulatedText.length;
-      streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
+      await new Promise((r) => setTimeout(r, 20));
     }
     removeThinkingPulse();
     fullAssistantText = rawAccumulatedText;
@@ -2669,7 +2674,7 @@ async function openModelSettingsModal() {
         const badgeText = isCurrentActive
           ? '● 正在使用'
           : isPLocal
-          ? (p.installed ? '💻 本地已就绪' : '未检测到')
+          ? (p.installed ? (p.executablePath ? '💻 本地已就绪' : '🌐 远程就绪') : '未检测到')
           : (p.hasKey ? '已就绪' : '待配置');
         const badgeClass = isCurrentActive
           ? 'configured'

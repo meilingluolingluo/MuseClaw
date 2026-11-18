@@ -1112,9 +1112,11 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
 
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive'
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no'
       });
+      (res as any).flushHeaders?.();
 
       // 发送 session 初始化事件，包含 bot_id 与 session_id
       res.write(`data: ${JSON.stringify({
@@ -1156,6 +1158,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
             fullAssistantText += event.text;
           }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
+          (res as any).flush?.();
         }
 
         session.messages.push({ role: 'user', content: text });
