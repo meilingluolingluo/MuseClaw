@@ -138,7 +138,7 @@ const infoflowChannel = createInfoflowChannel(
     const { bot, session_id: finalSessionId } = routeResult;
     const botWithMemory: AgentProfile = {
       ...bot,
-      memory: botMemory.getMemory(bot.id)
+      memory: botMemory.getMemory(bot.id, userId)
     };
 
     const loop = runAgentLoop(
@@ -190,7 +190,7 @@ const feishuChannel = createFeishuChannel(
     const { bot, session_id: finalSessionId } = routeResult;
     const botWithMemory: AgentProfile = {
       ...bot,
-      memory: botMemory.getMemory(bot.id)
+      memory: botMemory.getMemory(bot.id, userId)
     };
 
     const loop = runAgentLoop(
@@ -441,9 +441,9 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
       const id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
-      const memory = botMemory.getMemory(id);
+      const memory = botMemory.getMemory(id, currentUser?.username);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ bot_id: id, memory }));
+      return res.end(JSON.stringify({ bot_id: id, userId: currentUser?.username, memory }));
     }
 
     if (req.method === 'PUT' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
@@ -455,9 +455,9 @@ export function startGatewayServer(defaultPort = 8799) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Field "memory" must be a string' }));
       }
-      botMemory.saveMemory(id, memory);
+      botMemory.saveMemory(id, memory, currentUser?.username);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: true, bot_id: id, memory }));
+      return res.end(JSON.stringify({ success: true, bot_id: id, userId: currentUser?.username, memory }));
     }
 
     // 记忆受控自整理 (Memory Consolidation: POST /api/bots/:id/memory/consolidate)
@@ -474,10 +474,11 @@ export function startGatewayServer(defaultPort = 8799) {
             const resp = await callLLM([{ role: 'user', content: prompt }], []);
             return resp.content || '';
           },
-          { dryRun: Boolean(dry_run), budgetShare: typeof budget_share === 'number' ? budget_share : 0.2 }
+          { dryRun: Boolean(dry_run), budgetShare: typeof budget_share === 'number' ? budget_share : 0.2 },
+          currentUser?.username
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ success: true, bot_id: id, report }));
+        return res.end(JSON.stringify({ success: true, bot_id: id, userId: currentUser?.username, report }));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: false, error: err.message }));
@@ -487,17 +488,17 @@ export function startGatewayServer(defaultPort = 8799) {
     // 记忆整理一键撤销 (Memory Consolidation Undo: POST /api/bots/:id/memory/undo)
     if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/undo$/)) {
       const id = url.pathname.split('/')[3];
-      const result = botMemory.undoLastConsolidation(id);
+      const result = botMemory.undoLastConsolidation(id, currentUser?.username);
       res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ bot_id: id, ...result }));
+      return res.end(JSON.stringify({ bot_id: id, userId: currentUser?.username, ...result }));
     }
 
     // 获取记忆整理历史审计报告 (GET /api/bots/:id/memory/reports)
     if (req.method === 'GET' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/reports$/)) {
       const id = url.pathname.split('/')[3];
-      const reports = botMemory.getConsolidationHistory(id);
+      const reports = botMemory.getConsolidationHistory(id, currentUser?.username);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ bot_id: id, reports }));
+      return res.end(JSON.stringify({ bot_id: id, userId: currentUser?.username, reports }));
     }
 
     // B3. 对外独立 Bot API (Headless Bot API: POST /api/bots/:id/chat)
@@ -523,7 +524,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
       const botWithMemory: AgentProfile = {
         ...bot,
-        memory: botMemory.getMemory(bot.id)
+        memory: botMemory.getMemory(bot.id, apiUserId)
       };
 
       const loop = runAgentLoop(
@@ -1131,10 +1132,10 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
         mentionName: mention_name
       })}\n\n`);
 
-      // 启动 Agent Loop，注入该 Bot 的 Profile 及专属静态记忆
+      // 启动 Agent Loop，注入该 Bot 的 Profile 及专属静态记忆 (按当前用户隔离)
       const botWithMemory: AgentProfile = {
         ...bot,
-        memory: botMemory.getMemory(bot.id)
+        memory: botMemory.getMemory(bot.id, userId)
       };
 
       const userScopedCaller: LLMCaller = async (messages, tools, onChunk) => {
