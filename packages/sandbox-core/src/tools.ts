@@ -68,8 +68,16 @@ export function createDefaultTools(options?: {
         const url = String(args.url);
         console.log(`[Tool:web_fetch] 抓取: ${url}`);
         try {
+          const rawHeaders = (args.headers as Record<string, unknown>) || {};
+          const safeHeaders: Record<string, string> = { 'User-Agent': 'MuseClaw-WebFetch/1.0' };
+          for (const [k, v] of Object.entries(rawHeaders)) {
+            const cleanKey = String(k).replace(/[^\x00-\x7F]/g, '');
+            if (cleanKey) {
+              safeHeaders[cleanKey] = encodeURI(String(v ?? ''));
+            }
+          }
           const res = await fetch(url, {
-            headers: (args.headers as Record<string, string>) || { 'User-Agent': 'MuseClaw-WebFetch/1.0' }
+            headers: safeHeaders
           });
           const text = await res.text();
           return {

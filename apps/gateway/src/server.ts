@@ -42,7 +42,11 @@ function loadEnv() {
         const idx = trimmed.indexOf('=');
         if (idx !== -1) {
           const key = trimmed.slice(0, idx).trim();
-          const val = trimmed.slice(idx + 1).trim();
+          let val = trimmed.slice(idx + 1).trim();
+          const commentIdx = val.indexOf('#');
+          if (commentIdx !== -1 && !val.startsWith('"') && !val.startsWith("'")) {
+            val = val.slice(0, commentIdx).trim();
+          }
           if (!process.env[key]) {
             process.env[key] = val.replace(/^["']|["']$/g, '');
           }

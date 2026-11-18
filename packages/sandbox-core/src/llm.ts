@@ -171,7 +171,10 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
     };
 
     if (effectiveKey) {
-      headers.Authorization = `Bearer ${effectiveKey}`;
+      const cleanKey = effectiveKey.replace(/[^\x00-\x7F]/g, '').trim();
+      if (cleanKey) {
+        headers.Authorization = `Bearer ${cleanKey}`;
+      }
     }
 
     const res = await fetch(targetUrl, {
@@ -312,7 +315,10 @@ export async function testProviderConnection(config: ModelProviderConfig): Promi
       'Content-Type': 'application/json'
     };
     if (effectiveKey) {
-      headers.Authorization = `Bearer ${effectiveKey}`;
+      const cleanKey = effectiveKey.replace(/[^\x00-\x7F]/g, '').trim();
+      if (cleanKey) {
+        headers.Authorization = `Bearer ${cleanKey}`;
+      }
     }
 
     const res = await fetch(targetUrl, {
