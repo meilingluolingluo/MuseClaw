@@ -83,9 +83,18 @@ export async function runLocalAgent(
   prompt: string,
   options: LocalAgentRunOptions = {}
 ): Promise<LocalAgentRunResult> {
+  // 1. 如果指定了用户专属节点且该节点在线，优先派发至用户个人节点执行
+  if (options.userId) {
+    const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId, options.userId);
+    if (remoteRunner) {
+      return globalRunnerMesh.dispatchTask(agentId, prompt, options);
+    }
+  }
+
+  // 2. 检查当前网关本地是否存在该可执行程序
   const exe = findExecutableInPath(agentId);
   if (!exe) {
-    const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId, options.userId);
+    const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId);
     if (remoteRunner) {
       return globalRunnerMesh.dispatchTask(agentId, prompt, options);
     }
@@ -121,7 +130,8 @@ export async function runLocalAgent(
       args.push('--model', targetModel);
     }
   } else if (agentId === 'ducc') {
-    args = ['-p', '--dangerously-skip-permissions'];
+    const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+    args = isRoot ? ['-p'] : ['-p', '--dangerously-skip-permissions'];
     let targetModel = options.model;
     if (!targetModel) {
       const duccInfo = discoverDuccModels();

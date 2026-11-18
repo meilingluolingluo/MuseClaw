@@ -269,7 +269,8 @@ class MuseClawRunnerClient {
 
     let args: string[] = [];
     if (task.agentId === 'ducc') {
-      args = ['-p', '--dangerously-skip-permissions'];
+      const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+      args = isRoot ? ['-p'] : ['-p', '--dangerously-skip-permissions'];
       if (task.model) args.push('--model', task.model);
     } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
       args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];

@@ -2223,64 +2223,36 @@ function getOrCreateUserId() {
 }
 
 async function openAddMachineModal() {
-  const multicaCmd = `# 1. 配置网络并安装 Multica CLI
-export no_proxy=".bcebos.com,.duckdns.org,.ai-chat.host,.baidu-int.com,10.0.0.0/8\${no_proxy:+,\$no_proxy}"
-export NO_PROXY="$no_proxy"
-export https_proxy="http://agent.baidu.com:8188"
-export http_proxy="$https_proxy"
-
-curl -fsSL 'http://team-mesh.loop.baidu-int.com:8004/api/tmesh/dist/install.sh' | bash
-
-# 2. 配置平台地址并登录
-multica --profile qijunhui config set server_url 'http://team-mesh.loop.baidu-int.com:8006'
-multica --profile qijunhui config set app_url 'http://team-mesh.loop.baidu-int.com:8004'
-multica --profile qijunhui login --token 'mul_17382c066f970baec6bcf8aa00c63436db6b75e5'
-
-# 3. 配置运行时并准备 ducc、ducx
-multica --profile qijunhui config set daemon_runtimes 'ducc,ducx'
-multica --profile qijunhui config set runtime_shims 'ducc,ducx'
-
-multica --profile qijunhui ducc setup
-export PATH="$HOME/.baidu-cc/baidu-cc/bin:$HOME/.comate/baidu-cc/bin:$HOME/.baidu-cx/baidu-cx/bin:$HOME/.comate/baidu-cx/bin:$PATH"
-ducc config model 'Opus 4.8'
-
-# 4. 启动守护进程，连接平台
-multica --profile qijunhui daemon restart`;
-
   const origin = window.location.origin;
   const currentUserId = getOrCreateUserId();
-  const curlCmdNormal = `curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(currentUserId)}" | bash`;
+  const installCmd = `# 1. 配置内网直连代理 (防止内网 IP 被全局代理拦截)
+export no_proxy=".bcebos.com,.duckdns.org,.ai-chat.host,.baidu-int.com,10.0.0.0/8,localhost,127.0.0.1\${no_proxy:+,\$no_proxy}"
+export NO_PROXY="$no_proxy"
+
+# 2. 一键启动 MuseClaw 本地计算节点伴侣 (自动识别本机 ducc、ducx)
+curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(currentUserId)}" | bash`;
 
   const bodyHtml = `
     <div style="font-size: 13px; color: var(--om-muted); margin-bottom: 14px; line-height: 1.5;">
-      在要添加的电脑上复制运行以下整组命令。守护进程一上线，这里就会自动识别已连接的 <code>ducc</code> 与 <code>ducx</code> 运行时。
+      在要连接的个人电脑（Mac 或 Linux）终端中，复制并运行以下整组命令。伴侣进程启动后，系统将自动识别并就绪你电脑上的 <code>ducc</code> 与 <code>ducx</code> 等本地 Agent。
     </div>
 
     <div style="margin-bottom: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-        <div style="font-size: 12.5px; font-weight: 650; color: var(--om-fg);">
-          方式一：企业 Multica 守护进程方案 (推荐 · 适用百度内网环境)
+        <div style="font-size: 12.5px; font-weight: 650; color: var(--om-fg); display: flex; align-items: center; gap: 6px;">
+          <span>💻 个人电脑终端接入命令</span>
+          <span style="font-size: 11px; color: var(--om-muted); font-weight: 400;">(免安装依赖 · Node.js 即时运行)</span>
         </div>
-        <button type="button" class="btn-secondary" onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(multicaCmd)}')); showToast('已复制完整 Multica 命令组', 'success');" style="padding: 2px 8px; font-size: 11px; cursor: pointer;">
+        <button type="button" class="btn-secondary" onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(installCmd)}')); showToast('已复制接入命令', 'success');" style="padding: 2px 8px; font-size: 11px; cursor: pointer;">
           📋 一键复制整组命令
         </button>
       </div>
-      <div style="position: relative; background: var(--om-surface-3); border: 1px solid var(--om-border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.45; word-break: break-all; color: var(--om-fg); max-height: 240px; overflow-y: auto; white-space: pre-wrap;"><code>${escapeHtml(multicaCmd)}</code></div>
-    </div>
-
-    <div style="margin-bottom: 14px;">
-      <details style="font-size: 12px; color: var(--om-muted);">
-        <summary style="cursor: pointer; font-weight: 600; color: var(--om-fg); margin-bottom: 6px;">方式二：轻量伴侣进程直连 (无 Team Mesh 时使用)</summary>
-        <div style="position: relative; background: var(--om-surface-3); border: 1px solid var(--om-border); border-radius: 8px; padding: 10px 40px 10px 12px; font-family: var(--font-mono); font-size: 12px; word-break: break-all; color: var(--om-fg); margin-top: 6px;">
-          <code>${escapeHtml(curlCmdNormal)}</code>
-          <button type="button" class="btn-copy-code" onclick="navigator.clipboard.writeText('${curlCmdNormal}'); showToast('已复制直连命令', 'success');" style="position: absolute; right: 8px; top: 8px; background: none; border: none; cursor: pointer; color: var(--om-muted);" title="复制命令">📋</button>
-        </div>
-      </details>
+      <div style="position: relative; background: var(--om-surface-3); border: 1px solid var(--om-border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; word-break: break-all; color: var(--om-fg); white-space: pre-wrap;"><code>${escapeHtml(installCmd)}</code></div>
     </div>
 
     <div id="add-machine-status-box" style="background: var(--om-surface-2); border: 1px solid var(--om-border); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; margin-top: 16px;">
       <span class="loading-spinner" id="add-machine-spinner" style="display: inline-block; width: 14px; height: 14px; border: 2px solid var(--om-border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin 1s linear infinite;"></span>
-      <div style="font-size: 12px; color: var(--om-muted);" id="add-machine-status-text">正在检测 Multica 守护进程与机器上线状态...</div>
+      <div style="font-size: 12px; color: var(--om-muted);" id="add-machine-status-text">正在等待个人电脑计算节点连接... (请在终端运行上方命令)</div>
     </div>
 
     <div class="modal-footer" style="margin-top: 16px;">
@@ -2288,51 +2260,44 @@ multica --profile qijunhui daemon restart`;
     </div>
   `;
 
-  openModal('添加机器 · 本地运行时接入 (Multica)', bodyHtml, { icon: '💻' });
+  openModal('添加计算节点 · 个人电脑本地 Agent 接入', bodyHtml, { icon: '💻' });
 
   let isDestroyed = false;
   const pollTimer = setInterval(async () => {
     if (isDestroyed) return;
     try {
-      // 优先检测 Multica 状态
-      const mRes = await fetch('/api/multica/status');
-      const mData = await mRes.json();
-      const multica = mData.multica;
+      // 1. 优先查询当前用户绑定的专属节点
+      let rRes = await fetch(`/api/runner/machines?userId=${encodeURIComponent(currentUserId)}`);
+      let rData = await rRes.json();
+      let onlineRunners = rData.machines?.filter((m) => m.status === 'online') || [];
 
-      const rRes = await fetch(`/api/runner/machines?userId=${encodeURIComponent(currentUserId)}`);
-      const rData = await rRes.json();
-      const onlineRunners = rData.machines?.filter((m) => m.status === 'online') || [];
+      // 2. 兜底查询所有活跃节点
+      if (onlineRunners.length === 0) {
+        const fallbackRes = await fetch('/api/runner/machines');
+        const fallbackData = await fallbackRes.json();
+        onlineRunners = fallbackData.machines?.filter((m) => m.status === 'online') || [];
+      }
 
       const statusBox = document.getElementById('add-machine-status-box');
       const statusText = document.getElementById('add-machine-status-text');
       const spinner = document.getElementById('add-machine-spinner');
 
-      if (multica && multica.daemonRunning) {
-        if (statusBox && statusText) {
-          statusBox.style.borderColor = 'var(--accent-green)';
-          statusBox.style.background = 'rgba(48, 209, 88, 0.08)';
-          if (spinner) spinner.style.display = 'none';
-          const rNames = multica.runtimes?.map((r) => `${r.agentId || r.name} (${r.status})`).join(', ') || '已上线';
-          statusText.innerHTML = `
-            <span style="color: var(--accent-green); font-weight: 600;">🟢 Multica 守护进程正在运行 (PID: ${escapeHtml(multica.daemonPid || '')}, Profile: ${escapeHtml(multica.profile)})</span><br>
-            <span style="font-size: 11px; color: var(--om-fg); margin-top: 2px; display: inline-block;">⚡ 已就绪运行时: ${escapeHtml(rNames)}</span><br>
-            <span style="font-size: 10.5px; color: var(--om-muted);">平台地址: ${escapeHtml(multica.serverUrl || '')}</span>
-          `;
-        }
-      } else if (onlineRunners.length > 0) {
+      if (onlineRunners.length > 0) {
         if (statusBox && statusText) {
           statusBox.style.borderColor = 'var(--accent-green)';
           statusBox.style.background = 'rgba(48, 209, 88, 0.08)';
           if (spinner) spinner.style.display = 'none';
           const latest = onlineRunners[onlineRunners.length - 1];
+          const runtimeNames = latest.runtimes?.map((r) => `<b>${escapeHtml(r.id)}</b> (${escapeHtml(r.defaultModel || '已就绪')})`).join(' · ') || '通用计算';
           statusText.innerHTML = `
-            <span style="color: var(--accent-green); font-weight: 600;">🎉 识别到计算节点上线: ${escapeHtml(latest.hostname)}</span><br>
-            <span style="font-size: 11px; color: var(--om-muted);">就绪运行时: ${escapeHtml(latest.runtimes?.map((r) => r.id).join(', ') || '通用')}</span>
+            <span style="color: var(--accent-green); font-weight: 600;">🎉 个人电脑计算节点已上线: ${escapeHtml(latest.hostname)}</span><br>
+            <span style="font-size: 11px; color: var(--om-fg); margin-top: 3px; display: inline-block;">⚡ 已识别本地 Agent: ${runtimeNames}</span><br>
+            <span style="font-size: 10.5px; color: var(--om-muted);">节点注册 ID: ${escapeHtml(latest.id)}</span>
           `;
         }
       }
     } catch {}
-  }, 2000);
+  }, 1500);
 
   activeModalCloseHandler = () => {
     isDestroyed = true;
@@ -2514,29 +2479,19 @@ async function openModelSettingsModal() {
       `;
 
     const onlineMachines = machines.filter((m) => m.status === 'online');
-    const isMulticaActive = Boolean(multica && multica.daemonRunning);
-    const multicaRuntimes = multica?.runtimes || [];
+    const isConnected = onlineMachines.length > 0;
 
-    const bannerTitle = isMulticaActive
-      ? `Multica 运行时平台 (Profile: ${escapeHtml(multica.profile)})`
-      : '远程计算节点与本地运行时 (Mesh Runners)';
-
-    const badgeText = isMulticaActive
-      ? `● PID ${escapeHtml(multica.daemonPid || '')} 守护进程运行中`
-      : (onlineMachines.length > 0 ? `● ${onlineMachines.length} 台在线` : '未连接');
-
-    const badgeClass = (isMulticaActive || onlineMachines.length > 0) ? 'configured' : 'unconfigured';
-
-    const bannerDesc = isMulticaActive
-      ? `已就绪运行时: ${multicaRuntimes.map((r) => `<code>${escapeHtml(r.agentId || r.name)}</code> (${escapeHtml(r.status)})`).join(' · ') || '已连接'}`
-      : (onlineMachines.length > 0
-          ? `已在线节点: ${onlineMachines.map((m) => `${escapeHtml(m.hostname)} (${m.runtimes?.map((r) => r.id).join(', ') || '通用'})`).join('; ')}`
-          : '云端部署时，在个人电脑运行 Multica 守护进程或直连命令即可就绪 ducc、ducx 等 Agent');
+    const bannerTitle = '个人电脑计算节点 (Mesh Runner)';
+    const badgeText = isConnected ? `● ${onlineMachines.length} 台在线` : '未连接';
+    const badgeClass = isConnected ? 'configured' : 'unconfigured';
+    const bannerDesc = isConnected
+      ? `已连接: ${onlineMachines.map((m) => `${escapeHtml(m.hostname)} (已就绪: ${m.runtimes?.map((r) => r.id).join(', ') || 'ducc, ducx'})`).join('; ')}`
+      : '在个人电脑终端运行单行命令，即可直接在云端调用您本机的 ducc、ducx 等 Agent';
 
     const runnerBannerHtml = `
       <div style="display: flex; justify-content: space-between; align-items: center; background: var(--om-surface-2); border: 1px solid var(--om-border); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px;">
         <div style="display: flex; align-items: center; gap: 10px;">
-          <span style="font-size: 20px;">${isMulticaActive ? '🟢' : '⚡'}</span>
+          <span style="font-size: 20px;">${isConnected ? '🟢' : '⚡'}</span>
           <div>
             <div style="font-size: 13px; font-weight: 650; color: var(--om-fg); display: flex; align-items: center; gap: 6px;">
               <span>${bannerTitle}</span>
@@ -2550,7 +2505,7 @@ async function openModelSettingsModal() {
           </div>
         </div>
         <button type="button" class="btn-secondary" id="btn-add-machine-mesh" style="font-size: 11.5px; padding: 4px 12px; cursor: pointer; white-space: nowrap;">
-          ${isMulticaActive ? '⚙️ 管理 Multica / 机器接入' : '➕ 接入个人电脑'}
+          ${isConnected ? '⚙️ 管理计算节点' : '➕ 接入个人电脑'}
         </button>
       </div>
     `;
