@@ -1,30 +1,13 @@
 import { Icons } from './icons.js';
 
-// 全局 Fetch 拦截器：统一附加 withCredentials (credentials: 'include') 与 x-original-url 请求头，并处理 401 UUAP 跳转
+// 全局 Fetch 拦截器：统一附加 withCredentials (credentials: 'include')
 const originalFetch = window.fetch;
 window.fetch = async function(resource, init = {}) {
   const options = { ...init };
   if (!options.credentials) {
     options.credentials = 'include';
   }
-  const headers = new Headers(options.headers || {});
-  if (!headers.has('x-original-url')) {
-    headers.set('x-original-url', window.location.href);
-  }
-  options.headers = headers;
-
-  const res = await originalFetch(resource, options);
-
-  // 如果遇到 401 且包含 UUAP 重定向头，自动跳转到企业统一登录认证
-  if (res.status === 401) {
-    const uuapLocation = res.headers.get('Uuap-Location') || res.headers.get('location');
-    if (uuapLocation) {
-      window.location.href = uuapLocation;
-      return res;
-    }
-  }
-
-  return res;
+  return originalFetch(resource, options);
 };
 
 // ============================================================================
@@ -893,6 +876,12 @@ function appendMessageBubble(role, content) {
 
 // 发送用户指令并开启 SSE 流式接收
 async function sendMessage() {
+  if (!state.currentUser) {
+    showToast('请先登录或注册账号后再发送指令', 'info');
+    openAuthModal('login');
+    return;
+  }
+
   const text = dom.composerInput.value.trim();
   if (!text || state.isStreaming) return;
 
@@ -2306,34 +2295,18 @@ function updateUserUI(user) {
     dom.topUserName.textContent = name;
     dom.topUserName.title = `${name} (${user.username})`;
     dom.topUserAvatar.textContent = name.slice(0, 1).toUpperCase();
-    if (user.isDev) {
-      dom.topUserAvatar.style.backgroundColor = 'var(--om-success, #10b981)';
-    }
+    dom.topUserAvatar.style.backgroundColor = 'var(--om-accent)';
   } else {
-    dom.topUserName.textContent = '未登录';
+    dom.topUserName.textContent = '登录 / 注册';
+    dom.topUserName.title = '点击登录或注册账号';
     dom.topUserAvatar.textContent = '👤';
+    dom.topUserAvatar.style.backgroundColor = 'var(--om-muted)';
   }
 }
 
 async function getLoginUser() {
   try {
-    const res = await fetch(`/api/v1/loginUser?originalUrl=${encodeURIComponent(window.location.href)}`);
-    if (res.status === 401) {
-      const uuapLoc = res.headers.get('Uuap-Location') || res.headers.get('location');
-      if (uuapLoc) {
-        window.location.href = uuapLoc;
-        return null;
-      }
-      try {
-        const data = await res.json();
-        if (data && (data.location || data.uuapLocation)) {
-          window.location.href = data.location || data.uuapLocation;
-          return null;
-        }
-      } catch {
-        // 忽略解析异常
-      }
-    }
+    const res = await fetch('/api/auth/me');
     if (res.ok) {
       const json = await res.json();
       const user = json.data || json.user || json;
@@ -2342,45 +2315,188 @@ async function getLoginUser() {
       return user;
     }
   } catch (err) {
-    console.warn('[Auth] 获取员工登录身份异常:', err);
+    console.warn('[Auth] 获取登录身份异常:', err);
   }
+  state.currentUser = null;
+  updateUserUI(null);
   return null;
 }
 
+function openAuthModal(defaultTab = 'login') {
+  let activeTab = defaultTab;
+
+  function renderForm() {
+    const isLogin = activeTab === 'login';
+    const bodyHtml = `
+      <div style="margin-bottom: 20px;">
+        <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--om-border); padding-bottom: 10px; margin-bottom: 18px;">
+          <button type="button" id="tab-auth-login" style="padding: 7px 18px; border-radius: 20px; font-weight: 600; font-size: 13.5px; cursor: pointer; border: none; background: ${isLogin ? 'var(--om-accent)' : 'transparent'}; color: ${isLogin ? '#fff' : 'var(--om-muted)'}; transition: all 0.15s ease;">
+            账号登录
+          </button>
+          <button type="button" id="tab-auth-register" style="padding: 7px 18px; border-radius: 20px; font-weight: 600; font-size: 13.5px; cursor: pointer; border: none; background: ${!isLogin ? 'var(--om-accent)' : 'transparent'}; color: ${!isLogin ? '#fff' : 'var(--om-muted)'}; transition: all 0.15s ease;">
+            注册新账号
+          </button>
+        </div>
+
+        ${isLogin ? `
+          <form id="form-auth-login" style="display: flex; flex-direction: column; gap: 14px;">
+            <div>
+              <label style="display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--om-fg);">账号 / 用户名</label>
+              <input type="text" id="auth-username" required autocomplete="username" placeholder="请输入注册账号" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background: var(--om-surface-2); color: var(--om-fg); font-size: 13.5px;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--om-fg);">密码</label>
+              <input type="password" id="auth-password" required autocomplete="current-password" placeholder="请输入密码" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background: var(--om-surface-2); color: var(--om-fg); font-size: 13.5px;" />
+            </div>
+            <div id="auth-error-msg" style="display: none; font-size: 12.5px; color: var(--accent-red, #ef4444); padding: 2px 0;"></div>
+            <button type="submit" class="btn-primary" style="margin-top: 8px; padding: 11px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer;">
+              立即登录
+            </button>
+          </form>
+        ` : `
+          <form id="form-auth-register" style="display: flex; flex-direction: column; gap: 14px;">
+            <div>
+              <label style="display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--om-fg);">账号 / 用户名</label>
+              <input type="text" id="reg-username" required autocomplete="username" placeholder="2-32位字符（字母、数字或中文）" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background: var(--om-surface-2); color: var(--om-fg); font-size: 13.5px;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--om-fg);">显示昵称 (选填)</label>
+              <input type="text" id="reg-displayname" autocomplete="name" placeholder="例如：开发助手小李" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background: var(--om-surface-2); color: var(--om-fg); font-size: 13.5px;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--om-fg);">设置密码</label>
+              <input type="password" id="reg-password" required autocomplete="new-password" placeholder="至少 6 位密码" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background: var(--om-surface-2); color: var(--om-fg); font-size: 13.5px;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 13px; font-weight: 550; margin-bottom: 6px; color: var(--om-fg);">确认密码</label>
+              <input type="password" id="reg-confirm" required autocomplete="new-password" placeholder="再次输入密码" style="width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background: var(--om-surface-2); color: var(--om-fg); font-size: 13.5px;" />
+            </div>
+            <div id="reg-error-msg" style="display: none; font-size: 12.5px; color: var(--accent-red, #ef4444); padding: 2px 0;"></div>
+            <button type="submit" class="btn-primary" style="margin-top: 8px; padding: 11px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer;">
+              立即注册并登录
+            </button>
+          </form>
+        `}
+      </div>
+    `;
+
+    openModal(isLogin ? '登录 MuseClaw 工作台' : '注册 MuseClaw 新账号', bodyHtml);
+
+    const btnTabLogin = document.getElementById('tab-auth-login');
+    const btnTabReg = document.getElementById('tab-auth-register');
+    if (btnTabLogin && btnTabReg) {
+      btnTabLogin.onclick = () => { activeTab = 'login'; renderForm(); };
+      btnTabReg.onclick = () => { activeTab = 'register'; renderForm(); };
+    }
+
+    if (isLogin) {
+      const loginForm = document.getElementById('form-auth-login');
+      if (loginForm) {
+        loginForm.onsubmit = async (e) => {
+          e.preventDefault();
+          const username = document.getElementById('auth-username')?.value.trim();
+          const password = document.getElementById('auth-password')?.value;
+          const errBox = document.getElementById('auth-error-msg');
+          try {
+            const res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              throw new Error(data.error || '登录失败');
+            }
+            state.currentUser = data.user || data.data;
+            updateUserUI(state.currentUser);
+            closeModal();
+            showToast(`欢迎回来，${state.currentUser.displayName || state.currentUser.username}！`, 'success');
+            loadBots();
+            loadSessions();
+          } catch (err) {
+            if (errBox) {
+              errBox.textContent = err.message;
+              errBox.style.display = 'block';
+            }
+          }
+        };
+      }
+    } else {
+      const regForm = document.getElementById('form-auth-register');
+      if (regForm) {
+        regForm.onsubmit = async (e) => {
+          e.preventDefault();
+          const username = document.getElementById('reg-username')?.value.trim();
+          const displayName = document.getElementById('reg-displayname')?.value.trim();
+          const password = document.getElementById('reg-password')?.value;
+          const confirm = document.getElementById('reg-confirm')?.value;
+          const errBox = document.getElementById('reg-error-msg');
+
+          if (password !== confirm) {
+            if (errBox) {
+              errBox.textContent = '两次输入的密码不一致';
+              errBox.style.display = 'block';
+            }
+            return;
+          }
+
+          try {
+            const res = await fetch('/api/auth/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username, password, displayName })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              throw new Error(data.error || '注册失败');
+            }
+            state.currentUser = data.user || data.data;
+            updateUserUI(state.currentUser);
+            closeModal();
+            showToast('注册成功，已为你自动登录！', 'success');
+            loadBots();
+            loadSessions();
+          } catch (err) {
+            if (errBox) {
+              errBox.textContent = err.message;
+              errBox.style.display = 'block';
+            }
+          }
+        };
+      }
+    }
+  }
+
+  renderForm();
+}
+
 function openUserProfileModal() {
-  const user = state.currentUser || { username: '未登录', displayName: '访客' };
-  const isDev = Boolean(user.isDev);
+  const user = state.currentUser;
+  if (!user) {
+    openAuthModal('login');
+    return;
+  }
 
   const bodyHtml = `
     <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--om-border);">
-      <div style="width: 52px; height: 52px; border-radius: 50%; background: ${isDev ? 'var(--om-success, #10b981)' : 'var(--om-accent)'}; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 650; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+      <div style="width: 52px; height: 52px; border-radius: 50%; background: var(--om-accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 650; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
         ${escapeHtml((user.displayName || user.username || 'U').slice(0, 1).toUpperCase())}
       </div>
       <div>
         <div style="font-size: 16px; font-weight: 650; color: var(--om-fg); display: flex; align-items: center; gap: 8px;">
           <span>${escapeHtml(user.displayName || user.username)}</span>
-          ${isDev ? '<span class="pill-badge pill-green" style="font-size: 11px;">开发免密</span>' : '<span class="pill-badge pill-blue" style="font-size: 11px;">企业 UUAP</span>'}
+          <span class="pill-badge pill-blue" style="font-size: 11px;">账号已就绪</span>
         </div>
         <div style="font-size: 13px; color: var(--om-muted); margin-top: 3px;">
-          员工账号: <code style="color: var(--om-fg);">${escapeHtml(user.username)}</code>
+          用户名: <code style="color: var(--om-fg);">${escapeHtml(user.username)}</code>
         </div>
       </div>
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; margin-bottom: 24px;">
-      ${user.email ? `
-        <div style="display: flex; justify-content: space-between;">
-          <span style="color: var(--om-muted);">企业邮箱</span>
-          <span style="color: var(--om-fg); font-family: var(--font-mono);">${escapeHtml(user.email)}</span>
-        </div>` : ''}
-      ${user.department ? `
-        <div style="display: flex; justify-content: space-between;">
-          <span style="color: var(--om-muted);">所属部门</span>
-          <span style="color: var(--om-fg);">${escapeHtml(user.department)}</span>
-        </div>` : ''}
       <div style="display: flex; justify-content: space-between;">
-        <span style="color: var(--om-muted);">个人数据隔离</span>
-        <span style="color: var(--om-success, #10b981); font-weight: 550;">● 独立存储就绪</span>
+        <span style="color: var(--om-muted);">数据沙箱隔离</span>
+        <span style="color: var(--om-success, #10b981); font-weight: 550;">● 独立数据存储就绪</span>
       </div>
       <div style="display: flex; justify-content: space-between;">
         <span style="color: var(--om-muted);">伴侣接入 Token</span>
@@ -2391,22 +2507,23 @@ function openUserProfileModal() {
     <div style="display: flex; justify-content: flex-end; gap: 10px;">
       <button type="button" class="btn-secondary" onclick="closeModal();">关闭</button>
       <button type="button" class="btn-danger" id="btn-modal-logout" style="padding: 7px 14px; border-radius: 8px; font-size: 12.5px; cursor: pointer;">
-        退出当前登录
+        退出登录
       </button>
     </div>
   `;
 
-  openModal('员工个人中心与身份信息', bodyHtml);
+  openModal('个人中心与账号设置', bodyHtml);
 
   const btnLogout = document.getElementById('btn-modal-logout');
   if (btnLogout) {
     btnLogout.onclick = async () => {
       try {
-        await fetch('/api/v1/logout', { method: 'POST' });
+        await fetch('/api/auth/logout', { method: 'POST' });
+        state.currentUser = null;
+        updateUserUI(null);
+        closeModal();
         showToast('已安全退出登录', 'info');
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
+        openAuthModal('login');
       } catch (err) {
         showToast(`退出异常: ${err.message}`, 'error');
       }
@@ -3059,7 +3176,13 @@ function initEventHandlers() {
     dom.btnTopModelBadge.onclick = openModelSettingsModal;
   }
   if (dom.btnTopUserProfile) {
-    dom.btnTopUserProfile.onclick = openUserProfileModal;
+    dom.btnTopUserProfile.onclick = () => {
+      if (state.currentUser) {
+        openUserProfileModal();
+      } else {
+        openAuthModal('login');
+      }
+    };
   }
 
   dom.btnNewSession.onclick = createNewSession;
@@ -3178,6 +3301,9 @@ initEventHandlers();
 getLoginUser().finally(() => {
   loadBots();
   loadModelsConfig();
+  if (!state.currentUser) {
+    openAuthModal('login');
+  }
 });
 const initialTab = getTabFromLocation();
 switchTab(initialTab, true);

@@ -14,15 +14,7 @@ import { ProactiveManager } from '../proactive/index.ts';
 import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager } from '../bots/index.ts';
 import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
-import {
-  getUuapConfig,
-  getCurrentUser,
-  handleAuthFailure,
-  decryptTicketToSToken,
-  validateUuapSession,
-  buildUuapLoginUrl,
-  parseCookies
-} from '../auth/uuap.ts';
+import { authService, parseCookies, type AuthUser } from '../auth/auth-service.ts';
 import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -269,7 +261,6 @@ const goalEngine = new GoalEngine({
  */
 export function startGatewayServer(defaultPort = 8799) {
   const port = Number(process.env.PORT) || defaultPort;
-  const uuapConfig = getUuapConfig();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
@@ -281,13 +272,14 @@ export function startGatewayServer(defaultPort = 8799) {
     const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
     if (handledByFeishu) return;
 
-    // A3. 解析当前请求的用户登录身份 (支持 UUAP SSO Cookie、零信任网关 JWT、本地回环开发免密)
-    const currentUser = await getCurrentUser(req, uuapConfig, url.searchParams.get('ticket') || undefined);
+    // A3. 解析当前请求的用户登录身份 (支持 Cookie 与 Authorization Bearer Token)
+    const currentUser = authService.getCurrentUser(req);
 
-    // A4. 企业统一身份认证 (UUAP SSO) 相关接口
-    if (req.method === 'GET' && (url.pathname === '/api/v1/loginUser' || url.pathname === '/api/auth/me')) {
+    // A4. 账号认证相关接口 (注册 / 登录 / 退出 / 获取当前登录信息)
+    if (req.method === 'GET' && (url.pathname === '/api/auth/me' || url.pathname === '/api/v1/loginUser')) {
       if (!currentUser) {
-        return handleAuthFailure(req, res, uuapConfig, url.searchParams.get('originalUrl') || undefined);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, code: 401, error: 'Unauthorized' }));
       }
       res.writeHead(200, {
         'Content-Type': 'application/json',
@@ -301,68 +293,75 @@ export function startGatewayServer(defaultPort = 8799) {
       }));
     }
 
-    if (req.method === 'GET' && (url.pathname === '/api/v1/callbackUrl' || url.pathname === '/api/auth/callback')) {
-      const ticket = url.searchParams.get('ticket');
-      const originalUrl = url.searchParams.get('originalUrl') || '/chat';
-      const cookies = parseCookies(req.headers.cookie);
-      const pToken = cookies['SECURE_UUAP_P_TOKEN'] || cookies['SECURE_UUAP_P_TOKEN_OFFLINE'];
-
-      let sToken: string | null = null;
-      if (ticket) {
-        sToken = await decryptTicketToSToken(uuapConfig.serverUrl, uuapConfig.appKey, ticket);
-      }
-
-      if (sToken) {
-        if (pToken) {
-          await validateUuapSession(uuapConfig, pToken, sToken);
-        }
-
-        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https') ||
-                        Boolean(req.headers.host?.includes('baidu-int.com'));
-        const sTokenCookieName = uuapConfig.env === 'develop' ? 'UUAP_S_TOKEN' : 'SECURE_UUAP_S_TOKEN';
-        const cookieVal = `${sTokenCookieName}=${encodeURIComponent(sToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 3600}${isHttps ? '; Secure' : ''}`;
-
-        res.writeHead(302, {
-          Location: originalUrl,
-          'Set-Cookie': cookieVal,
-          'Cache-Control': 'no-cache'
+    if (req.method === 'POST' && url.pathname === '/api/auth/register') {
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const data = JSON.parse(body || '{}');
+        const result = authService.register(data.username, data.password, data.displayName);
+        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https');
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Set-Cookie': authService.createSessionCookie(result.token, isHttps)
         });
-        return res.end();
+        return res.end(JSON.stringify({
+          ok: true,
+          code: 200,
+          data: result.user,
+          user: result.user,
+          token: result.token
+        }));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, code: 400, error: err.message || '注册失败' }));
       }
-
-      return handleAuthFailure(req, res, uuapConfig, originalUrl);
     }
 
-    if (req.method === 'GET' && (url.pathname === '/login' || url.pathname === '/api/v1/login')) {
-      const loginUrl = buildUuapLoginUrl(req, uuapConfig, url.searchParams.get('originalUrl') || undefined);
-      res.writeHead(302, { Location: loginUrl, 'Cache-Control': 'no-cache' });
-      return res.end();
+    if (req.method === 'POST' && (url.pathname === '/api/auth/login' || url.pathname === '/api/v1/login')) {
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const data = JSON.parse(body || '{}');
+        const result = authService.login(data.username, data.password);
+        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https');
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Set-Cookie': authService.createSessionCookie(result.token, isHttps)
+        });
+        return res.end(JSON.stringify({
+          ok: true,
+          code: 200,
+          data: result.user,
+          user: result.user,
+          token: result.token
+        }));
+      } catch (err: any) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, code: 401, error: err.message || '用户名或密码错误' }));
+      }
     }
 
-    if ((req.method === 'POST' || req.method === 'GET') && (url.pathname === '/api/v1/logout' || url.pathname === '/api/auth/logout')) {
-      const clearCookies = [
-        'SECURE_UUAP_S_TOKEN=; Path=/; HttpOnly; Max-Age=0',
-        'UUAP_S_TOKEN=; Path=/; HttpOnly; Max-Age=0',
-        'SECURE_UUAP_P_TOKEN=; Path=/; HttpOnly; Max-Age=0',
-        'SECURE_UUAP_P_TOKEN_OFFLINE=; Path=/; HttpOnly; Max-Age=0'
-      ];
+    if ((req.method === 'POST' || req.method === 'GET') && (url.pathname === '/api/auth/logout' || url.pathname === '/api/v1/logout')) {
+      const cookies = parseCookies(req.headers.cookie);
+      if (cookies['museclaw_session']) {
+        authService.logout(cookies['museclaw_session']);
+      }
       res.writeHead(200, {
         'Content-Type': 'application/json',
-        'Set-Cookie': clearCookies
+        'Set-Cookie': authService.createClearCookie()
       });
       return res.end(JSON.stringify({ ok: true, message: 'Logged out successfully' }));
     }
 
-    // A5. 企业 SSO 模式下的未登录请求拦截与引导
+    // A5. 未登录请求拦截保护
     const isPublicPath = [
-      '/api/v1/loginUser',
-      '/api/auth/me',
-      '/api/v1/callbackUrl',
-      '/api/auth/callback',
-      '/api/v1/login',
-      '/login',
-      '/api/v1/logout',
+      '/api/auth/register',
+      '/api/auth/login',
       '/api/auth/logout',
+      '/api/auth/me',
+      '/api/v1/loginUser',
+      '/api/v1/login',
+      '/api/v1/logout',
       '/api/multica/status',
       '/api/runner/register',
       '/api/runner/poll',
@@ -372,8 +371,9 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname.startsWith('/api/infoflow') ||
     url.pathname.startsWith('/api/feishu');
 
-    if (uuapConfig.enableSso && !currentUser && url.pathname.startsWith('/api/') && !isPublicPath) {
-      return handleAuthFailure(req, res, uuapConfig);
+    if (!currentUser && url.pathname.startsWith('/api/') && !isPublicPath) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
     }
 
     // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 apps/web，回退兼容 data/web 或旧版 ui.html)
