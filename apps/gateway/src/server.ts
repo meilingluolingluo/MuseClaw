@@ -94,12 +94,8 @@ const botRegistry = new BotRegistry();
 const sessionStore = new SessionStore();
 const sessionRouter = new SessionRouter(botRegistry, sessionStore);
 const botMemory = new BotMemoryManager();
-botMemory.ensureDefaultMemory(
-  'muse',
-  '# Muse 核心记忆与准则\n- 企业自动化总协调助手。\n- 优先调用工具解决问题，回答清晰精炼。'
-);
 
-function getOrCreateSession(sessionId?: string, botId?: string, userId?: string): Session {
+function getOrCreateSession(sessionId?: string, botId?: string, userId = 'system'): Session {
   const id = sessionId || `sess_${Date.now()}`;
   let session = sessionStore.get(id, userId);
   if (!session) {
