@@ -269,7 +269,12 @@ class MuseClawRunnerClient {
 
     let args: string[] = [];
     if (task.agentId === 'ducc') {
-      const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+      const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
+                     process.env.USER === 'root' ||
+                     process.env.LOGNAME === 'root' ||
+                     Boolean(process.env.SUDO_USER) ||
+                     Boolean(process.env.SUDO_UID) ||
+                     process.env.UID === '0';
       args = isRoot ? ['-p'] : ['-p', '--dangerously-skip-permissions'];
       if (task.model) args.push('--model', task.model);
     } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
@@ -283,7 +288,12 @@ class MuseClawRunnerClient {
       args = [task.prompt];
     }
 
-    const env = { ...process.env, PATH: getAugmentedPath() };
+    const env = {
+      ...process.env,
+      PATH: getAugmentedPath(),
+      IS_SANDBOX: '1',
+      CLAUDE_ALLOW_ROOT: '1'
+    };
     const child = spawn(exe, args, { env, timeout: task.timeoutMs || 90000 });
 
     let stdout = '';

@@ -130,7 +130,12 @@ export async function runLocalAgent(
       args.push('--model', targetModel);
     }
   } else if (agentId === 'ducc') {
-    const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+    const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
+                   process.env.USER === 'root' ||
+                   process.env.LOGNAME === 'root' ||
+                   Boolean(process.env.SUDO_USER) ||
+                   Boolean(process.env.SUDO_UID) ||
+                   process.env.UID === '0';
     args = isRoot ? ['-p'] : ['-p', '--dangerously-skip-permissions'];
     let targetModel = options.model;
     if (!targetModel) {
@@ -162,6 +167,8 @@ export async function runLocalAgent(
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: getAugmentedPath(),
+    IS_SANDBOX: '1',
+    CLAUDE_ALLOW_ROOT: '1',
     ...(options.apiKey ? { DEEPSEEK_API_KEY: options.apiKey } : {})
   };
 
