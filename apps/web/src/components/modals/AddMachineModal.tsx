@@ -11,9 +11,9 @@ export const AddMachineModal: React.FC = () => {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8799';
   const token = user?.username || 'user_default';
 
-  const installCmd = `# 1. 配置内网直连代理 (防止内网 IP 被全局代理拦截)
-export no_proxy=".bcebos.com,.duckdns.org,.ai-chat.host,.baidu-int.com,10.0.0.0/8,localhost,127.0.0.1\${no_proxy:+,\$no_proxy}"
-export NO_PROXY="$no_proxy"
+  const installCmd = `# 1. 配置内网直连代理 (避免被全局代理拦截)
+export NO_PROXY="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,localhost,127.0.0.1,*.baidu-int.com"
+export no_proxy="$NO_PROXY"
 
 # 2. 一键启动 MuseClaw 本地计算节点伴侣 (自动识别本机 ducc、ducx)
 curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | bash`;
@@ -22,7 +22,9 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
     if (!isAddMachineModalOpen) return;
     const timer = setInterval(async () => {
       try {
-        const res = await fetch(`/api/runner/machines?userId=${encodeURIComponent(token)}`);
+        const res = await fetch(`/api/runner/machines?userId=${encodeURIComponent(token)}`, {
+          credentials: 'include'
+        });
         if (res.ok) {
           const data = await res.json();
           const online = data.machines?.filter((m: any) => m.status === 'online') || [];

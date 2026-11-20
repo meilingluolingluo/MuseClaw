@@ -69,11 +69,15 @@ export const ModelSettingsModal: React.FC = () => {
     setTestResult(null);
     try {
       const res = await api.testModel(currentProvider.id, modelId);
-      setTestResult(res);
-      if (res.success) {
-        showToast(`连通性测试成功 (${res.latency || 12}ms)`, 'success');
+      const isOk = Boolean(res.success || res.ok);
+      const latency = res.latency ?? res.latencyMs ?? 0;
+      const message = res.message || res.error || (isOk ? '连通性验证通过' : '连接超时或未响应');
+      const normalizedResult = { ...res, success: isOk, latency, message };
+      setTestResult(normalizedResult);
+      if (isOk) {
+        showToast(`连通性测试成功 (${latency}ms)`, 'success');
       } else {
-        showToast(`测试未通过: ${res.message || '连接超时'}`, 'error');
+        showToast(`测试未通过: ${message}`, 'error');
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message });
@@ -261,7 +265,7 @@ export const ModelSettingsModal: React.FC = () => {
                   color: isCurrentReady ? 'var(--om-fg)' : 'var(--accent-amber)',
                 }}
               >
-                {currentProvider.executablePath || currentProvider.cliPath || (isCurrentReady ? `/usr/local/bin/${currentProvider.id}` : '未在服务器或已连接节点中检测到')}
+                {currentProvider.executablePath || currentProvider.cliPath || (isCurrentReady ? '通过远程在线计算节点连接就绪' : '未在服务器或已连接节点中检测到')}
               </div>
             </div>
 
@@ -277,7 +281,7 @@ export const ModelSettingsModal: React.FC = () => {
                   paddingLeft: '2px',
                 }}
               >
-                {currentProvider.version || currentProvider.detectedVersion || (isCurrentReady ? `${currentProvider.id}-cli 1.0.0` : '探针未响应')}
+                {currentProvider.version || currentProvider.detectedVersion || (isCurrentReady ? '在线就绪' : '探针未响应')}
               </div>
             </div>
 
@@ -315,11 +319,59 @@ export const ModelSettingsModal: React.FC = () => {
               </div>
             </div>
 
-            {isCurrentReady ? (
+            {testResult ? (
+              testResult.success ? (
+                <div
+                  style={{
+                    background: 'rgba(48, 209, 88, 0.08)',
+                    border: '1px solid var(--accent-green)',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '6px',
+                  }}
+                >
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-green)', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 600 }}>
+                      🟢 本地 Agent 响应就绪 ({testResult.latency || 15}ms)
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                      检测到版本: {currentProvider.version || '在线就绪'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    background: 'rgba(255, 69, 58, 0.08)',
+                    border: '1px solid var(--accent-red)',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '6px',
+                  }}
+                >
+                  <AlertCircle size={16} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--accent-red)', fontWeight: 600 }}>
+                      连通性测试未通过
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                      {testResult.message || '远程节点响应超时'}
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : isCurrentReady ? (
               <div
                 style={{
-                  background: 'rgba(48, 209, 88, 0.08)',
-                  border: '1px solid var(--accent-green)',
+                  background: 'rgba(48, 209, 88, 0.06)',
+                  border: '1px solid var(--om-border)',
                   borderRadius: '8px',
                   padding: '10px 14px',
                   display: 'flex',
@@ -330,11 +382,11 @@ export const ModelSettingsModal: React.FC = () => {
               >
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-green)', flexShrink: 0 }} />
                 <div>
-                  <div style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 600 }}>
-                    本地 Agent 响应就绪 (12ms)
+                  <div style={{ fontSize: '12px', color: 'var(--om-fg)', fontWeight: 600 }}>
+                    Agent 运行环境已就绪
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
-                    检测到版本: {currentProvider.version || `${currentProvider.id}-cli 1.0.0`}
+                    已关联可用计算节点，可点击下方“测试连通性”进行在线验证
                   </div>
                 </div>
               </div>

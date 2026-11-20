@@ -102,6 +102,7 @@ export async function testLocalAgent(
       const runResult = await globalRunnerMesh.dispatchTask(agentId, 'Hi', {
         model,
         userId,
+        targetMachineId: remoteRunner.id,
         timeoutMs: 15000
       });
       if (runResult.ok) {
@@ -179,7 +180,7 @@ export async function runLocalAgent(
   if (options.userId) {
     const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId, options.userId);
     if (remoteRunner) {
-      return globalRunnerMesh.dispatchTask(agentId, prompt, options);
+      return globalRunnerMesh.dispatchTask(agentId, prompt, { ...options, targetMachineId: remoteRunner.id });
     }
   }
 
@@ -188,7 +189,7 @@ export async function runLocalAgent(
   if (!exe) {
     const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId);
     if (remoteRunner) {
-      return globalRunnerMesh.dispatchTask(agentId, prompt, options);
+      return globalRunnerMesh.dispatchTask(agentId, prompt, { ...options, targetMachineId: remoteRunner.id });
     }
     const userHint = options.userId ? ` (所属用户: ${options.userId})` : '';
     return { ok: false, text: '', latencyMs: 0, error: `未在服务器或已连接的远程计算节点${userHint}中找到 ${agentId}。请在个人电脑上运行伴侣命令连接此网关。` };

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execSync, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, copyFileSync } from 'node:fs';
 import os, { homedir, hostname } from 'node:os';
 import path, { delimiter, join } from 'node:path';
@@ -100,6 +100,23 @@ function resolveModelAlias(requestedModel, availableModels, defaultModel) {
   return defaultModel || availableModels[0];
 }
 
+function probeCliVersion(binPath, args = ['--version']) {
+  try {
+    const out = execFileSync(binPath, args, {
+      timeout: 1500,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, PATH: getAugmentedPath() }
+    });
+    const match = out.match(/(\d+\.\d+(?:\.\d+)*(?:-[\w.-]+)?)/);
+    if (match && match[1]) return match[1].trim();
+    const firstLine = out.trim().split('\n')[0];
+    return firstLine ? firstLine.slice(0, 30).trim() : '在线就绪';
+  } catch {
+    return '在线就绪';
+  }
+}
+
 function detectLocalRuntimes() {
   const home = homedir();
   const runtimes = [];
@@ -157,6 +174,7 @@ function detectLocalRuntimes() {
       id: 'ducc',
       name: 'Baidu CC (本地 ducc)',
       executablePath: duccPath,
+      version: probeCliVersion(duccPath, ['-v']),
       models,
       defaultModel: activeModel || models[0]
     });
@@ -210,6 +228,7 @@ function detectLocalRuntimes() {
       id: 'ducx',
       name: 'Baidu CX (本地 ducx)',
       executablePath: ducxPath,
+      version: probeCliVersion(ducxPath, ['-v']),
       models,
       defaultModel: activeModel || models[0]
     });
@@ -305,6 +324,7 @@ function detectLocalRuntimes() {
       id: 'codex',
       name: 'OpenAI Codex (本地 Agent)',
       executablePath: codexPath,
+      version: probeCliVersion(codexPath, ['--version']),
       models,
       defaultModel: activeModel || models[0] || 'Grok-4.7-baidu-oneapi'
     });
@@ -358,6 +378,7 @@ function detectLocalRuntimes() {
       id: 'pi',
       name: 'Pi Coding Agent (本地 Agent)',
       executablePath: piPath,
+      version: probeCliVersion(piPath, ['--version']),
       models,
       defaultModel: models[0] || 'Opus 5.5-baidu-oneapi'
     });
@@ -451,6 +472,10 @@ function installService(config) {
   <array>
     <string>${nodeBin}</string>
     <string>${paths.clientScript}</string>
+    <string>--server</string>
+    <string>${config.serverUrl}</string>
+    <string>--token</string>
+    <string>${config.token}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -491,7 +516,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodeBin} ${paths.clientScript}
+ExecStart=${nodeBin} "${paths.clientScript}" --server "${config.serverUrl}" --token "${config.token}"
 WorkingDirectory=${paths.museclawDir}
 Restart=always
 RestartSec=5

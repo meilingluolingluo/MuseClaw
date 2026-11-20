@@ -85,7 +85,7 @@ export const api = {
   saveModelsConfig: (data: { activeProviderId?: string; provider?: Partial<ModelProvider> & { id: string } }) =>
     request<{ success: boolean }>('/api/models/config', { method: 'POST', body: JSON.stringify(data) }),
   testModel: (providerId: string, modelId?: string) =>
-    request<{ success: boolean; latency?: number; message?: string }>('/api/models/test', {
+    request<{ success?: boolean; ok?: boolean; latency?: number; latencyMs?: number; message?: string; error?: string }>('/api/models/test', {
       method: 'POST',
       body: JSON.stringify({ providerId, id: providerId, model: modelId }),
     }),

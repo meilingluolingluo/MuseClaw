@@ -413,9 +413,13 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/multica/status',
       '/api/runner/register',
       '/api/runner/poll',
-      '/runner/client.js'
+      '/runner/client.js',
+      '/runner/install.sh'
     ].includes(url.pathname) ||
     url.pathname.startsWith('/api/bots') ||
+    url.pathname.startsWith('/api/models') ||
+    url.pathname.startsWith('/api/runner') ||
+    url.pathname.startsWith('/runner') ||
     url.pathname.startsWith('/api/sessions') ||
     url.pathname.startsWith('/api/routines') ||
     url.pathname.startsWith('/api/feed') ||
@@ -423,7 +427,6 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname.startsWith('/api/audit') ||
     url.pathname.startsWith('/api/hooks') ||
     url.pathname.startsWith('/api/skills') ||
-    url.pathname.startsWith('/api/runner/tasks/') ||
     url.pathname.startsWith('/api/infoflow') ||
     url.pathname.startsWith('/api/feishu');
 
@@ -970,8 +973,18 @@ export function startGatewayServer(defaultPort = 8799) {
         data.userId = currentUser.username;
       }
       const result = await globalModelStore.testProvider(data);
+      const isSuccess = Boolean(result.ok);
+      const responsePayload = {
+        ok: isSuccess,
+        success: isSuccess,
+        latencyMs: result.latencyMs,
+        latency: result.latencyMs,
+        model: result.model,
+        error: result.error,
+        message: result.error || (isSuccess ? '连通性测试通过' : '连接超时或未响应')
+      };
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(result));
+      return res.end(JSON.stringify(responsePayload));
     }
 
     if (req.method === 'GET' && url.pathname === '/api/models/ollama/probe') {
@@ -1027,6 +1040,10 @@ export function startGatewayServer(defaultPort = 8799) {
       if (!existing) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ needRegister: true }));
+      }
+      if (data.token && (!existing.userId || existing.userId === 'default-mesh-token')) {
+        existing.userId = data.token.trim();
+        existing.token = data.token.trim();
       }
       const task = await globalRunnerMesh.pollTask(machineId, 25000);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1112,6 +1129,10 @@ fi
 
     if (req.method === 'GET' && url.pathname === '/runner/client.js') {
       const candidates = [
+        path.resolve(__dirname, '../../apps/runner/client.js'),
+        path.resolve(__dirname, '../../apps/runner/dist/client.js'),
+        path.resolve(process.cwd(), 'apps/runner/client.js'),
+        path.resolve(process.cwd(), 'apps/runner/dist/client.js'),
         path.resolve(__dirname, '../../runner/client.js'),
         path.resolve(__dirname, '../../runner/dist/client.js'),
       ];

@@ -487,7 +487,7 @@ export class ModelProviderStore {
         const isInstalled = isLocal ? Boolean(localInfo?.installed || remote?.installed) : undefined;
         const hasKey = isLocal ? Boolean(isInstalled) : Boolean(resolved);
         const effectiveVersion = localInfo?.version || remote?.version || p.version;
-        const effectiveExecutable = localInfo?.executablePath || p.executablePath;
+        const effectiveExecutable = localInfo?.executablePath || remote?.executablePath || p.executablePath;
         const maskedKey = isLocal
           ? (isInstalled ? (effectiveVersion || (localInfo?.installed ? '本地就绪' : '远程就绪')) : '未检测到')
           : this.maskKey(resolved);

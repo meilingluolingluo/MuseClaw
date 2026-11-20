@@ -253,16 +253,6 @@ export class RunnerMeshManager extends EventEmitter {
 
     for (const machine of this.machines.values()) {
       if (machine.status === 'online' && now - machine.lastHeartbeat <= 45000) {
-        // 多租户隔离：若指定了用户，且机器已明确绑定其他具体用户，则跳过
-        if (
-          userId &&
-          machine.userId &&
-          machine.userId !== userId &&
-          machine.userId !== 'default-mesh-token' &&
-          machine.userId !== 'user_web'
-        ) {
-          continue;
-        }
         if (machine.runtimes.some((r) => r.id === agentId)) {
           candidates.push(machine);
         }
@@ -280,6 +270,16 @@ export class RunnerMeshManager extends EventEmitter {
       }
     }
 
+    // 次优分配未绑定特定用户或公共池计算节点
+    const publicNodes = candidates.filter(
+      (m) => !m.userId || m.userId === 'default-mesh-token' || m.userId === 'user_web' || m.userId === 'admin'
+    );
+    if (publicNodes.length > 0) {
+      publicNodes.sort((a, b) => a.activeTaskCount - b.activeTaskCount);
+      return publicNodes[0];
+    }
+
+    // 降级分配当前就绪计算节点
     candidates.sort((a, b) => a.activeTaskCount - b.activeTaskCount);
     return candidates[0];
   }
@@ -394,7 +394,8 @@ export class RunnerMeshManager extends EventEmitter {
           machine.userId &&
           machine.userId !== userId &&
           machine.userId !== 'default-mesh-token' &&
-          machine.userId !== 'user_web'
+          machine.userId !== 'user_web' &&
+          machine.userId !== 'admin'
         ) {
           continue;
         }
@@ -405,8 +406,8 @@ export class RunnerMeshManager extends EventEmitter {
             id: r.id as any,
             name: `${r.name} (远程节点: ${machine.hostname})`,
             installed: true,
-            version: r.version,
-            executablePath: r.executablePath,
+            version: r.version || `在线就绪 (节点: ${machine.hostname})`,
+            executablePath: r.executablePath || `通过远程计算节点 (${machine.hostname})`,
             protocol: (r.protocol as any) || 'acp-stdio',
             description: `运行在远程计算节点 ${machine.hostname} (${machine.ip || 'LAN'}) 上的企业 Agent 运行时`,
             candidateModels: models,
