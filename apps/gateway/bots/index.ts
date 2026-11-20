@@ -3,3 +3,4 @@ export * from './session-store.ts';
 export * from './router.ts';
 export * from './memory.ts';
 export * from './consolidate.ts';
+export * from './feed-store.ts';

@@ -11,7 +11,7 @@ import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
 import { ProactiveManager } from '../proactive/index.ts';
-import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager } from '../bots/index.ts';
+import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager, FeedStore } from '../bots/index.ts';
 import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
 import { authService, parseCookies, type AuthUser } from '../auth/auth-service.ts';
@@ -86,6 +86,7 @@ const botRegistry = new BotRegistry();
 const sessionStore = new SessionStore();
 const sessionRouter = new SessionRouter(botRegistry, sessionStore);
 const botMemory = new BotMemoryManager();
+const feedStore = new FeedStore();
 
 function getOrCreateSession(sessionId?: string, botId?: string, userId = 'system'): Session {
   const id = sessionId || `sess_${Date.now()}`;
@@ -214,6 +215,11 @@ const proactive = new ProactiveManager({
   botMemory,
   onApprovalNeeded: async (request, routine) => {
     console.log(`⚠️ [Proactive] 例行任务触发审批需求: ${routine.name} (${request.approvalId})`);
+    feedStore.recordActivity('user_web', {
+      kind: 'approval',
+      title: `待审批: ${routine.name}`,
+      text: request.reason || '例行任务触发敏感操作，等待授权审批'
+    });
     // 若配置了飞书通知目标，自动推送原生审批卡片
     const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
     if (alertTarget) {
@@ -226,6 +232,13 @@ const proactive = new ProactiveManager({
     session.title = `[主动巡检] ${run.routineName}`;
     session.messages.push({ role: 'user', content: `[触发源: ${run.triggerSource}] 执行例行任务: ${run.routineName}` });
     session.messages.push({ role: 'assistant', content: output });
+
+    feedStore.recordActivity('user_web', {
+      kind: 'routine',
+      title: `例行巡检: ${run.routineName}`,
+      text: run.quiet ? '未发现新异常 (NOTHING NEW)' : output.slice(0, 300),
+      quiet: run.quiet
+    });
 
     // 静默抑制 (Quiet When Green)：正常无异常时静默沉淀历史，不向飞书/如流骚扰推送
     if (run.quiet) {
@@ -253,6 +266,11 @@ const goalEngine = new GoalEngine({
   botMemory,
   onGoalCheckInCompleted: async (result, goal) => {
     console.log(`[Goals:CheckIn] 目标 "${goal.title}" 阶段推进完成: 步骤 [${result.stepTitle || result.stepId}] -> ${result.status}`);
+    feedStore.recordActivity('user_web', {
+      kind: 'goal',
+      title: `自驱目标推进: ${goal.title}`,
+      text: `步骤 [${result.stepTitle || result.stepId}] 状态: ${result.status}`
+    });
   }
 });
 
@@ -1079,6 +1097,85 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
       return res.end(JSON.stringify({ success: deleted }));
     }
 
+    // 智能体动态列表 (GET /api/feed/posts)
+    if (req.method === 'GET' && url.pathname === '/api/feed/posts') {
+      const userId = currentUser?.username || 'user_web';
+      const data = feedStore.getFeedPosts(userId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(data));
+    }
+
+    // 更新动态定制指令与定时策略 (PUT /api/feed/instructions)
+    if (req.method === 'PUT' && url.pathname === '/api/feed/instructions') {
+      const userId = currentUser?.username || 'user_web';
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      const data = feedStore.setFeedInstructions(userId, parsed);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(data));
+    }
+
+    // 立即撰写并生成动态 (POST /api/feed/posts/refresh)
+    if (req.method === 'POST' && url.pathname === '/api/feed/posts/refresh') {
+      const userId = currentUser?.username || 'user_web';
+      const caller = globalModelStore.getActiveCaller({ userId });
+
+      const contextLines: string[] = [];
+      contextLines.push(`- 当前用户名: ${currentUser?.displayName || currentUser?.username || '员工'}`);
+
+      const memory = botMemory.getMemory('muse', userId);
+      if (memory) {
+        const memoryLines = memory
+          .split('\n')
+          .filter((l) => l.trim().startsWith('-') || l.trim().startsWith('*'))
+          .slice(0, 15);
+        if (memoryLines.length > 0) {
+          contextLines.push(`- 用户记忆与准则偏好:\n${memoryLines.join('\n')}`);
+        }
+      }
+
+      const activeGoals = goalStore.list('active');
+      if (activeGoals.length > 0) {
+        contextLines.push('- 当前活跃的长周期自驱目标:');
+        for (const g of activeGoals.slice(0, 5)) {
+          const currentStep = g.steps.find((s) => s.status === 'in_progress') || g.steps.find((s) => s.status === 'pending');
+          contextLines.push(`  * 目标: ${g.title} (进度: ${g.progress}%${currentStep ? `, 下一步: ${currentStep.title}` : ''})`);
+        }
+      }
+
+      const recentSessions = sessionStore.list('muse', userId).slice(0, 4);
+      if (recentSessions.length > 0) {
+        contextLines.push('- 近期工作焦点:');
+        for (const s of recentSessions) {
+          if (s.title) contextLines.push(`  * 会话: ${s.title}`);
+        }
+      }
+
+      contextLines.push(`- 当前系统时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
+
+      const result = await feedStore.writeFeedPosts(userId, caller, contextLines, 3);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    // 删除单条动态 (DELETE /api/feed/posts/:id)
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/feed\/posts\/[^/]+$/)) {
+      const userId = currentUser?.username || 'user_web';
+      const postId = url.pathname.split('/')[4];
+      const deleted = feedStore.deleteFeedPost(userId, postId);
+      res.writeHead(deleted ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: deleted }));
+    }
+
+    // 获取离线工作动态流水 (GET /api/feed/activity)
+    if (req.method === 'GET' && url.pathname === '/api/feed/activity') {
+      const userId = currentUser?.username || 'user_web';
+      const items = feedStore.getActivity(userId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(items));
+    }
+
     // E. Web 任务执行流式接口（多 Bot 路由、@Mention 支持与 /api/chat 双兼容）
     if (req.method === 'POST' && (url.pathname === '/api/tasks' || url.pathname === '/api/chat')) {
       let body = '';
@@ -1166,6 +1263,13 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
           session.messages.push({ role: 'assistant', content: fullAssistantText });
         }
         sessionStore.save(session, userId);
+        feedStore.recordActivity(userId, {
+          kind: 'chat',
+          title: session.title || '任务会话',
+          text: fullAssistantText.slice(0, 150),
+          sessionId: session.id,
+          sessionTitle: session.title
+        });
       } catch (err: any) {
         res.write(`data: ${JSON.stringify({
           type: 'stream:text-delta',

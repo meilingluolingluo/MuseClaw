@@ -44,24 +44,19 @@
           <span class="nav-label">对话</span>
         </button>
 
+        <button class="nav-item" data-tab="feed" title="智能体动态与工作简报">
+          <span class="nav-icon" id="icon-nav-feed"></span>
+          <span class="nav-label">动态</span>
+        </button>
+
         <button class="nav-item" data-tab="goals" title="长周期自驱目标">
           <span class="nav-icon" id="icon-nav-goals"></span>
           <span class="nav-label">目标</span>
         </button>
 
-        <button class="nav-item" data-tab="routines" title="例行主动巡检与 Webhook">
-          <span class="nav-icon" id="icon-nav-routines"></span>
-          <span class="nav-label">巡检</span>
-        </button>
-
         <button class="nav-item" data-tab="memory" title="受控长期记忆">
           <span class="nav-icon" id="icon-nav-memory"></span>
           <span class="nav-label">记忆</span>
-        </button>
-
-        <button class="nav-item" data-tab="skills" title="技能成本阶梯与微沙箱">
-          <span class="nav-icon" id="icon-nav-ladder"></span>
-          <span class="nav-label">阶梯</span>
         </button>
 
         <button class="nav-item" data-tab="audit" title="安全策略与合规审计">
@@ -222,6 +217,40 @@
                 <button class="btn-send" id="btn-send-message" title="发送指令 (Enter)" aria-label="发送">
                   <span id="icon-send"></span>
                 </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 视图: 📰 智能体动态 (Feed) -->
+        <section class="view-stage" id="view-feed" style="display: none;">
+          <div class="view-header">
+            <div>
+              <div class="view-heading"><span id="icon-feed-heading"></span> 智能体动态 (Feed)</div>
+              <div class="view-sub">基于您的工作习惯、长期记忆、近期对话与目标自动提炼的每日动态简报</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-secondary" id="btn-feed-settings" title="配置动态引导指令与自动撰写时间">
+                <span id="icon-feed-settings"></span> 偏好设置
+              </button>
+              <button class="btn-primary" id="btn-feed-write-now" title="立即触发智能体撰写新动态">
+                <span id="icon-feed-write"></span> 立即撰写
+              </button>
+            </div>
+          </div>
+
+          <div class="feed-layout">
+            <div class="feed-main-col">
+              <!-- 动态文章容器（Day Titles, IntroCard, PostCards, Empty State） -->
+              <div id="feed-posts-container"></div>
+
+              <!-- 离开时后台活动记录 (While you were away) -->
+              <div class="feed-activity-section" id="feed-activity-section" style="margin-top: 32px;">
+                <div class="feed-section-header">
+                  <span class="feed-section-title">在你离开时 (WHILE YOU WERE AWAY)</span>
+                  <button class="btn-secondary" id="btn-refresh-feed-activity" style="padding: 2px 8px; font-size: 11px;">刷新</button>
+                </div>
+                <div id="feed-activity-container" class="feed-activity-list" style="margin-top: 10px;"></div>
               </div>
             </div>
           </div>

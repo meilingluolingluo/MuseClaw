@@ -38,7 +38,15 @@ const state = {
   auditLogs: [],
   artifacts: [],
   modelsConfig: { activeProviderId: 'deepseek', providers: [] },
-  isStreaming: false
+  isStreaming: false,
+  feed: {
+    posts: [],
+    instructions: '',
+    daily: true,
+    time: '08:00',
+    writing: false,
+    activities: []
+  }
 };
 
 // ============================================================================
@@ -55,6 +63,7 @@ const dom = {
   topUserName: document.getElementById('top-user-name'),
   views: {
     chat: document.getElementById('view-chat'),
+    feed: document.getElementById('view-feed'),
     goals: document.getElementById('view-goals'),
     routines: document.getElementById('view-routines'),
     memory: document.getElementById('view-memory'),
@@ -91,6 +100,11 @@ const dom = {
   composerInput: document.getElementById('composer-input'),
   btnSendMessage: document.getElementById('btn-send-message'),
   promptPills: document.querySelectorAll('.prompt-pill'),
+  feedPostsContainer: document.getElementById('feed-posts-container'),
+  feedActivityContainer: document.getElementById('feed-activity-container'),
+  btnFeedSettings: document.getElementById('btn-feed-settings'),
+  btnFeedWriteNow: document.getElementById('btn-feed-write-now'),
+  btnRefreshFeedActivity: document.getElementById('btn-refresh-feed-activity'),
   goalsContainer: document.getElementById('goals-container'),
   btnCreateGoal: document.getElementById('btn-create-goal'),
   routinesListContainer: document.getElementById('routines-list-container'),
@@ -359,13 +373,29 @@ function initTheme() {
 // 图标注入初始化
 // ============================================================================
 function initIcons() {
-  document.getElementById('icon-nav-chat').innerHTML = Icons.chat(20);
-  document.getElementById('icon-nav-goals').innerHTML = Icons.goals(20);
-  document.getElementById('icon-nav-routines').innerHTML = Icons.routines(20);
-  document.getElementById('icon-nav-memory').innerHTML = Icons.memory(20);
-  document.getElementById('icon-nav-ladder').innerHTML = Icons.ladder(20);
-  document.getElementById('icon-nav-audit').innerHTML = Icons.audit(20);
-  document.getElementById('icon-nav-artifacts').innerHTML = Icons.artifacts(20);
+  const iconNavChat = document.getElementById('icon-nav-chat');
+  if (iconNavChat) iconNavChat.innerHTML = Icons.chat(20);
+  const iconNavFeed = document.getElementById('icon-nav-feed');
+  if (iconNavFeed) iconNavFeed.innerHTML = Icons.feed(20);
+  const iconNavGoals = document.getElementById('icon-nav-goals');
+  if (iconNavGoals) iconNavGoals.innerHTML = Icons.goals(20);
+  const iconNavRoutines = document.getElementById('icon-nav-routines');
+  if (iconNavRoutines) iconNavRoutines.innerHTML = Icons.routines(20);
+  const iconNavMemory = document.getElementById('icon-nav-memory');
+  if (iconNavMemory) iconNavMemory.innerHTML = Icons.memory(20);
+  const iconNavLadder = document.getElementById('icon-nav-ladder');
+  if (iconNavLadder) iconNavLadder.innerHTML = Icons.ladder(20);
+  const iconNavAudit = document.getElementById('icon-nav-audit');
+  if (iconNavAudit) iconNavAudit.innerHTML = Icons.audit(20);
+  const iconNavArtifacts = document.getElementById('icon-nav-artifacts');
+  if (iconNavArtifacts) iconNavArtifacts.innerHTML = Icons.artifacts(20);
+
+  const iconFeedHeading = document.getElementById('icon-feed-heading');
+  if (iconFeedHeading) iconFeedHeading.innerHTML = Icons.feed(22);
+  const iconFeedSettings = document.getElementById('icon-feed-settings');
+  if (iconFeedSettings) iconFeedSettings.innerHTML = Icons.sliders(14);
+  const iconFeedWrite = document.getElementById('icon-feed-write');
+  if (iconFeedWrite) iconFeedWrite.innerHTML = Icons.sparkles(14);
   const iconNavModel = document.getElementById('icon-nav-model');
   if (iconNavModel) {
     iconNavModel.innerHTML = Icons.cpu ? Icons.cpu(20) : Icons.settings(20);
@@ -492,6 +522,7 @@ function updateTopBarForTab(tabName) {
     if (dom.globalTopStatus) dom.globalTopStatus.style.display = 'flex';
 
     const config = {
+      feed: { icon: '📰', title: '智能体动态 (Feed)', tag: '工作动态与简报', statusText: '实时同步' },
       goals: { icon: '🎯', title: '长周期自驱目标治理', tag: '60s 自驱推进', statusText: '自驱引擎运行中' },
       routines: { icon: '⏰', title: '例行主动巡检与 Webhook', tag: '30s 调度周期', statusText: '主动巡检就绪' },
       skills: { icon: '🪜', title: '技能成本阶梯与微沙箱', tag: 'Rank 1 进程隔离', statusText: '沙箱隔离中' },
@@ -512,7 +543,7 @@ function updateTopBarForTab(tabName) {
 // ============================================================================
 // 视图切换与导航路由 (SPA History & Hash 路由同步与持久化)
 // ============================================================================
-const VALID_TABS = ['chat', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
+const VALID_TABS = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
 
 function getTabFromLocation() {
   const pathPart = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
@@ -566,6 +597,7 @@ function switchTab(tabName, updateUrl = true) {
 
   updateTopBarForTab(tabName);
 
+  if (tabName === 'feed') loadFeedData();
   if (tabName === 'goals') loadGoals();
   if (tabName === 'routines') loadRoutines();
   if (tabName === 'memory') loadMemory();
@@ -1187,6 +1219,488 @@ window.resolveApproval = async function (approvalId, approved) {
     console.error('处理审批失败:', err);
   }
 };
+
+// ============================================================================
+// 2.5 智能体动态与工作简报 (Feed)
+// ============================================================================
+const AREA_EMOJIS = {
+  planning: '🗓️',
+  research: '🔍',
+  goals: '🎯',
+  money: '💰',
+  health: '🌿',
+  home: '🏠',
+  learning: '📚',
+  people: '👥',
+  files: '📄',
+  fun: '🎈'
+};
+
+const AREA_LABELS = {
+  planning: '规划调研',
+  research: '深度研究',
+  goals: '目标自驱',
+  money: '财务预算',
+  health: '健康活力',
+  home: '生活日常',
+  learning: '技能学习',
+  people: '人际协作',
+  files: '文档工件',
+  fun: '休闲娱乐'
+};
+
+const INTRO_ACK_KEY = 'museclaw_feed_intro_ack';
+
+function formatRelativeTime(isoStr) {
+  if (!isoStr) return '';
+  const now = Date.now();
+  const t = new Date(isoStr).getTime();
+  if (isNaN(t)) return '';
+  const diffSec = Math.floor((now - t) / 1000);
+  if (diffSec < 60) return '刚刚';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} 分钟前`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} 小时前`;
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)} 天前`;
+  return new Date(isoStr).toLocaleDateString();
+}
+
+function todayDateKey(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function groupPostsByDay(posts) {
+  const map = new Map();
+  for (const p of posts) {
+    const d = new Date(p.ts || Date.now());
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const list = map.get(key);
+    if (list) list.push(p);
+    else map.set(key, [p]);
+  }
+  return [...map.entries()];
+}
+
+function getFeedDayLabel(dateKey, at) {
+  const today = todayDateKey();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yKey = todayDateKey(yesterday);
+  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+  const weekday = weekdays[at.getDay()];
+
+  if (dateKey === today) {
+    const hour = new Date().getHours();
+    const part = hour < 12 ? '上午' : hour < 18 ? '下午' : '晚上';
+    return `${weekday} ${part} · 今天`;
+  }
+  if (dateKey === yKey) {
+    return `${weekday} · 昨天`;
+  }
+  return `${weekday} · ${at.getMonth() + 1}月${at.getDate()}日`;
+}
+
+async function loadFeedData() {
+  await Promise.allSettled([loadFeedPosts(), loadFeedActivity()]);
+}
+
+async function loadFeedPosts() {
+  try {
+    const res = await fetch('/api/feed/posts');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.feed.posts = Array.isArray(data.posts) ? data.posts : [];
+    state.feed.instructions = data.instructions || '';
+    state.feed.daily = data.daily !== false;
+    state.feed.time = data.time || '08:00';
+    renderFeedPosts();
+  } catch (err) {
+    console.error('加载 Feed 动态失败:', err);
+    if (dom.feedPostsContainer) {
+      dom.feedPostsContainer.innerHTML = `
+        <div class="feed-card" style="padding: 24px; text-align: center; color: var(--om-muted);">
+          加载动态失败: ${escapeHtml(err.message)}
+          <div style="margin-top: 10px;"><button class="btn-secondary" onclick="window.loadFeedData()">重试</button></div>
+        </div>
+      `;
+    }
+  }
+}
+window.loadFeedData = loadFeedData;
+
+async function loadFeedActivity() {
+  try {
+    const res = await fetch('/api/feed/activity?limit=40');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.feed.activities = Array.isArray(data) ? data : (data.items || []);
+    renderFeedActivity();
+  } catch (err) {
+    console.error('加载离开时动态失败:', err);
+  }
+}
+
+function renderFeedPosts() {
+  if (!dom.feedPostsContainer) return;
+  const posts = state.feed.posts;
+  const groups = groupPostsByDay(posts);
+  const introAcked = localStorage.getItem(INTRO_ACK_KEY) === '1';
+
+  let html = '';
+
+  if (!introAcked) {
+    const steeringText = state.feed.instructions || '给我做一个关于我关心的事的动态。短一点、直接一点，扫一眼就能看完，别搞标题党。';
+    html += `
+      <div class="feed-card feed-intro-card" id="feed-intro-banner">
+        <div class="feed-intro-header">
+          <div class="feed-intro-title">📰 关于智能体动态 (Feed)</div>
+          <p class="feed-intro-sub">
+            智能体根据它记录的关于您的记忆事实、最近对话重点与自驱目标，提炼生成的短篇简报。下方的引导指令将直接决定未来每一篇动态的侧重点，您可以随时修改。
+          </p>
+        </div>
+        <div class="feed-intro-body">
+          <p class="feed-intro-text">“${escapeHtml(steeringText)}”</p>
+          <div class="feed-intro-footer">
+            <button class="btn-secondary" id="btn-edit-feed-intro" style="border-radius: 9999px; padding: 6px 16px; font-size: 13.5px;">✏️ 修改偏好指令</button>
+            <button class="btn-primary" id="btn-ack-feed-intro" style="border-radius: 9999px; padding: 6px 18px; font-size: 13.5px;">我知道了</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.feed.writing) {
+    html += `
+      <div class="feed-card feed-loading-box">
+        <span class="om-spinner" style="display: inline-block; width: 18px; height: 18px; border: 2px solid var(--om-border); border-top-color: var(--om-accent); border-radius: 50%; animation: om-spin 0.8s linear infinite;"></span>
+        <span>智能体正在为您提炼记忆与目标，撰写最新动态…</span>
+      </div>
+    `;
+  }
+
+  if (groups.length === 0 && !state.feed.writing) {
+    html += `
+      <div class="feed-day-title">${getFeedDayLabel(todayDateKey(), new Date())}</div>
+      <div class="feed-card" style="padding: 24px 20px;">
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <div class="feed-area-badge">🖼️</div>
+          <div style="flex: 1;">
+            <div style="font-size: 16px; font-weight: 600; color: var(--om-fg); margin-bottom: 6px;">暂无动态内容</div>
+            <div style="font-size: 14px; color: var(--om-muted); line-height: 1.6;">
+              每天在预设时间（${escapeHtml(state.feed.time || '08:00')}），智能体会阅读关于您的记忆事实、近期对话与目标，为您量身定制几条短小精悍的动态。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feed-card" style="padding: 24px 20px;">
+        <div style="display: flex; gap: 14px; align-items: flex-start;">
+          <div class="feed-area-badge">📝</div>
+          <div style="flex: 1;">
+            <div style="font-size: 16px; font-weight: 600; color: var(--om-fg); margin-bottom: 6px;">用一句话引导它</div>
+            <div style="font-size: 14px; color: var(--om-muted); line-height: 1.6;">
+              点击右上角「偏好设置」可以告诉智能体您更希望看到哪些领域，或者立刻点击下方按钮生成第一期动态。
+            </div>
+            <div style="margin-top: 14px;">
+              <button class="btn-primary" id="btn-feed-empty-write" style="border-radius: 9999px; padding: 8px 20px; font-size: 14px; font-weight: 600;">
+                ✨ 立即撰写动态
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    for (const [dayKey, dayPosts] of groups) {
+      const firstDate = new Date(dayPosts[0]?.ts || Date.now());
+      html += `<div class="feed-day-title">${getFeedDayLabel(dayKey, firstDate)}</div>`;
+      for (const p of dayPosts) {
+        const emoji = AREA_EMOJIS[p.area] || '📝';
+        const areaLabel = AREA_LABELS[p.area] || '工作简报';
+        html += `
+          <div class="feed-card feed-post-card" data-post-id="${escapeHtml(p.id)}">
+            <div class="feed-post-top">
+              <div class="feed-area-badge" title="${escapeHtml(areaLabel)}">${emoji}</div>
+              <div class="feed-post-content">
+                <div class="feed-post-title">${escapeHtml(p.title)}</div>
+                <div class="feed-post-body">${renderMarkdown(p.body)}</div>
+              </div>
+            </div>
+            <div class="feed-post-actions">
+              <button class="feed-action-btn" onclick="window._discussFeedPost('${escapeHtml(p.id)}')">
+                ${Icons.messageCircle(16)} 展开讨论
+              </button>
+              <button class="feed-action-btn" onclick="window._openFeedPostInfo('${escapeHtml(p.id)}')">
+                ${Icons.info(16)} 详情与操作
+              </button>
+            </div>
+          </div>
+        `;
+      }
+    }
+  }
+
+  dom.feedPostsContainer.innerHTML = html;
+
+  const btnAck = document.getElementById('btn-ack-feed-intro');
+  if (btnAck) {
+    btnAck.onclick = () => {
+      localStorage.setItem(INTRO_ACK_KEY, '1');
+      renderFeedPosts();
+    };
+  }
+  const btnEditIntro = document.getElementById('btn-edit-feed-intro');
+  if (btnEditIntro) {
+    btnEditIntro.onclick = () => openFeedSettingsModal();
+  }
+  const btnEmptyWrite = document.getElementById('btn-feed-empty-write');
+  if (btnEmptyWrite) {
+    btnEmptyWrite.onclick = () => writeFeedNow();
+  }
+}
+
+function renderFeedActivity() {
+  if (!dom.feedActivityContainer) return;
+  const items = state.feed.activities;
+  if (!items || items.length === 0) {
+    dom.feedActivityContainer.innerHTML = `
+      <div style="padding: 18px 12px; color: var(--om-muted); font-size: 13px; text-align: center;">
+        暂无离开时的后台推进记录。后台无人值守推进目标或产生工件时将在此处留痕。
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+  for (const it of items) {
+    let icon = Icons.sparkles(16);
+    if (it.kind === 'artifact') icon = Icons.fileText(16);
+    else if (it.kind === 'approval') icon = Icons.shieldAlert(16);
+    else if (it.kind === 'question') icon = Icons.messageCircle(16);
+    else if (it.quiet) icon = Icons.moon(16);
+
+    const relTime = formatRelativeTime(it.ts);
+
+    html += `
+      <div class="feed-activity-row" onclick="window._openFeedActivityItem('${escapeHtml(it.id)}')">
+        <div class="feed-activity-icon">${icon}</div>
+        <div class="feed-activity-body">
+          <div class="feed-activity-title-bar">
+            <span class="feed-activity-title">${escapeHtml(it.title || '后台推进事件')}</span>
+            <span class="feed-activity-time">${relTime}</span>
+          </div>
+          ${it.text ? `<div class="feed-activity-text">${escapeHtml(it.text)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  dom.feedActivityContainer.innerHTML = html;
+}
+
+async function writeFeedNow() {
+  if (state.feed.writing) return;
+  state.feed.writing = true;
+  renderFeedPosts();
+  try {
+    const res = await fetch('/api/feed/posts/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    state.feed.posts = Array.isArray(data.posts) ? data.posts : [];
+    if (data.instructions) state.feed.instructions = data.instructions;
+    showToast('✨ 新动态撰写完成', 'success');
+  } catch (err) {
+    console.error('撰写动态失败:', err);
+    showToast(`撰写动态失败: ${err.message}`, 'error');
+  } finally {
+    state.feed.writing = false;
+    renderFeedPosts();
+  }
+}
+
+function discussFeedPost(postId) {
+  const post = state.feed.posts.find((p) => p.id === postId);
+  if (!post) return;
+  switchTab('chat');
+  const discussText = post.prompt || `关于动态中的这条建议：\n\n**${post.title}**\n\n${post.body.slice(0, 1000)}`;
+  if (dom.composerInput) {
+    dom.composerInput.value = discussText;
+    dom.composerInput.focus();
+    dom.composerInput.style.height = 'auto';
+    dom.composerInput.style.height = `${Math.min(dom.composerInput.scrollHeight, 200)}px`;
+  }
+}
+window._discussFeedPost = discussFeedPost;
+
+function openPostInfoModal(postId) {
+  const post = state.feed.posts.find((p) => p.id === postId);
+  if (!post) return;
+  const areaLabel = AREA_LABELS[post.area] || '工作简报';
+  const emoji = AREA_EMOJIS[post.area] || '📝';
+  const writtenTime = new Date(post.ts || Date.now()).toLocaleString();
+
+  const bodyHtml = `
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 26px;">${emoji}</span>
+        <div>
+          <div style="font-size: 15px; font-weight: 600; color: var(--om-fg);">${escapeHtml(post.title)}</div>
+          <div style="font-size: 12px; color: var(--om-muted);">分类领域: ${escapeHtml(areaLabel)} · 生成时间: ${escapeHtml(writtenTime)}</div>
+        </div>
+      </div>
+
+      ${post.prompt ? `
+        <div style="background-color: var(--om-surface-2); border-radius: 12px; padding: 12px; font-size: 13px; color: var(--om-fg);">
+          <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--om-muted); margin-bottom: 4px;">建议跟进 Prompt</div>
+          ${escapeHtml(post.prompt)}
+        </div>
+      ` : ''}
+
+      <div class="modal-footer" style="margin-top: 10px; display: flex; justify-content: space-between;">
+        <button class="btn-danger" id="btn-delete-feed-post" style="padding: 7px 16px; border-radius: 9999px; font-size: 13px; cursor: pointer;">
+          🗑️ 删除此篇动态
+        </button>
+        <button class="btn-secondary" onclick="window.closeModal()" style="padding: 7px 16px; border-radius: 9999px; font-size: 13px;">
+          关闭
+        </button>
+      </div>
+    </div>
+  `;
+
+  openModal('动态详情与操作', bodyHtml, { icon: '📰' });
+
+  const btnDel = document.getElementById('btn-delete-feed-post');
+  if (btnDel) {
+    btnDel.onclick = async () => {
+      const ok = await showConfirm('确认删除', '确定要删除此篇动态记录吗？此操作不可恢复。');
+      if (!ok) return;
+      await deleteFeedPost(postId);
+      closeModal();
+    };
+  }
+}
+window._openFeedPostInfo = openPostInfoModal;
+
+async function deleteFeedPost(postId) {
+  try {
+    const res = await fetch(`/api/feed/posts/${encodeURIComponent(postId)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    state.feed.posts = state.feed.posts.filter((p) => p.id !== postId);
+    renderFeedPosts();
+    showToast('动态已成功删除', 'info');
+  } catch (err) {
+    console.error('删除动态失败:', err);
+    showToast(`删除动态失败: ${err.message}`, 'error');
+  }
+}
+
+function openFeedSettingsModal() {
+  const currentInst = state.feed.instructions || '';
+  const daily = state.feed.daily !== false;
+  const time = state.feed.time || '08:00';
+
+  const bodyHtml = `
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div>
+        <label style="font-size: 13px; font-weight: 600; color: var(--om-fg); display: block; margin-bottom: 6px;">
+          动态偏好引导指令 (Steering Instruction)
+        </label>
+        <div style="font-size: 12.5px; color: var(--om-muted); margin-bottom: 8px;">
+          用一两句话告诉智能体您最关心的方向（如：重点跟进前端进展、每天提醒日程、别搞标题党等）。后续撰写的每篇动态都将遵循该指令。
+        </div>
+        <textarea id="modal-feed-instructions" class="form-control" rows="3" placeholder="给我做一个关于我关心的事的动态。短一点、直接一点，扫一眼就能看完，别搞标题党。" style="font-size: 13.5px; line-height: 1.5;">${escapeHtml(currentInst)}</textarea>
+      </div>
+
+      <div style="background-color: var(--om-surface-2); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 13.5px; font-weight: 600; color: var(--om-fg);">每日定时自动撰写</div>
+            <div style="font-size: 12px; color: var(--om-muted);">由后台定时例行任务驱动，在每日指定时刻自动生成</div>
+          </div>
+          <input type="checkbox" id="modal-feed-daily" ${daily ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;" />
+        </div>
+
+        <div id="feed-time-wrap" style="display: ${daily ? 'flex' : 'none'}; justify-content: space-between; align-items: center; border-top: 1px solid var(--om-border); padding-top: 10px;">
+          <span style="font-size: 13px; color: var(--om-muted);">每日执行时刻</span>
+          <input type="time" id="modal-feed-time" class="form-control" value="${escapeHtml(time)}" style="width: 110px; font-family: var(--font-mono); font-size: 13px;" />
+        </div>
+      </div>
+
+      <div class="modal-footer" style="margin-top: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn-secondary" id="btn-modal-feed-writenow" style="border-radius: 9999px; padding: 7px 16px; font-size: 13px;">
+          ✨ 立即撰写一期
+        </button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-secondary" onclick="window.closeModal()" style="border-radius: 9999px; padding: 7px 16px; font-size: 13px;">取消</button>
+          <button class="btn-primary" id="btn-modal-save-feed-settings" style="border-radius: 9999px; padding: 7px 20px; font-size: 13px; font-weight: 600;">保存设置</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  openModal('动态偏好设置 (Feed Settings)', bodyHtml, { icon: '⚙️' });
+
+  const chkDaily = document.getElementById('modal-feed-daily');
+  const timeWrap = document.getElementById('feed-time-wrap');
+  if (chkDaily && timeWrap) {
+    chkDaily.onchange = () => {
+      timeWrap.style.display = chkDaily.checked ? 'flex' : 'none';
+    };
+  }
+
+  const btnWriteNow = document.getElementById('btn-modal-feed-writenow');
+  if (btnWriteNow) {
+    btnWriteNow.onclick = async () => {
+      closeModal();
+      await writeFeedNow();
+    };
+  }
+
+  const btnSave = document.getElementById('btn-modal-save-feed-settings');
+  if (btnSave) {
+    btnSave.onclick = async () => {
+      const instructions = (document.getElementById('modal-feed-instructions')?.value || '').trim();
+      const dailyVal = document.getElementById('modal-feed-daily')?.checked !== false;
+      const timeVal = (document.getElementById('modal-feed-time')?.value || '08:00').trim();
+
+      try {
+        const res = await fetch('/api/feed/instructions', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instructions, daily: dailyVal, time: timeVal })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const updated = await res.json();
+        state.feed.instructions = updated.instructions || instructions;
+        state.feed.daily = updated.daily !== false;
+        state.feed.time = updated.time || timeVal;
+        showToast('动态偏好设置已保存', 'success');
+        closeModal();
+        renderFeedPosts();
+      } catch (err) {
+        console.error('保存设置失败:', err);
+        showToast(`保存失败: ${err.message}`, 'error');
+      }
+    };
+  }
+}
+
+function openFeedActivityItem(itemId) {
+  const item = state.feed.activities.find((x) => x.id === itemId);
+  if (!item) return;
+  if (item.kind === 'artifact' && item.path) {
+    switchTab('artifacts');
+  } else {
+    switchTab('chat');
+  }
+}
+window._openFeedActivityItem = openFeedActivityItem;
 
 // ============================================================================
 // 3. 长周期目标管理 (Goals)
@@ -3209,14 +3723,24 @@ function initEventHandlers() {
     };
   });
 
-  dom.btnEditMemory.onclick = openEditMemoryModal;
-  dom.btnDryRunMemory.onclick = () => triggerConsolidation(true);
-  dom.btnRunConsolidate.onclick = () => triggerConsolidation(false);
-  dom.btnUndoMemory.onclick = undoConsolidation;
+  if (dom.btnFeedSettings) {
+    dom.btnFeedSettings.onclick = openFeedSettingsModal;
+  }
+  if (dom.btnFeedWriteNow) {
+    dom.btnFeedWriteNow.onclick = writeFeedNow;
+  }
+  if (dom.btnRefreshFeedActivity) {
+    dom.btnRefreshFeedActivity.onclick = loadFeedActivity;
+  }
 
-  dom.btnRefreshRoutines.onclick = loadRoutines;
-  dom.btnRefreshSandbox.onclick = loadSandboxStatus;
-  dom.btnRefreshArtifacts.onclick = loadArtifacts;
+  if (dom.btnEditMemory) dom.btnEditMemory.onclick = openEditMemoryModal;
+  if (dom.btnDryRunMemory) dom.btnDryRunMemory.onclick = () => triggerConsolidation(true);
+  if (dom.btnRunConsolidate) dom.btnRunConsolidate.onclick = () => triggerConsolidation(false);
+  if (dom.btnUndoMemory) dom.btnUndoMemory.onclick = undoConsolidation;
+
+  if (dom.btnRefreshRoutines) dom.btnRefreshRoutines.onclick = loadRoutines;
+  if (dom.btnRefreshSandbox) dom.btnRefreshSandbox.onclick = loadSandboxStatus;
+  if (dom.btnRefreshArtifacts) dom.btnRefreshArtifacts.onclick = loadArtifacts;
 
   dom.btnReloadPolicy.onclick = async () => {
     try {
