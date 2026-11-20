@@ -438,8 +438,11 @@ export function startGatewayServer(defaultPort = 8799) {
         path.resolve(__dirname, '../../web/index.html'),
         path.resolve(__dirname, '../data/web/index.html'),
       ];
-      const modernWebPath = modernWebCandidates.find((p) => fs.existsSync(p));
-      const htmlPath = modernWebPath || path.join(__dirname, 'ui.html');
+      const htmlPath = modernWebCandidates.find((p) => fs.existsSync(p));
+      if (!htmlPath) {
+        res.writeHead(500);
+        return res.end('Web UI not found');
+      }
       try {
         const html = fs.readFileSync(htmlPath, 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
