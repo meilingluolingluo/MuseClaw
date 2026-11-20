@@ -941,29 +941,316 @@ html[data-theme="dark"] .pill-red {
   align-items: center;
 }
 
-.prompt-suggestions {
+/* ============================================================================
+   6.1 对话框附件与工件引用展示条
+============================================================================ */
+.composer-attachments-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
-  padding: 2px 0;
+  margin-bottom: 8px;
+  padding: 4px 6px;
 }
 
-.prompt-pill {
-  padding: 4px 12px;
-  border-radius: 9999px;
-  font-size: 11.5px;
+.composer-attachment-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
   background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  color: var(--om-fg);
+  max-width: 260px;
+}
+
+.attachment-tag-icon {
+  display: flex;
+  align-items: center;
+  color: var(--om-accent);
+}
+
+.attachment-tag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-tag-remove {
+  background: none;
+  border: none;
   color: var(--om-muted);
   cursor: pointer;
-  border: 1px solid var(--om-border);
-  white-space: nowrap;
-  transition: all 0.15s ease;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
 }
 
-.prompt-pill:hover {
+.attachment-tag-remove:hover {
+  color: var(--om-danger, #ef4444);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* ============================================================================
+   6.2 现代化对话框底部工具栏与操作区
+============================================================================ */
+.composer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.composer-tool-group {
+  position: relative;
+}
+
+.composer-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--om-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.composer-tool-btn:hover {
+  background-color: var(--om-surface-2);
+  color: var(--om-fg);
+  border-color: var(--om-border);
+}
+
+.composer-tool-btn.active {
   background-color: var(--om-accent-soft);
   color: var(--om-accent);
   border-color: rgba(0, 100, 212, 0.25);
+}
+
+.composer-tool-btn-icon-only {
+  padding: 5px 6px;
+}
+
+.composer-tool-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--om-border);
+  margin: 0 4px;
+}
+
+/* 键盘微提示 */
+.composer-hotkey-hint {
+  display: flex;
+  align-items: center;
+  color: var(--om-muted);
+  font-size: 11px;
+  user-select: none;
+}
+
+.hotkey-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  color: var(--om-muted);
+  font-size: 11px;
+}
+
+.hotkey-pill kbd {
+  display: inline-block;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--om-fg);
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  border-radius: 4px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+/* 弹出菜单面板 (Popover) */
+.composer-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  background-color: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  box-shadow: var(--om-shadow-card, 0 8px 24px rgba(0,0,0,0.12));
+  padding: 6px;
+  min-width: 250px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: composerPopoverIn 0.15s ease-out;
+}
+
+@keyframes composerPopoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.composer-popover-header {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--om-muted);
+  border-bottom: 1px solid var(--om-border);
+  margin-bottom: 4px;
+}
+
+.composer-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--om-fg);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  width: 100%;
+}
+
+.composer-popover-item:hover {
+  background-color: var(--om-surface-2);
+}
+
+.composer-popover-icon {
+  display: flex;
+  align-items: center;
+  color: var(--om-accent);
+  flex-shrink: 0;
+}
+
+.composer-popover-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.composer-popover-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.composer-popover-desc {
+  font-size: 11px;
+  color: var(--om-muted);
+}
+
+/* 快捷指令专有面板 */
+.composer-commands-popover {
+  min-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.composer-commands-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-command-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.composer-command-item:hover {
+  background-color: var(--om-surface-2);
+}
+
+.composer-command-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-command-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--om-accent);
+  font-family: var(--font-mono, monospace);
+}
+
+.composer-command-desc {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.composer-command-badge {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--om-surface-2);
+  color: var(--om-muted);
+}
+
+/* ============================================================================
+   6.3 对话框外底部安全与免责提示
+============================================================================ */
+.composer-footer-disclaimer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--om-muted);
+  user-select: none;
+  text-align: center;
+}
+
+.disclaimer-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--om-accent);
+  opacity: 0.7;
+}
+
+@media (max-width: 640px) {
+  .composer-tool-label {
+    display: none;
+  }
+  .composer-hotkey-hint {
+    display: none;
+  }
 }
 
 /* nanoMuse Ink Disc Send Button */

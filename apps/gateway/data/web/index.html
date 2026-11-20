@@ -200,24 +200,85 @@
           </div>
 
           <div class="chat-composer-wrap">
+            <!-- 本地文件选择器 -->
+            <input type="file" id="composer-file-input" style="display: none;" multiple accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.html,.css,.py,.sh,.yml,.yaml,.sql,.log,.csv" />
+
+            <!-- 上下文附件与工件引用展示条 -->
+            <div class="composer-attachments-bar" id="composer-attachments-bar" style="display: none;"></div>
+
             <div class="composer-box">
               <textarea
                 class="composer-textarea"
                 id="composer-input"
-                placeholder="向数字员工下达指令（Enter 发送，Shift+Enter 换行）..."
+                placeholder="向数字员工下达指令（输入 / 快速唤起常用指令，Enter 发送）..."
                 rows="2"
               ></textarea>
+
               <div class="composer-actions">
-                <div class="prompt-suggestions">
-                  <span class="prompt-pill" data-prompt="帮我巡检一下当前服务器运行状态与磁盘空间">⚡ 服务器运行巡检</span>
-                  <span class="prompt-pill" data-prompt="梳理当前项目的交付物与报告并沉淀为交付工件">📋 整理交付工件</span>
-                  <span class="prompt-pill" data-prompt="规划一个为期两周的企业内部系统升级目标">🎯 规划长周期目标</span>
-                  <span class="prompt-pill" data-prompt="查看当前系统的安全策略与审计事件">🛡️ 检查合规审计</span>
+                <div class="composer-tools">
+                  <!-- 1. 附件与工件引用 -->
+                  <div class="composer-tool-group">
+                    <button type="button" class="composer-tool-btn" id="btn-composer-attach" title="添加文件附件或引用交付工件">
+                      <span id="icon-composer-attach"></span>
+                      <span class="composer-tool-label">附件 / 工件</span>
+                    </button>
+                    <div class="composer-popover" id="composer-attach-popover" style="display: none;">
+                      <div class="composer-popover-header">添加会话上下文</div>
+                      <button type="button" class="composer-popover-item" id="btn-popover-upload-file">
+                        <span class="composer-popover-icon" id="icon-popover-upload"></span>
+                        <div class="composer-popover-text">
+                          <span class="composer-popover-title">上传本地文本/代码文件</span>
+                          <span class="composer-popover-desc">导入 Markdown、JSON、源码或日志作为上下文</span>
+                        </div>
+                      </button>
+                      <button type="button" class="composer-popover-item" id="btn-popover-select-artifact">
+                        <span class="composer-popover-icon" id="icon-popover-artifact"></span>
+                        <div class="composer-popover-text">
+                          <span class="composer-popover-title">引用交付工件 (Artifacts)</span>
+                          <span class="composer-popover-desc">快速关联智能体此前生成的架构、报告与设计物</span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 2. 快捷指令菜单 -->
+                  <div class="composer-tool-group">
+                    <button type="button" class="composer-tool-btn" id="btn-composer-commands" title="唤起智能体快捷指令 (/clear, /feed, /goals...)">
+                      <span id="icon-composer-commands"></span>
+                      <span class="composer-tool-label">快捷指令</span>
+                    </button>
+                    <div class="composer-popover composer-commands-popover" id="composer-commands-popover" style="display: none;">
+                      <div class="composer-popover-header">智能体常用指令</div>
+                      <div class="composer-commands-list" id="composer-commands-list">
+                        <!-- 动态渲染快捷指令列表 -->
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 3. 清空输入按钮 -->
+                  <button type="button" class="composer-tool-btn composer-tool-btn-icon-only" id="btn-composer-clear" title="清空当前输入文本" style="display: none;">
+                    <span id="icon-composer-clear"></span>
+                  </button>
+
+                  <div class="composer-tool-divider"></div>
+
+                  <!-- 4. 键盘操作指引 -->
+                  <div class="composer-hotkey-hint">
+                    <span class="hotkey-pill"><kbd>Shift</kbd> + <kbd>↵</kbd> 换行</span>
+                  </div>
                 </div>
+
+                <!-- 发送指令按钮 -->
                 <button class="btn-send" id="btn-send-message" title="发送指令 (Enter)" aria-label="发送">
                   <span id="icon-send"></span>
                 </button>
               </div>
+            </div>
+
+            <!-- 对话框外部底部安全与免责提示 -->
+            <div class="composer-footer-disclaimer">
+              <span class="disclaimer-dot"></span>
+              <span>MuseClaw 数字员工运行于受控微沙箱 · 重要系统指令与配置变更将触发门禁审批</span>
             </div>
           </div>
         </section>

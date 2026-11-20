@@ -37,6 +37,7 @@ const state = {
   grants: [],
   auditLogs: [],
   artifacts: [],
+  composerAttachments: [],
   modelsConfig: { activeProviderId: 'deepseek', providers: [] },
   isStreaming: false,
   feed: {
@@ -99,7 +100,16 @@ const dom = {
   chatMessages: document.getElementById('chat-messages'),
   composerInput: document.getElementById('composer-input'),
   btnSendMessage: document.getElementById('btn-send-message'),
-  promptPills: document.querySelectorAll('.prompt-pill'),
+  btnComposerAttach: document.getElementById('btn-composer-attach'),
+  composerAttachPopover: document.getElementById('composer-attach-popover'),
+  btnPopoverUploadFile: document.getElementById('btn-popover-upload-file'),
+  btnPopoverSelectArtifact: document.getElementById('btn-popover-select-artifact'),
+  composerFileInput: document.getElementById('composer-file-input'),
+  composerAttachmentsBar: document.getElementById('composer-attachments-bar'),
+  btnComposerCommands: document.getElementById('btn-composer-commands'),
+  composerCommandsPopover: document.getElementById('composer-commands-popover'),
+  composerCommandsList: document.getElementById('composer-commands-list'),
+  btnComposerClear: document.getElementById('btn-composer-clear'),
   feedPostsContainer: document.getElementById('feed-posts-container'),
   feedActivityContainer: document.getElementById('feed-activity-container'),
   btnFeedSettings: document.getElementById('btn-feed-settings'),
@@ -418,6 +428,17 @@ function initIcons() {
   document.getElementById('icon-lock').innerHTML = Icons.lock(12);
   document.getElementById('icon-dropdown').innerHTML = Icons.chevronDown(12);
   document.getElementById('icon-send').innerHTML = Icons.arrowUp(16);
+
+  const elAttach = document.getElementById('icon-composer-attach');
+  if (elAttach) elAttach.innerHTML = Icons.paperclip(14);
+  const elCmds = document.getElementById('icon-composer-commands');
+  if (elCmds) elCmds.innerHTML = Icons.command(14);
+  const elClear = document.getElementById('icon-composer-clear');
+  if (elClear) elClear.innerHTML = Icons.trash(14);
+  const elPopUpload = document.getElementById('icon-popover-upload');
+  if (elPopUpload) elPopUpload.innerHTML = Icons.upload(16);
+  const elPopArt = document.getElementById('icon-popover-artifact');
+  if (elPopArt) elPopArt.innerHTML = Icons.artifacts(16);
 
   document.getElementById('icon-goals-heading').innerHTML = Icons.goals(22);
   document.getElementById('icon-plus-goal').innerHTML = Icons.plus(14);
@@ -906,6 +927,299 @@ function appendMessageBubble(role, content) {
   return row;
 }
 
+// ============================================================================
+// 对话框工具栏、附件管理与快捷指令
+// ============================================================================
+function formatComposerFileSize(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
+function renderComposerAttachments() {
+  if (!dom.composerAttachmentsBar) return;
+  if (!state.composerAttachments || state.composerAttachments.length === 0) {
+    dom.composerAttachmentsBar.style.display = 'none';
+    dom.composerAttachmentsBar.innerHTML = '';
+    return;
+  }
+
+  dom.composerAttachmentsBar.style.display = 'flex';
+  dom.composerAttachmentsBar.innerHTML = state.composerAttachments.map((att, idx) => {
+    const isArtifact = att.type === 'artifact';
+    const iconSvg = isArtifact ? Icons.artifacts(14) : Icons.fileText(14);
+    const label = escapeHtml(att.name);
+    const sub = att.size ? ` (${escapeHtml(att.size)})` : '';
+    return `
+      <div class="composer-attachment-tag">
+        <span class="attachment-tag-icon">${iconSvg}</span>
+        <span class="attachment-tag-name" title="${label}">${label}${sub}</span>
+        <button type="button" class="attachment-tag-remove" data-index="${idx}" title="移除">
+          ${Icons.x(12)}
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  dom.composerAttachmentsBar.querySelectorAll('.attachment-tag-remove').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.index, 10);
+      if (!isNaN(idx)) {
+        state.composerAttachments.splice(idx, 1);
+        renderComposerAttachments();
+      }
+    };
+  });
+}
+
+function clearComposerAttachments() {
+  state.composerAttachments = [];
+  renderComposerAttachments();
+}
+
+function closeAllComposerPopovers() {
+  if (dom.composerAttachPopover) dom.composerAttachPopover.style.display = 'none';
+  if (dom.composerCommandsPopover) dom.composerCommandsPopover.style.display = 'none';
+  if (dom.btnComposerAttach) dom.btnComposerAttach.classList.remove('active');
+  if (dom.btnComposerCommands) dom.btnComposerCommands.classList.remove('active');
+}
+
+function updateComposerClearButton() {
+  if (!dom.btnComposerClear || !dom.composerInput) return;
+  if (dom.composerInput.value.length > 0) {
+    dom.btnComposerClear.style.display = 'inline-flex';
+  } else {
+    dom.btnComposerClear.style.display = 'none';
+  }
+}
+
+async function openArtifactSelectModal() {
+  closeAllComposerPopovers();
+  if (!state.artifacts || state.artifacts.length === 0) {
+    try {
+      await loadArtifacts();
+    } catch (e) {
+      console.warn('加载交付工件失败:', e);
+    }
+  }
+
+  const artifacts = state.artifacts || [];
+  if (artifacts.length === 0) {
+    openModal('引用交付工件', `
+      <div style="text-align: center; padding: 24px 12px; color: var(--om-muted);">
+        <div style="font-size: 32px; margin-bottom: 8px;">📦</div>
+        <div style="font-size: 14px; font-weight: 500; color: var(--om-fg); margin-bottom: 4px;">暂无可引用的交付工件</div>
+        <div style="font-size: 12px;">当数字员工生成 Markdown 文档、架构图或交付文件后，将自动沉淀在工件库中，供您在此一键引用。</div>
+      </div>
+    `, { icon: Icons.artifacts(18) });
+    return;
+  }
+
+  const itemsHtml = artifacts.map((art) => {
+    const filename = art.filename || art.name || '未命名工件';
+    const ext = filename.split('.').pop()?.toUpperCase() || 'FILE';
+    return `
+      <div class="composer-artifact-select-item" data-filename="${escapeHtml(filename)}" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--om-border); background-color: var(--om-surface); cursor: pointer; transition: all 0.15s ease; margin-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
+          <span style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background-color: var(--om-surface-2); color: var(--om-accent);">
+            ${Icons.fileText(16)}
+          </span>
+          <div style="overflow: hidden;">
+            <div style="font-size: 13px; font-weight: 600; color: var(--om-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(filename)}</div>
+            <div style="font-size: 11px; color: var(--om-muted);">${ext} 格式工件</div>
+          </div>
+        </div>
+        <button type="button" class="btn-secondary" style="padding: 3px 10px; font-size: 12px; flex-shrink: 0;">引用</button>
+      </div>
+    `;
+  }).join('');
+
+  openModal('选择交付工件引入会话', `
+    <div style="margin-bottom: 12px; font-size: 12.5px; color: var(--om-muted);">
+      选择系统工件库中的文件，将其作为当前会话的上下文知识提供给数字员工。
+    </div>
+    <div class="composer-artifact-select-list" style="max-height: 360px; overflow-y: auto;">
+      ${itemsHtml}
+    </div>
+  `, { icon: Icons.artifacts(18) });
+
+  const container = dom.modalContainer.querySelector('.composer-artifact-select-list');
+  if (container) {
+    container.querySelectorAll('.composer-artifact-select-item').forEach((item) => {
+      item.onclick = () => {
+        const name = item.dataset.filename;
+        if (!state.composerAttachments.some((a) => a.type === 'artifact' && a.name === name)) {
+          state.composerAttachments.push({ type: 'artifact', name });
+          renderComposerAttachments();
+          showToast(`已引用工件: ${name}`, 'success');
+        } else {
+          showToast(`工件 ${name} 已在引用列表中`, 'info');
+        }
+        closeModal();
+      };
+    });
+  }
+}
+
+function showHelpMessage() {
+  const helpText = `### 🤖 MuseClaw 数字员工工作台指令系统
+
+您可以通过输入指令或使用快捷方式调遣数字员工：
+
+* **/clear**：清空当前会话界面并新建工作话题
+* **/feed**：查看智能体基于近期工作自动总结提炼的每日动态
+* **/goals**：管理长期自驱运行任务与阶段里程碑
+* **/memory**：查验受控长期记忆与智能体认知偏好
+* **/audit**：查看安全拦截事件、审批日志与授权记录
+* **/artifacts**：浏览智能体沉淀的代码、架构与交付成果
+* **/model**：配置切换 AI 大模型接入服务 (DeepSeek / OpenAI / Ollama 等)
+
+💡 **提示**：对话框左下角支持直接**上传本地文本/代码**或**引用交付工件**作为分析上下文。`;
+
+  state.messages.push({ role: 'assistant', content: helpText });
+  appendMessageBubble('assistant', helpText);
+}
+
+const COMPOSER_COMMANDS = [
+  { name: '/help', desc: '查看常用指令与数字员工能力', action: () => showHelpMessage() },
+  { name: '/clear', desc: '清屏并开启全新工作会话', action: () => createNewSession() },
+  { name: '/feed', desc: '查看每日动态简报与工作总结', action: () => switchTab('feed') },
+  { name: '/goals', desc: '规划与管理自驱长周期目标', action: () => switchTab('goals') },
+  { name: '/memory', desc: '查验受控长期记忆库', action: () => switchTab('memory') },
+  { name: '/audit', desc: '查看安全合规与操作审计', action: () => switchTab('audit') },
+  { name: '/artifacts', desc: '浏览系统沉淀的交付工件', action: () => switchTab('artifacts') },
+  { name: '/model', desc: '配置 AI 大模型接入服务', action: () => openModelSettingsModal() }
+];
+
+function initComposerControls() {
+  if (dom.composerCommandsList) {
+    dom.composerCommandsList.innerHTML = COMPOSER_COMMANDS.map((cmd) => {
+      return `
+        <div class="composer-command-item" data-cmd="${cmd.name}">
+          <div class="composer-command-left">
+            <span class="composer-command-name">${cmd.name}</span>
+            <span class="composer-command-desc">${cmd.desc}</span>
+          </div>
+          <span class="composer-command-badge">执行</span>
+        </div>
+      `;
+    }).join('');
+
+    dom.composerCommandsList.querySelectorAll('.composer-command-item').forEach((item) => {
+      item.onclick = (e) => {
+        e.stopPropagation();
+        const cmdName = item.dataset.cmd;
+        closeAllComposerPopovers();
+        const matched = COMPOSER_COMMANDS.find((c) => c.name === cmdName);
+        if (matched && matched.action) {
+          matched.action();
+        }
+      };
+    });
+  }
+
+  if (dom.btnComposerAttach) {
+    dom.btnComposerAttach.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = dom.composerAttachPopover.style.display !== 'none';
+      closeAllComposerPopovers();
+      if (!isOpen) {
+        dom.composerAttachPopover.style.display = 'flex';
+        dom.btnComposerAttach.classList.add('active');
+      }
+    };
+  }
+
+  if (dom.btnPopoverUploadFile && dom.composerFileInput) {
+    dom.btnPopoverUploadFile.onclick = (e) => {
+      e.stopPropagation();
+      closeAllComposerPopovers();
+      dom.composerFileInput.click();
+    };
+  }
+
+  if (dom.composerFileInput) {
+    dom.composerFileInput.onchange = (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+
+      files.forEach((file) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const content = evt.target?.result || '';
+          state.composerAttachments.push({
+            type: 'file',
+            name: file.name,
+            size: formatComposerFileSize(file.size),
+            content: typeof content === 'string' ? content : ''
+          });
+          renderComposerAttachments();
+        };
+        reader.readAsText(file);
+      });
+
+      e.target.value = '';
+    };
+  }
+
+  if (dom.btnPopoverSelectArtifact) {
+    dom.btnPopoverSelectArtifact.onclick = (e) => {
+      e.stopPropagation();
+      openArtifactSelectModal();
+    };
+  }
+
+  if (dom.btnComposerCommands) {
+    dom.btnComposerCommands.onclick = (e) => {
+      e.stopPropagation();
+      const isOpen = dom.composerCommandsPopover.style.display !== 'none';
+      closeAllComposerPopovers();
+      if (!isOpen) {
+        dom.composerCommandsPopover.style.display = 'flex';
+        dom.btnComposerCommands.classList.add('active');
+      }
+    };
+  }
+
+  if (dom.btnComposerClear) {
+    dom.btnComposerClear.onclick = () => {
+      dom.composerInput.value = '';
+      dom.composerInput.style.height = 'auto';
+      updateComposerClearButton();
+      closeAllComposerPopovers();
+      dom.composerInput.focus();
+    };
+  }
+
+  if (dom.composerInput) {
+    dom.composerInput.oninput = () => {
+      updateComposerClearButton();
+      dom.composerInput.style.height = 'auto';
+      dom.composerInput.style.height = Math.min(dom.composerInput.scrollHeight, 160) + 'px';
+
+      const val = dom.composerInput.value.trim();
+      if (val === '/') {
+        dom.composerCommandsPopover.style.display = 'flex';
+        if (dom.btnComposerCommands) dom.btnComposerCommands.classList.add('active');
+      }
+    };
+  }
+
+  document.addEventListener('click', (e) => {
+    if (
+      !e.target.closest('#composer-attach-popover') &&
+      !e.target.closest('#btn-composer-attach') &&
+      !e.target.closest('#composer-commands-popover') &&
+      !e.target.closest('#btn-composer-commands')
+    ) {
+      closeAllComposerPopovers();
+    }
+  });
+}
+
 // 发送用户指令并开启 SSE 流式接收
 async function sendMessage() {
   if (!state.currentUser) {
@@ -914,16 +1228,42 @@ async function sendMessage() {
     return;
   }
 
-  const text = dom.composerInput.value.trim();
-  if (!text || state.isStreaming) return;
+  const rawText = dom.composerInput.value.trim();
+  const hasAttachments = state.composerAttachments && state.composerAttachments.length > 0;
+  if ((!rawText && !hasAttachments) || state.isStreaming) return;
+
+  let displayText = rawText;
+  let effectivePrompt = rawText;
+
+  if (hasAttachments) {
+    const attachTags = state.composerAttachments.map((att) => {
+      return att.type === 'artifact' ? `[工件: ${att.name}]` : `[文件: ${att.name}]`;
+    }).join(' ');
+
+    displayText = displayText ? `${attachTags}\n${displayText}` : attachTags;
+
+    const attachBlocks = state.composerAttachments.map((att) => {
+      if (att.type === 'artifact') {
+        return `【引用交付工件: ${att.name}】`;
+      }
+      return `【附加本地文件: ${att.name}${att.size ? ` (${att.size})` : ''}】\n\`\`\`\n${att.content || ''}\n\`\`\``;
+    }).join('\n\n');
+
+    effectivePrompt = effectivePrompt ? `${attachBlocks}\n\n${effectivePrompt}` : attachBlocks;
+  }
 
   dom.composerInput.value = '';
+  dom.composerInput.style.height = 'auto';
+  clearComposerAttachments();
+  updateComposerClearButton();
+  closeAllComposerPopovers();
+
   state.isStreaming = true;
   dom.btnSendMessage.disabled = true;
 
   // 1. 添加用户消息气泡
-  state.messages.push({ role: 'user', content: text });
-  appendMessageBubble('user', text);
+  state.messages.push({ role: 'user', content: displayText });
+  appendMessageBubble('user', displayText);
 
   const curSession = state.sessions.find((s) => s.id === state.activeSessionId);
   if (curSession) {
@@ -1009,9 +1349,9 @@ async function sendMessage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt: text,
-        text,
-        message: text,
+        prompt: effectivePrompt,
+        text: effectivePrompt,
+        message: effectivePrompt,
         session_id: state.activeSessionId,
         bot_id: state.activeBotId,
         user_id: getOrCreateUserId()
@@ -3716,12 +4056,7 @@ function initEventHandlers() {
     }
   };
 
-  dom.promptPills.forEach((pill) => {
-    pill.onclick = () => {
-      dom.composerInput.value = pill.dataset.prompt;
-      dom.composerInput.focus();
-    };
-  });
+  initComposerControls();
 
   if (dom.btnFeedSettings) {
     dom.btnFeedSettings.onclick = openFeedSettingsModal;
