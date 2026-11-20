@@ -7,6 +7,7 @@ import {
   Target,
   Clock,
   Brain,
+  Boxes,
   ShieldCheck,
   Package,
   Cpu,
@@ -37,6 +38,7 @@ export const NavRail: React.FC = () => {
     { id: 'goals', label: '目标', icon: <Target size={20} /> },
     { id: 'routines', label: '定时', icon: <Clock size={20} /> },
     { id: 'memory', label: '记忆', icon: <Brain size={20} /> },
+    { id: 'skills', label: '技能', icon: <Boxes size={20} /> },
     { id: 'audit', label: '审计', icon: <ShieldCheck size={20} /> },
     { id: 'artifacts', label: '工件', icon: <Package size={20} /> },
   ];

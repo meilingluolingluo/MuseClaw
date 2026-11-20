@@ -21,7 +21,7 @@ export const ModelSettingsModal: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [endpoint, setEndpoint] = useState('');
   const [isTesting, setIsTesting] = useState(false);
-  const [, setTestResult] = useState<{ success: boolean; latency?: number; message?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; latency?: number; message?: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {

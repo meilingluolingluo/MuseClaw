@@ -1672,11 +1672,12 @@ fi
         return res.end(JSON.stringify({ error: 'Static asset not found' }));
       }
 
-      // 如果属于已声明的前端 SPA 路由，fallback 到 index.html (SPA History 模式)
+      // 如果属于已声明的前端 SPA 路由，或非 API、非静态资源请求，fallback 到 index.html (SPA History 模式)
       const isSpaRoute = [
         '/',
         '/index.html',
         '/chat',
+        '/feed',
         '/goals',
         '/routines',
         '/memory',
@@ -1687,7 +1688,7 @@ fi
         '/bots'
       ].some((r) => url.pathname === r || url.pathname.startsWith(`${r}/`));
 
-      if (isSpaRoute) {
+      if (isSpaRoute || (!ext && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/runner/'))) {
         filePath = path.join(webDir, 'index.html');
       } else if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
