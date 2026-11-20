@@ -158,10 +158,15 @@ function initMarkedRenderer() {
       tablecell(content, flags) {
         const alignAttr = flags.align ? ` style="text-align: ${flags.align};"` : '';
         if (flags.header) {
-          return `<th${alignAttr}>${content}</th>`;
+          return `<th${alignAttr} class="cell-nowrap">${content}</th>`;
         }
+        const clean = String(content || '').trim();
+        // 自动识别短字段 (如类型 Task/Story/Feature、负责人、单号、日期、状态)，避免单词中途折断
+        const isShortField = /^[\w\s.-]{1,24}$/.test(clean);
+        const hasBadgeOrLink = clean.includes('status-badge') || clean.includes('issue-link') || clean.includes('<a ');
+        const nowrapClass = (isShortField || hasBadgeOrLink) ? ' class="cell-nowrap"' : '';
         const formatted = formatStatusBadge(content);
-        return `<td${alignAttr}>${formatted}</td>`;
+        return `<td${alignAttr}${nowrapClass}>${formatted}</td>`;
       },
       link(href, title, text) {
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
@@ -352,17 +357,51 @@ function renderMarkdownFallback(text) {
   return output.join('');
 }
 
+// 规范化 Markdown 表格排版，确保表格前后必然有空行隔离，杜绝普通正文被误识别为表格末行
+function normalizeMarkdownTables(md) {
+  if (!md || typeof md !== 'string') return '';
+  const lines = md.split('\n');
+  const result = [];
+  let inTable = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const isTableRow = trimmed.startsWith('|') && trimmed.endsWith('|');
+
+    if (isTableRow) {
+      if (!inTable) {
+        if (result.length > 0 && result[result.length - 1].trim() !== '') {
+          result.push('');
+        }
+        inTable = true;
+      }
+      result.push(line);
+    } else {
+      if (inTable) {
+        if (trimmed.length > 0) {
+          result.push('');
+        }
+        inTable = false;
+      }
+      result.push(line);
+    }
+  }
+  return result.join('\n');
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
+  const normalized = normalizeMarkdownTables(text);
   initMarkedRenderer();
   if (window.marked && typeof window.marked.parse === 'function') {
     try {
-      return `<div class="markdown-body">${window.marked.parse(text)}</div>`;
+      return `<div class="markdown-body">${window.marked.parse(normalized)}</div>`;
     } catch (e) {
       console.warn('Marked 解析异常，使用兜底解析器:', e);
     }
   }
-  return `<div class="markdown-body">${renderMarkdownFallback(text)}</div>`;
+  return `<div class="markdown-body">${renderMarkdownFallback(normalized)}</div>`;
 }
 
 function escapeHtml(str) {

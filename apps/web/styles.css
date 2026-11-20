@@ -1884,20 +1884,20 @@ html[data-theme="dark"] .pill-red {
 /* 1. 现代化响应式卡片化表格体系 */
 .markdown-table-wrapper {
   width: 100%;
-  margin: 16px 0;
+  margin: 14px 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid var(--om-border);
   background-color: var(--om-surface);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .markdown-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.5;
   text-align: left;
 }
@@ -1907,13 +1907,13 @@ html[data-theme="dark"] .pill-red {
 }
 
 .markdown-table th {
-  padding: 10px 16px;
+  padding: 9px 14px;
   font-weight: 650;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--om-muted);
   border-bottom: 1px solid var(--om-border);
   white-space: nowrap;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .markdown-table th:not(:last-child),
@@ -1922,12 +1922,20 @@ html[data-theme="dark"] .pill-red {
 }
 
 .markdown-table td {
-  padding: 11px 16px;
+  padding: 9px 14px;
   color: var(--om-fg);
   border-bottom: 1px solid var(--om-border);
   vertical-align: middle;
   background-color: var(--om-surface);
   transition: background-color 0.15s ease;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* 单元格单行保持，避免短词或人名生硬断行 */
+.markdown-table th.cell-nowrap,
+.markdown-table td.cell-nowrap {
+  white-space: nowrap;
 }
 
 .markdown-table tbody tr:last-child td {
@@ -2036,17 +2044,24 @@ html[data-theme="dark"] .pill-red {
 /* 工单/卡片编号链接胶囊强化 (如 bcop-sop-xxx, icafe, task-xxx 等) */
 .markdown-body a.issue-link {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: #4f46e5;
   background-color: rgba(79, 70, 229, 0.08);
   border: 1px solid rgba(79, 70, 229, 0.22);
-  padding: 2.5px 8px;
+  padding: 2px 7px;
   border-radius: 6px;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+[data-theme='dark'] .markdown-body a.issue-link {
+  color: #818cf8;
+  background-color: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.3);
 }
 
 .markdown-body a.issue-link:hover {
