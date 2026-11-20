@@ -67,7 +67,7 @@ export const AuditView: React.FC = () => {
           <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px' }}>
             🛡️ 声明式安全策略 (sentinel-policy.json)
           </div>
-          <pre style={{ margin: 0, fontSize: '12px', color: 'var(--text-dim)', maxHeight: '180px', overflowY: 'auto' }}>
+          <pre style={{ margin: 0, fontSize: '12px', color: 'var(--text-dim)', maxHeight: '180px', overflow: 'auto' }}>
             {JSON.stringify(policy, null, 2)}
           </pre>
         </div>
@@ -121,8 +121,8 @@ export const AuditView: React.FC = () => {
         <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px' }}>
           📋 结构化操作审计流水 (Audit Trail)
         </div>
-        <div style={{ maxHeight: '380px', overflowY: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+        <div style={{ maxHeight: '380px', overflow: 'auto' }}>
+          <table style={{ width: '100%', minWidth: '640px', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--om-border)', color: 'var(--text-dim)' }}>
                 <th style={{ padding: '8px' }}>时间戳</th>

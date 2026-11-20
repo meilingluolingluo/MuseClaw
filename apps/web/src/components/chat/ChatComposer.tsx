@@ -1,19 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, Slash, ArrowUp, X, Image as ImageIcon, FileText, Package } from 'lucide-react';
+import { Paperclip, Slash, ArrowUp, Square, X, Image as ImageIcon, FileText, Package } from 'lucide-react';
 import type { MessageAttachment } from '../../types';
 import { api } from '../../services/api';
+import { useApp } from '../../context/AppContext';
 
 interface ChatComposerProps {
   onSendMessage: (text: string, attachments: MessageAttachment[]) => void;
   isStreaming: boolean;
-  onClearMessages?: () => void;
+  onStop: () => void;
 }
 
 export const ChatComposer: React.FC<ChatComposerProps> = ({
   onSendMessage,
   isStreaming,
-  onClearMessages,
+  onStop,
 }) => {
+  const { showToast, setTab, createNewSession } = useApp();
   const [inputText, setInputText] = useState('');
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [isAttachPopoverOpen, setIsAttachPopoverOpen] = useState(false);
@@ -47,7 +49,8 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   const handleSend = () => {
     const trimmed = inputText.trim();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
-    onSendMessage(trimmed, attachments);
+    // 只发附件时也要给 Agent 一句话上下文
+    onSendMessage(trimmed || '请查看附件', attachments);
     setInputText('');
     setAttachments([]);
     setIsAttachPopoverOpen(false);
@@ -58,6 +61,8 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 中文/日文输入法用 Enter 确认候选词，不能当成发送
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -79,8 +84,9 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
             url: uploadRes.url,
           },
         ]);
-      } catch (err) {
+      } catch (err: any) {
         console.error('File upload error:', err);
+        showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
       }
     }
     setIsAttachPopoverOpen(false);
@@ -103,11 +109,11 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   };
 
   const slashCommands = [
-    { cmd: '/clear', desc: '清空当前会话显示的消息记录', action: () => onClearMessages?.() },
-    { cmd: '/feed', desc: '跳转查看智能体每日动态与简报', action: () => (window.location.pathname = '/feed') },
-    { cmd: '/goals', desc: '进入长周期自驱目标管理看板', action: () => (window.location.pathname = '/goals') },
-    { cmd: '/routines', desc: '进入定时任务与主动巡检工作台', action: () => (window.location.pathname = '/routines') },
-    { cmd: '/memory', desc: '查看并管理受控长期记忆库', action: () => (window.location.pathname = '/memory') },
+    { cmd: '/new', desc: '开一个新会话', action: () => createNewSession() },
+    { cmd: '/feed', desc: '跳转查看智能体每日动态与简报', action: () => setTab('feed') },
+    { cmd: '/goals', desc: '进入长周期自驱目标管理看板', action: () => setTab('goals') },
+    { cmd: '/routines', desc: '进入定时任务与主动巡检工作台', action: () => setTab('routines') },
+    { cmd: '/memory', desc: '查看并管理受控长期记忆库', action: () => setTab('memory') },
   ];
 
   return (
@@ -268,16 +274,28 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
             </div>
           </div>
 
-          {/* Send Button */}
-          <button
-            className="btn-send"
-            type="button"
-            title="发送指令 (Enter)"
-            disabled={isStreaming || (!inputText.trim() && attachments.length === 0)}
-            onClick={handleSend}
-          >
-            <ArrowUp size={16} />
-          </button>
+          {/* 执行中显示停止，空闲时显示发送 */}
+          {isStreaming ? (
+            <button
+              className="btn-send is-stop"
+              type="button"
+              title="停止本轮执行"
+              aria-label="停止本轮执行"
+              onClick={onStop}
+            >
+              <Square size={14} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              className="btn-send"
+              type="button"
+              title="发送指令 (Enter)"
+              disabled={!inputText.trim() && attachments.length === 0}
+              onClick={handleSend}
+            >
+              <ArrowUp size={16} />
+            </button>
+          )}
         </div>
       </div>
 

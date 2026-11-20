@@ -26,7 +26,11 @@ export const GoalsView: React.FC = () => {
   }, []);
 
   const handleCreateGoal = async () => {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim()) {
+      showToast('先给目标起个名字，再立项', 'warning');
+      document.getElementById('goal-title-input')?.focus();
+      return;
+    }
     try {
       const g = await api.createGoal({
         title: newTitle.trim(),
@@ -168,14 +172,15 @@ export const GoalsView: React.FC = () => {
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             <button type="button" className="btn-secondary" onClick={() => setIsCreateModalOpen(false)}>取消</button>
-            <button type="button" className="btn-primary" onClick={handleCreateGoal}>立项并保存</button>
+            <button type="button" className="btn-primary" onClick={handleCreateGoal} disabled={!newTitle.trim()}>立项并保存</button>
           </div>
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
-            <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>目标名称</label>
+            <label htmlFor="goal-title-input" style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>目标名称</label>
             <input
+              id="goal-title-input"
               type="text"
               className="form-control"
               placeholder="例如：每日清晨自动汇总研发集群日志并生成周报"
@@ -185,8 +190,9 @@ export const GoalsView: React.FC = () => {
             />
           </div>
           <div>
-            <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>详细指标与推演规范</label>
+            <label htmlFor="goal-desc-input" style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>详细指标与推演规范</label>
             <textarea
+              id="goal-desc-input"
               className="form-control"
               rows={4}
               placeholder="描述目标的期望产出、检查准则与涉及的模块..."

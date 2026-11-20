@@ -227,8 +227,9 @@ const proactive = new ProactiveManager({
     }
   },
   onRunCompleted: async (run, output) => {
-    // 写入会话历史以便 Web 前端同步显示
-    const session = getOrCreateSession(run.sessionId, 'ops_bot');
+    // 写入会话历史以便 Web 前端同步显示（归属到该巡检真正的执行 Bot）
+    const routine = proactive.getRoutine(run.routineId);
+    const session = getOrCreateSession(run.sessionId, routine?.agentId || 'muse');
     session.title = `[主动巡检] ${run.routineName}`;
     session.messages.push({ role: 'user', content: `[触发源: ${run.triggerSource}] 执行例行任务: ${run.routineName}` });
     session.messages.push({ role: 'assistant', content: output });
@@ -243,7 +244,6 @@ const proactive = new ProactiveManager({
     });
 
     // 定时任务执行产出精简展示到动态 (Feed)，并挂接直通完整执行会话的链接
-    const routine = proactive.getRoutine(run.routineId);
     const shouldPublishToFeed = (routine?.feedPublish !== false) && !run.quiet && output && output.trim().length > 0;
     if (shouldPublishToFeed) {
       const cleanOutput = output.trim();
@@ -444,6 +444,7 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname.startsWith('/api/routines') ||
     url.pathname.startsWith('/api/feed') ||
     url.pathname.startsWith('/api/goals') ||
+    url.pathname.startsWith('/api/approvals') ||
     url.pathname.startsWith('/api/audit') ||
     url.pathname.startsWith('/api/policy') ||
     url.pathname.startsWith('/api/grants') ||
@@ -1354,7 +1355,7 @@ fi
       const goal = goalStore.create({
         title: data.title,
         description: data.description || data.title,
-        botId: data.botId || data.bot_id || 'ops_bot',
+        botId: data.botId || data.bot_id || 'muse',
         userId: currentUser?.username || data.userId || data.user_id || 'admin',
         category: data.category,
         cadence: data.cadence,
@@ -1616,9 +1617,19 @@ fi
       );
 
       let fullAssistantText = '';
+      let clientGone = false;
+      let finished = false;
+
+      // 用户点「停止」或关掉页面：终结这一轮，而不是留着后台继续跑
+      res.on('close', () => {
+        if (finished) return;
+        clientGone = true;
+        sentinel.cancelPendingForSession(session.id);
+      });
 
       try {
         for await (const event of loop) {
+          if (clientGone) break;
           if (event.type === 'stream:text-delta') {
             fullAssistantText += event.text;
           }
@@ -1627,28 +1638,47 @@ fi
         }
 
         session.messages.push({ role: 'user', content: promptWithImages });
-        if (fullAssistantText) {
-          session.messages.push({ role: 'assistant', content: fullAssistantText });
+        if (fullAssistantText || clientGone) {
+          const content = clientGone
+            ? `${fullAssistantText ? `${fullAssistantText}\n\n` : ''}（已停止）`
+            : fullAssistantText;
+          session.messages.push({ role: 'assistant', content });
         }
         sessionStore.save(session, userId);
-        feedStore.recordActivity(userId, {
-          kind: 'chat',
-          title: session.title || '任务会话',
-          text: fullAssistantText.slice(0, 150),
-          sessionId: session.id,
-          sessionTitle: session.title
-        });
+        if (!clientGone) {
+          feedStore.recordActivity(userId, {
+            kind: 'chat',
+            title: session.title || '任务会话',
+            text: fullAssistantText.slice(0, 150),
+            sessionId: session.id,
+            sessionTitle: session.title
+          });
+        } else {
+          console.log(`[Chat] 客户端已断开，本轮终止: session=${session.id}`);
+        }
       } catch (err: any) {
-        res.write(`data: ${JSON.stringify({
-          type: 'agent:error',
-          error: err.message,
-          text: `\n[执行出错: ${err.message}]`,
-          bot_id: bot.id,
-          session_id: session.id
-        })}\n\n`);
+        if (!clientGone) {
+          try {
+            res.write(`data: ${JSON.stringify({
+              type: 'agent:error',
+              error: err.message,
+              text: `\n[执行出错: ${err.message}]`,
+              bot_id: bot.id,
+              session_id: session.id
+            })}\n\n`);
+          } catch {
+            /* 浏览器可能已经断开 */
+          }
+        }
+      } finally {
+        finished = true;
       }
 
-      return res.end();
+      try {
+        return res.end();
+      } catch {
+        return undefined;
+      }
     }
 
     // B4. 运行时上传文件（工件、聊天图片、自定义头像）不在构建产物里，单独托管

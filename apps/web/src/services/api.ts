@@ -74,10 +74,11 @@ export const api = {
       return [];
     }
   },
-  sendDecision: (sessionId: string, actionId: string, decision: 'APPROVE' | 'REJECT') =>
-    request<{ success: boolean }>(`/api/sessions/${sessionId}/decision`, {
+  // 服务端只提供 /api/approvals/:approvalId，参数是 approved/scope
+  sendDecision: (_sessionId: string, actionId: string, decision: 'APPROVE' | 'REJECT') =>
+    request<{ success: boolean }>(`/api/approvals/${encodeURIComponent(actionId)}`, {
       method: 'POST',
-      body: JSON.stringify({ actionId, decision }),
+      body: JSON.stringify({ approved: decision === 'APPROVE', scope: 'once', operator: 'web' }),
     }),
 
   // Models
@@ -105,8 +106,13 @@ export const api = {
 
   // Routines
   getRoutines: () => request<Routine[]>('/api/routines'),
-  createRoutine: (data: Partial<Routine>) =>
-    request<Routine>('/api/routines', { method: 'POST', body: JSON.stringify(data) }),
+  createRoutine: async (data: Partial<Routine>): Promise<Routine> => {
+    const res = await request<{ success: boolean; routine: Routine }>('/api/routines', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return (res as any)?.routine ?? (res as unknown as Routine);
+  },
   updateRoutine: (id: string, data: Partial<Routine>) =>
     request<Routine>(`/api/routines/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteRoutine: (id: string) => request<{ success: boolean }>(`/api/routines/${id}`, { method: 'DELETE' }),

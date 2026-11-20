@@ -163,15 +163,7 @@ export const ModelSettingsModal: React.FC = () => {
       </div>
 
       {/* 模型服务商网格 */}
-      <div
-        className="model-providers-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '10px',
-          marginBottom: '20px',
-        }}
-      >
+      <div className="model-providers-grid">
         {modelsConfig?.providers.map((p) => {
           const isSelected = p.id === selectedProviderId;
           const isActive = p.id === modelsConfig.activeProviderId;

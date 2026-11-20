@@ -466,7 +466,34 @@ export class SentinelPolicyManager implements SentinelHook {
     return new Promise<boolean>((resolve) => {
       this.pendingApprovals.set(request.approvalId, { request, resolve });
       console.log(`[Sentinel] 动作已挂起，等待审批 ID: ${request.approvalId}`);
+
+      // 人一直不回来（关页面/断线）时，别把会话永久挂住
+      const timer = setTimeout(() => {
+        const item = this.pendingApprovals.get(request.approvalId);
+        if (!item) return;
+        item.request.status = 'rejected';
+        item.request.decidedAt = Date.now();
+        item.resolve(false);
+        this.pendingApprovals.delete(request.approvalId);
+        console.warn(`[Sentinel] 审批超时自动拒绝: ${request.approvalId}`);
+      }, 15 * 60 * 1000);
+      timer.unref?.();
     });
+  }
+
+  /** 用户点「停止」时，把它这一轮的待审批项一并拒绝 */
+  public cancelPendingForSession(sessionId: string, reason = '客户端已断开'): number {
+    let cancelled = 0;
+    for (const [approvalId, item] of this.pendingApprovals) {
+      if (item.request.sessionId !== sessionId) continue;
+      item.request.status = 'rejected';
+      item.request.decidedAt = Date.now();
+      item.resolve(false);
+      this.pendingApprovals.delete(approvalId);
+      cancelled += 1;
+      console.log(`[Sentinel] 审批随会话结束取消: ${approvalId} (${reason})`);
+    }
+    return cancelled;
   }
 
   // 供 Web 或企业 IM 回调的解挂方法 (支持授予 once / session / 24h / always 作用域)

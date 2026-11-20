@@ -7,8 +7,10 @@ import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
 export const ChatView: React.FC = () => {
-  const { activeSessionId, activeBot, showToast, setTainted, createNewSession } = useApp();
+  const { activeSessionId, activeBot, showToast, setTainted, createNewSession, loadSessions } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [loadingSession, setLoadingSession] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
@@ -20,22 +22,35 @@ export const ChatView: React.FC = () => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Load message history on active session change
+  // 切换会话：先清空再拉取，并丢弃过期响应（避免快速切换时串话）
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([]);
+      setLoadingSession(false);
       return;
     }
+    let cancelled = false;
+    setMessages([]);
+    setLoadingSession(true);
     api
       .getMessages(activeSessionId)
       .then((res) => {
+        if (cancelled) return;
         setMessages(Array.isArray(res) ? res : []);
         setTimeout(scrollToBottom, 50);
       })
       .catch((err) => {
+        if (cancelled) return;
         console.error('Failed to load messages:', err);
+        showToast(`会话记录载入失败：${err.message}`, 'error');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSession(false);
       });
-  }, [activeSessionId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, showToast]);
 
   useEffect(() => {
     scrollToBottom();
@@ -67,11 +82,16 @@ export const ChatView: React.FC = () => {
     setStreamingReasoning('');
     setStreamingTools([]);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let accumulatedText = '';
+
     try {
       const response = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify({
           prompt: text,
           text,
@@ -93,7 +113,6 @@ export const ChatView: React.FC = () => {
 
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
-      let accumulatedText = '';
       let accumulatedReasoning = '';
       const toolsAccumulator: any[] = [];
 
@@ -178,28 +197,53 @@ export const ChatView: React.FC = () => {
         setMessages((prev) => [...prev, fallbackMsg]);
       }
     } catch (err: any) {
-      showToast(`对话失败: ${err.message}`, 'error');
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err_${Date.now()}`,
-          role: 'assistant',
-          content: `❌ 通信异常: ${err.message}`,
-          timestamp: Date.now(),
-        },
-      ]);
+      if (err?.name === 'AbortError') {
+        const partial = accumulatedText.trim();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `stop_${Date.now()}`,
+            role: 'assistant',
+            content: partial ? `${partial}\n\n（已停止这一轮）` : '（已停止这一轮）',
+            timestamp: Date.now(),
+          },
+        ]);
+      } else {
+        showToast(`对话失败: ${err.message}`, 'error');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err_${Date.now()}`,
+            role: 'assistant',
+            content: `❌ 通信异常: ${err.message}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
     } finally {
+      abortRef.current = null;
       setIsStreaming(false);
       setStreamingContent('');
       setStreamingReasoning('');
       setStreamingTools([]);
+      // 首轮之后标题/条数由服务端生成，刷新侧栏
+      if (activeBot?.id) loadSessions(activeBot.id);
     }
+  };
+
+  const handleStop = () => {
+    abortRef.current?.abort();
   };
 
   return (
     <section className="chat-container">
       <div className="chat-history">
-        {messages.length === 0 && !isStreaming ? (
+        {loadingSession ? (
+          <div className="chat-loading" role="status" aria-live="polite">
+            <span className="chat-loading-dot" />
+            正在载入会话记录…
+          </div>
+        ) : messages.length === 0 && !isStreaming ? (
           <div style={{ textAlign: 'center', color: 'var(--text-dim)', margin: 'auto', padding: '40px' }}>
             <div
               style={{
@@ -209,9 +253,9 @@ export const ChatView: React.FC = () => {
                 width: '56px',
                 height: '56px',
                 borderRadius: '18px',
-                background: '#ffffff',
+                background: 'var(--om-surface)',
                 border: '1px solid var(--om-border)',
-                boxShadow: '0 4px 14px rgba(0, 100, 212, 0.1)',
+                boxShadow: '0 4px 14px color-mix(in srgb, var(--om-accent) 12%, transparent)',
                 marginBottom: '16px',
               }}
             >
@@ -253,7 +297,7 @@ export const ChatView: React.FC = () => {
       <ChatComposer
         onSendMessage={handleSendMessage}
         isStreaming={isStreaming}
-        onClearMessages={() => setMessages([])}
+        onStop={handleStop}
       />
     </section>
   );

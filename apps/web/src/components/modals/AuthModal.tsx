@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import { User as UserIcon, LogOut } from 'lucide-react';
@@ -15,6 +15,15 @@ export const AuthModal: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 关闭弹窗时清掉密码，不留在内存和输入框里
+  useEffect(() => {
+    if (!isAuthModalOpen) {
+      setPassword('');
+      setConfirmPassword('');
+      setErrorMsg('');
+    }
+  }, [isAuthModalOpen]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,7 +179,11 @@ export const AuthModal: React.FC = () => {
           </div>
 
           {errorMsg && (
-            <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', fontSize: '12.5px', marginBottom: '14px' }}>
+            <div
+              role="alert"
+              aria-live="polite"
+              style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', fontSize: '12.5px', marginBottom: '14px' }}
+            >
               {errorMsg}
             </div>
           )}
@@ -178,8 +191,11 @@ export const AuthModal: React.FC = () => {
           {activeTab === 'login' ? (
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>用户名</label>
+                <label htmlFor="login-username" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>用户名</label>
                 <input
+                  id="login-username"
+                  name="username"
+                  autoComplete="username"
                   type="text"
                   required
                   placeholder="请输入账号用户名"
@@ -189,8 +205,11 @@ export const AuthModal: React.FC = () => {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>密码</label>
+                <label htmlFor="login-password" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>密码</label>
                 <input
+                  id="login-password"
+                  name="password"
+                  autoComplete="current-password"
                   type="password"
                   required
                   placeholder="请输入密码"
@@ -211,8 +230,11 @@ export const AuthModal: React.FC = () => {
           ) : (
             <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>用户名</label>
+                <label htmlFor="reg-username" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>用户名</label>
                 <input
+                  id="reg-username"
+                  name="username"
+                  autoComplete="username"
                   type="text"
                   required
                   placeholder="2-32位字符"
@@ -222,8 +244,11 @@ export const AuthModal: React.FC = () => {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>显示昵称 (选填)</label>
+                <label htmlFor="reg-display" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>显示昵称 (选填)</label>
                 <input
+                  id="reg-display"
+                  name="displayName"
+                  autoComplete="nickname"
                   type="text"
                   placeholder="例如：开发助手小李"
                   value={displayName}
@@ -232,10 +257,14 @@ export const AuthModal: React.FC = () => {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>密码</label>
+                <label htmlFor="reg-password" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>密码</label>
                 <input
+                  id="reg-password"
+                  name="new-password"
+                  autoComplete="new-password"
                   type="password"
                   required
+                  minLength={6}
                   placeholder="至少 6 位密码"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -243,10 +272,14 @@ export const AuthModal: React.FC = () => {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>确认密码</label>
+                <label htmlFor="reg-confirm" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>确认密码</label>
                 <input
+                  id="reg-confirm"
+                  name="confirm-password"
+                  autoComplete="new-password"
                   type="password"
                   required
+                  minLength={6}
                   placeholder="再次输入密码"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

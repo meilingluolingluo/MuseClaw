@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ModalProps {
@@ -26,15 +26,58 @@ export const Modal: React.FC<ModalProps> = ({
   contentClass = '',
   zIndex = 1000,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const titleId = useId();
+
   useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+
+    // 打开时把焦点移进对话框，关闭后还给原来的元素
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    const root = dialogRef.current;
+    const getFocusable = () =>
+      Array.from(
+        root?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ) || []
+      ).filter((el) => el.offsetParent !== null);
+    const firstField = root?.querySelector<HTMLElement>('input, textarea, select');
+    (firstField || getFocusable()[0] || root)?.focus?.();
+
+    // 背景不跟着滚
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const items = getFocusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.body.style.overflow = previousOverflow;
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [isOpen]);
 
   if (!isOpen || typeof document === 'undefined') return null;
 
@@ -45,6 +88,11 @@ export const Modal: React.FC<ModalProps> = ({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={`modal-content ${contentClass}`}
         style={{ maxWidth, width: '92%' }}
         onClick={(e) => e.stopPropagation()}
@@ -53,7 +101,7 @@ export const Modal: React.FC<ModalProps> = ({
           <div className="modal-header">
             <div className="modal-title-wrap">
               {icon && <span className="modal-header-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>{icon}</span>}
-              <h3 className="modal-title">
+              <h3 className="modal-title" id={titleId}>
                 {title}
               </h3>
             </div>

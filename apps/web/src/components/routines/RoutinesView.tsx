@@ -60,9 +60,9 @@ export const RoutinesView: React.FC = () => {
     try {
       const created = await api.createRoutine({
         name: name.trim(),
-        cron: cron.trim(),
-        prompt: prompt.trim(),
-        targetBotId: targetBotId || (bots[0] ? bots[0].id : 'default'),
+        instructions: prompt.trim(),
+        cronExpr: cron.trim(),
+        agentId: targetBotId || (bots[0] ? bots[0].id : 'muse'),
         enabled: true,
       });
       setRoutines((prev) => [...prev, created]);
@@ -119,25 +119,14 @@ export const RoutinesView: React.FC = () => {
 
   const filtered = routines.filter((r) =>
     r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (r.prompt && r.prompt.toLowerCase().includes(searchQuery.toLowerCase()))
+    ((r as any).instructions || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
-    <section className="view-stage" style={{ padding: 0, height: 'calc(100vh - 54px)', overflow: 'hidden' }}>
-      <div className="routines-workspace" style={{ display: 'flex', height: '100%' }}>
+    <section className="view-stage routines-view">
+      <div className="routines-workspace">
         {/* Left column list */}
-        <aside
-          className="routines-sidebar"
-          style={{
-            width: '280px',
-            minWidth: '220px',
-            flexShrink: 0,
-            borderRight: '1px solid var(--om-border)',
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'var(--om-surface)',
-          }}
-        >
+        <aside className="routines-sidebar">
           <div
             className="routines-sidebar-header"
             style={{
@@ -206,7 +195,7 @@ export const RoutinesView: React.FC = () => {
                     </span>
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
-                    {r.cron || '周期调度'}
+                    {r.cronExpr || '周期调度'}
                   </div>
                 </div>
               );
@@ -215,7 +204,7 @@ export const RoutinesView: React.FC = () => {
         </aside>
 
         {/* Right column detail */}
-        <main className="routines-main-content" style={{ flex: 1, minWidth: '380px', overflowY: 'auto', padding: '24px' }}>
+        <main className="routines-main-content">
           {!activeRoutine ? (
             <div style={{ textAlign: 'center', padding: '60px 16px', color: 'var(--text-dim)' }}>
               <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏰</div>
@@ -226,12 +215,12 @@ export const RoutinesView: React.FC = () => {
             </div>
           ) : (
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '220px' }}>
                   <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: 600 }}>{activeRoutine.name}</h3>
-                  <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>调度表达式: <code>{activeRoutine.cron}</code></div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>调度表达式: <code>{activeRoutine.cronExpr || '未设置'}</code></div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0, flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     className="btn-secondary"
@@ -264,7 +253,7 @@ export const RoutinesView: React.FC = () => {
               <div style={{ background: 'var(--om-surface)', border: '1px solid var(--om-border)', borderRadius: '10px', padding: '16px', marginBottom: '24px' }}>
                 <div style={{ fontSize: '12.5px', fontWeight: 600, marginBottom: '6px' }}>执行指令提示词 (Prompt)</div>
                 <pre style={{ margin: 0, fontSize: '12px', color: 'var(--text-main)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                  {activeRoutine.prompt}
+                  {activeRoutine.instructions || '（未填写执行指令）'}
                 </pre>
               </div>
 

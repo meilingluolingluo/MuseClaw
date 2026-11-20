@@ -93,15 +93,18 @@ export interface Routine {
   id: string;
   name: string;
   description?: string;
-  cron?: string;
-  intervalMs?: number;
+  /** 服务端字段：cron 表达式，如 "0 9 * * 1-5" */
+  cronExpr: string;
+  /** 服务端字段：执行指令 */
+  instructions: string;
+  /** 归属的数字员工 */
+  agentId: string;
   enabled: boolean;
-  targetBotId: string;
-  prompt: string;
-  sandboxMode?: boolean;
+  status?: 'idle' | 'running' | 'paused';
   nextRunAt?: number;
   lastRunAt?: number;
   lastStatus?: string;
+  createdAt?: number;
 }
 
 export interface MemoryItem {
