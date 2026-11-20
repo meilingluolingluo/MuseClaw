@@ -102,9 +102,11 @@ const dom = {
   btnSendMessage: document.getElementById('btn-send-message'),
   btnComposerAttach: document.getElementById('btn-composer-attach'),
   composerAttachPopover: document.getElementById('composer-attach-popover'),
+  btnPopoverUploadImage: document.getElementById('btn-popover-upload-image'),
   btnPopoverUploadFile: document.getElementById('btn-popover-upload-file'),
   btnPopoverSelectArtifact: document.getElementById('btn-popover-select-artifact'),
   composerFileInput: document.getElementById('composer-file-input'),
+  composerImageInput: document.getElementById('composer-image-input'),
   composerAttachmentsBar: document.getElementById('composer-attachments-bar'),
   btnComposerCommands: document.getElementById('btn-composer-commands'),
   composerCommandsPopover: document.getElementById('composer-commands-popover'),
@@ -213,6 +215,18 @@ function initMarkedRenderer() {
           return `<li class="task-list-item">${text}</li>`;
         }
         return `<li>${text}</li>`;
+      },
+      image(href, title, text) {
+        const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+        const altAttr = text ? ` alt="${escapeHtml(text)}"` : ' alt="image"';
+        const safeHref = escapeHtml(href);
+        const caption = text ? `<div class="markdown-image-caption">${escapeHtml(text)}</div>` : '';
+        return `
+          <div class="markdown-image-wrapper">
+            <img src="${safeHref}"${altAttr}${titleAttr} class="markdown-image" loading="lazy" onclick="window.previewImageLightbox('${safeHref}', '${escapeHtml(text || '图片预览')}')" />
+            ${caption}
+          </div>
+        `;
       },
       code(code, lang) {
         const language = (lang || '').trim().toLowerCase();
@@ -323,6 +337,40 @@ window.copyCodeFromBlock = async function (btn) {
   } catch (err) {
     console.error('复制代码失败:', err);
   }
+};
+
+// 全局图片灯箱放大预览交互函数
+window.previewImageLightbox = function (src, caption) {
+  if (!src) return;
+  const existing = document.getElementById('image-lightbox-modal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'image-lightbox-modal';
+  overlay.className = 'image-lightbox-overlay';
+  overlay.onclick = (e) => {
+    if (e.target === overlay || e.target.closest('.image-lightbox-close')) {
+      overlay.remove();
+    }
+  };
+
+  overlay.innerHTML = `
+    <div class="image-lightbox-container" onclick="event.stopPropagation()">
+      <button type="button" class="image-lightbox-close" title="关闭 (Esc)">✕</button>
+      <img src="${escapeHtml(src)}" alt="${escapeHtml(caption || '')}" class="image-lightbox-img" />
+      ${caption ? `<div class="image-lightbox-caption">${escapeHtml(caption)}</div>` : ''}
+    </div>
+  `;
+
+  const escListener = (e) => {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', escListener);
+    }
+  };
+  document.addEventListener('keydown', escListener);
+
+  document.body.appendChild(overlay);
 };
 
 // 离线轻量 Markdown 兜底解析器 (保证断网与离线环境完整渲染)
@@ -443,6 +491,7 @@ function renderMarkdownFallback(text) {
     }
 
     let formatted = escapeHtml(rawLine);
+    formatted = formatted.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="markdown-image-wrapper"><img src="$2" alt="$1" class="markdown-image" onclick="window.previewImageLightbox(\'$2\', \'$1\')" /></div>');
     formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="markdown-link">$1</a>');
     formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
     formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -817,6 +866,8 @@ function initIcons() {
   if (elCmds) elCmds.innerHTML = Icons.command(14);
   const elClear = document.getElementById('icon-composer-clear');
   if (elClear) elClear.innerHTML = Icons.trash(14);
+  const elPopImg = document.getElementById('icon-popover-image');
+  if (elPopImg) elPopImg.innerHTML = Icons.image(16);
   const elPopUpload = document.getElementById('icon-popover-upload');
   if (elPopUpload) elPopUpload.innerHTML = Icons.upload(16);
   const elPopArt = document.getElementById('icon-popover-artifact');
@@ -1371,6 +1422,31 @@ function renderChatMessages() {
   dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
 }
 
+function renderUserMessage(content) {
+  if (!content) return '';
+  const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  const images = [];
+  let textOnly = content.replace(imgRegex, (match, alt, src) => {
+    images.push({ alt: alt || '用户图片', src });
+    return '';
+  }).trim();
+
+  let html = '';
+  if (textOnly) {
+    html += `<div class="user-text">${escapeHtml(textOnly).replace(/\n/g, '<br>')}</div>`;
+  }
+  if (images.length > 0) {
+    html += `
+      <div class="user-message-images">
+        ${images.map((img) => `
+          <img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.alt)}" class="user-bubble-image" onclick="window.previewImageLightbox('${escapeHtml(img.src)}', '${escapeHtml(img.alt)}')" />
+        `).join('')}
+      </div>
+    `;
+  }
+  return html || escapeHtml(content);
+}
+
 function appendMessageBubble(role, content) {
   const row = document.createElement('div');
   row.className = `message-row ${role}`;
@@ -1378,7 +1454,7 @@ function appendMessageBubble(role, content) {
   const bot = state.bots.find((b) => b.id === state.activeBotId);
   const avatar = role === 'user' ? '<div style="font-size: 20px;">👤</div>' : renderBotAvatar(bot, { size: 38, motion: 'avatar-idle' });
 
-  const bubbleContent = role === 'user' ? `<div class="message-bubble">${escapeHtml(content || '')}</div>` : `<div class="message-bubble">${renderMarkdown(content || '')}</div>`;
+  const bubbleContent = role === 'user' ? `<div class="message-bubble">${renderUserMessage(content || '')}</div>` : `<div class="message-bubble">${renderMarkdown(content || '')}</div>`;
 
   row.innerHTML = `
     <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${avatar}</div>
@@ -1410,12 +1486,16 @@ function renderComposerAttachments() {
 
   dom.composerAttachmentsBar.style.display = 'flex';
   dom.composerAttachmentsBar.innerHTML = state.composerAttachments.map((att, idx) => {
+    const isImage = att.type === 'image';
     const isArtifact = att.type === 'artifact';
-    const iconSvg = isArtifact ? Icons.artifacts(14) : Icons.fileText(14);
+    const iconSvg = isImage
+      ? `<img src="${att.previewUrl || att.dataUrl}" class="attachment-thumbnail" alt="${escapeHtml(att.name)}" onclick="window.previewImageLightbox('${att.previewUrl || att.dataUrl}', '${escapeHtml(att.name)}')" />`
+      : (isArtifact ? Icons.artifacts(14) : Icons.fileText(14));
     const label = escapeHtml(att.name);
     const sub = att.size ? ` (${escapeHtml(att.size)})` : '';
+    const extraClass = isImage ? ' composer-attachment-image' : '';
     return `
-      <div class="composer-attachment-tag">
+      <div class="composer-attachment-tag${extraClass}">
         <span class="attachment-tag-icon">${iconSvg}</span>
         <span class="attachment-tag-name" title="${label}">${label}${sub}</span>
         <button type="button" class="attachment-tag-remove" data-index="${idx}" title="移除">
@@ -1577,6 +1657,62 @@ const COMPOSER_COMMANDS = [
   { name: '/model', desc: '配置 AI 大模型接入服务', action: () => openModelSettingsModal() }
 ];
 
+async function processIncomingFile(file) {
+  if (!file) return;
+  const isImg = file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name);
+  if (isImg) {
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const dataUrl = evt.target?.result || '';
+      const attachmentItem = {
+        type: 'image',
+        name: file.name || '图片',
+        size: formatComposerFileSize(file.size),
+        dataUrl,
+        previewUrl: dataUrl,
+        status: 'uploading'
+      };
+      state.composerAttachments.push(attachmentItem);
+      renderComposerAttachments();
+      updateSendButtonState();
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: dataUrl, name: file.name })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.url) {
+            attachmentItem.url = data.url;
+            attachmentItem.previewUrl = data.url;
+            attachmentItem.status = 'ready';
+          }
+        }
+      } catch (err) {
+        console.warn('图片存储接口访问失败，回退为 DataURL 模式:', err);
+        attachmentItem.status = 'ready';
+      }
+    };
+    reader.readAsDataURL(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target?.result || '';
+      state.composerAttachments.push({
+        type: 'file',
+        name: file.name,
+        size: formatComposerFileSize(file.size),
+        content: typeof content === 'string' ? content : ''
+      });
+      renderComposerAttachments();
+      updateSendButtonState();
+    };
+    reader.readAsText(file);
+  }
+}
+
 function initComposerControls() {
   if (dom.composerCommandsList) {
     dom.composerCommandsList.innerHTML = COMPOSER_COMMANDS.map((cmd) => {
@@ -1616,6 +1752,22 @@ function initComposerControls() {
     };
   }
 
+  if (dom.btnPopoverUploadImage && dom.composerImageInput) {
+    dom.btnPopoverUploadImage.onclick = (e) => {
+      e.stopPropagation();
+      closeAllComposerPopovers();
+      dom.composerImageInput.click();
+    };
+  }
+
+  if (dom.composerImageInput) {
+    dom.composerImageInput.onchange = (e) => {
+      const files = Array.from(e.target.files || []);
+      files.forEach((file) => processIncomingFile(file));
+      e.target.value = '';
+    };
+  }
+
   if (dom.btnPopoverUploadFile && dom.composerFileInput) {
     dom.btnPopoverUploadFile.onclick = (e) => {
       e.stopPropagation();
@@ -1627,23 +1779,7 @@ function initComposerControls() {
   if (dom.composerFileInput) {
     dom.composerFileInput.onchange = (e) => {
       const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-
-      files.forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          const content = evt.target?.result || '';
-          state.composerAttachments.push({
-            type: 'file',
-            name: file.name,
-            size: formatComposerFileSize(file.size),
-            content: typeof content === 'string' ? content : ''
-          });
-          renderComposerAttachments();
-        };
-        reader.readAsText(file);
-      });
-
+      files.forEach((file) => processIncomingFile(file));
       e.target.value = '';
     };
   }
@@ -1691,6 +1827,55 @@ function initComposerControls() {
         if (dom.btnComposerCommands) dom.btnComposerCommands.classList.add('active');
       }
     };
+
+    dom.composerInput.addEventListener('paste', (e) => {
+      const items = (e.clipboardData || window.clipboardData)?.items;
+      if (!items) return;
+      let hasImage = false;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type && item.type.startsWith('image/')) {
+          const blob = item.getAsFile();
+          if (blob) {
+            hasImage = true;
+            const ext = item.type.split('/')[1] || 'png';
+            const filename = `screenshot_${Date.now()}.${ext}`;
+            const file = new File([blob], filename, { type: item.type });
+            processIncomingFile(file);
+          }
+        }
+      }
+      if (hasImage) {
+        e.preventDefault();
+      }
+    });
+  }
+
+  const composerWrap = document.querySelector('.chat-composer-wrap');
+  if (composerWrap) {
+    ['dragenter', 'dragover'].forEach((eventName) => {
+      composerWrap.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        composerWrap.classList.add('drag-active');
+      });
+    });
+    ['dragleave', 'dragend', 'drop'].forEach((eventName) => {
+      composerWrap.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        composerWrap.classList.remove('drag-active');
+      });
+    });
+    composerWrap.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      composerWrap.classList.remove('drag-active');
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (files.length > 0) {
+        files.forEach((file) => processIncomingFile(file));
+      }
+    });
   }
 
   document.addEventListener('click', (e) => {
@@ -1716,22 +1901,42 @@ async function sendMessage() {
   const effectiveUserId = getOrCreateUserId();
   let displayText = rawText;
   let effectivePrompt = rawText;
+  const imagesToSend = [];
 
   if (hasAttachments) {
-    const attachTags = state.composerAttachments.map((att) => {
+    const nonImageAttachments = [];
+    state.composerAttachments.forEach((att) => {
+      if (att.type === 'image') {
+        const imgUrl = att.url || att.dataUrl;
+        if (imgUrl) imagesToSend.push(imgUrl);
+      } else {
+        nonImageAttachments.push(att);
+      }
+    });
+
+    const imageMarkdownList = imagesToSend.map((url, i) => `![附图 ${i + 1}](${url})`).join('\n');
+
+    const attachTags = nonImageAttachments.map((att) => {
       return att.type === 'artifact' ? `[工件: ${att.name}]` : `[文件: ${att.name}]`;
     }).join(' ');
 
-    displayText = displayText ? `${attachTags}\n${displayText}` : attachTags;
+    const displayParts = [];
+    if (attachTags) displayParts.push(attachTags);
+    if (displayText) displayParts.push(displayText);
+    if (imageMarkdownList) displayParts.push(imageMarkdownList);
+    displayText = displayParts.join('\n');
 
-    const attachBlocks = state.composerAttachments.map((att) => {
+    const attachBlocks = nonImageAttachments.map((att) => {
       if (att.type === 'artifact') {
         return `【引用交付工件: ${att.name}】`;
       }
       return `【附加本地文件: ${att.name}${att.size ? ` (${att.size})` : ''}】\n\`\`\`\n${att.content || ''}\n\`\`\``;
     }).join('\n\n');
 
-    effectivePrompt = effectivePrompt ? `${attachBlocks}\n\n${effectivePrompt}` : attachBlocks;
+    const promptParts = [];
+    if (attachBlocks) promptParts.push(attachBlocks);
+    if (effectivePrompt) promptParts.push(effectivePrompt);
+    effectivePrompt = promptParts.join('\n\n');
   }
 
   if (dom.composerInput) {
@@ -1752,6 +1957,7 @@ async function sendMessage() {
   try {
     // 1. 添加用户消息气泡
     state.messages.push({ role: 'user', content: displayText });
+    appendMessageBubble('user', displayText);
     appendMessageBubble('user', displayText);
 
     const curSession = state.sessions.find((s) => s.id === state.activeSessionId);
@@ -1841,6 +2047,7 @@ async function sendMessage() {
         prompt: effectivePrompt,
         text: effectivePrompt,
         message: effectivePrompt,
+        images: imagesToSend,
         session_id: state.activeSessionId,
         bot_id: state.activeBotId,
         user_id: effectiveUserId

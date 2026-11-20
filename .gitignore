@@ -30,8 +30,12 @@ Thumbs.db
 # Scratch / Local testing
 scratch/
 tmp/
+apps/web/uploads/*
+!apps/web/uploads/.gitkeep
 apps/gateway/data/*
 !apps/gateway/data/web/
+apps/gateway/data/web/uploads/*
+!apps/gateway/data/web/uploads/.gitkeep
 
 # Graphify knowledge graph caches
 graphify-out/.graphify_*

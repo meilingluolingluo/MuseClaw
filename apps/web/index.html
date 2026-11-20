@@ -200,8 +200,9 @@
           </div>
 
           <div class="chat-composer-wrap">
-            <!-- 本地文件选择器 -->
-            <input type="file" id="composer-file-input" style="display: none;" multiple accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.html,.css,.py,.sh,.yml,.yaml,.sql,.log,.csv" />
+            <!-- 本地文件与图片选择器 -->
+            <input type="file" id="composer-file-input" style="display: none;" multiple accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.svg,.bmp,.ico,.txt,.md,.json,.js,.ts,.tsx,.jsx,.html,.css,.py,.sh,.yml,.yaml,.sql,.log,.csv" />
+            <input type="file" id="composer-image-input" style="display: none;" multiple accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" />
 
             <!-- 上下文附件与工件引用展示条 -->
             <div class="composer-attachments-bar" id="composer-attachments-bar" style="display: none;"></div>
@@ -210,7 +211,7 @@
               <textarea
                 class="composer-textarea"
                 id="composer-input"
-                placeholder="向数字员工下达指令（输入 / 快速唤起常用指令，Enter 发送）..."
+                placeholder="向数字员工下达指令（输入 / 快速唤起常用指令，Enter 发送，支持直接粘贴或拖拽图片）..."
                 rows="2"
               ></textarea>
 
@@ -218,16 +219,23 @@
                 <div class="composer-tools">
                   <!-- 1. 附件与工件引用 -->
                   <div class="composer-tool-group">
-                    <button type="button" class="composer-tool-btn" id="btn-composer-attach" title="添加文件附件或引用交付工件">
+                    <button type="button" class="composer-tool-btn" id="btn-composer-attach" title="添加图片/文件附件或引用交付工件">
                       <span id="icon-composer-attach"></span>
-                      <span class="composer-tool-label">附件 / 工件</span>
+                      <span class="composer-tool-label">附件 / 图片</span>
                     </button>
                     <div class="composer-popover" id="composer-attach-popover" style="display: none;">
                       <div class="composer-popover-header">添加会话上下文</div>
+                      <button type="button" class="composer-popover-item" id="btn-popover-upload-image">
+                        <span class="composer-popover-icon" id="icon-popover-image"></span>
+                        <div class="composer-popover-text">
+                          <span class="composer-popover-title">上传图片 / 截屏</span>
+                          <span class="composer-popover-desc">支持 PNG、JPG、WebP，亦支持直接在输入框粘贴</span>
+                        </div>
+                      </button>
                       <button type="button" class="composer-popover-item" id="btn-popover-upload-file">
                         <span class="composer-popover-icon" id="icon-popover-upload"></span>
                         <div class="composer-popover-text">
-                          <span class="composer-popover-title">上传本地文本/代码文件</span>
+                          <span class="composer-popover-title">上传文档 / 代码文件</span>
                           <span class="composer-popover-desc">导入 Markdown、JSON、源码或日志作为上下文</span>
                         </div>
                       </button>

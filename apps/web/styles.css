@@ -2379,6 +2379,148 @@ details[open] .thought-toggle::after {
   margin: 12px 0;
 }
 
+/* 8. 多模态图片排版与交互查看器 */
+.markdown-image-wrapper {
+  margin: 12px 0;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.markdown-image {
+  max-width: 100%;
+  max-height: 480px;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface-2);
+  display: block;
+  cursor: zoom-in;
+  object-fit: contain;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.markdown-image:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.markdown-image-caption {
+  font-size: 11.5px;
+  color: var(--om-muted);
+  text-align: center;
+  margin-top: 5px;
+  font-style: italic;
+}
+
+/* 用户消息气泡内的图片卡片 */
+.user-message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.user-bubble-image {
+  max-width: 280px;
+  max-height: 200px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: zoom-in;
+  object-fit: cover;
+  transition: transform 0.15s ease;
+  display: block;
+}
+
+.user-bubble-image:hover {
+  transform: scale(1.02);
+}
+
+/* 对话框附件条图片缩略图 */
+.composer-attachment-image {
+  padding-left: 4px !important;
+}
+
+.attachment-thumbnail {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 1px solid var(--om-border);
+  flex-shrink: 0;
+}
+
+.chat-composer-wrap.drag-active {
+  border-color: var(--om-accent) !important;
+  background-color: rgba(0, 100, 212, 0.04) !important;
+  box-shadow: 0 0 0 3px rgba(0, 100, 212, 0.15) !important;
+}
+
+/* 图片灯箱放大预览 (Lightbox) */
+.image-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.18s ease;
+  cursor: zoom-out;
+}
+
+.image-lightbox-container {
+  position: relative;
+  max-width: 92vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.image-lightbox-img {
+  max-width: 92vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+  user-select: none;
+}
+
+.image-lightbox-caption {
+  margin-top: 10px;
+  color: #f1f5f9;
+  font-size: 13px;
+  font-weight: 500;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: -38px;
+  right: 0;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #ffffff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.15s ease;
+}
+
+.image-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
 /* Routine & Audit Card Styles */
 .routine-card {
   background-color: var(--om-surface);

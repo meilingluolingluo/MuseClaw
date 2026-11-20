@@ -385,6 +385,8 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/tasks',
       '/api/chat',
       '/api/artifacts',
+      '/api/upload',
+      '/api/upload/image',
       '/api/upload/avatar',
       '/api/multica/status',
       '/api/runner/register',
@@ -416,6 +418,58 @@ export function startGatewayServer(defaultPort = 8799) {
       } catch {
         res.writeHead(500);
         return res.end('Web UI not found');
+      }
+    }
+
+    // B1. 通用图片与文件上传接口 (General File / Image Upload)
+    if (req.method === 'POST' && (url.pathname === '/api/upload' || url.pathname === '/api/upload/image')) {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const { image, file, name, ext: customExt } = JSON.parse(body || '{}');
+        const rawData = image || file;
+        if (!rawData) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'File data is required' }));
+        }
+
+        let buffer: Buffer;
+        let ext = customExt || '.png';
+        if (rawData.startsWith('data:')) {
+          const matches = rawData.match(/^data:([a-zA-Z0-9\/-]+);base64,(.+)$/);
+          if (matches) {
+            const mime = matches[1].toLowerCase();
+            if (mime.includes('png')) ext = '.png';
+            else if (mime.includes('jpeg') || mime.includes('jpg')) ext = '.jpg';
+            else if (mime.includes('webp')) ext = '.webp';
+            else if (mime.includes('gif')) ext = '.gif';
+            else if (mime.includes('svg')) ext = '.svg';
+            buffer = Buffer.from(matches[2], 'base64');
+          } else {
+            throw new Error('Invalid base64 data');
+          }
+        } else {
+          buffer = Buffer.from(rawData, 'utf-8');
+          ext = customExt || '.txt';
+        }
+
+        const safeName = (name || `upload_${Date.now()}`).replace(/[^\w.-]/g, '_');
+        const finalExt = path.extname(safeName) || ext;
+        const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${finalExt}`;
+        const uploadDir = path.resolve(__dirname, '../../web/uploads');
+        const backupUploadDir = path.resolve(__dirname, '../data/web/uploads');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        if (!fs.existsSync(backupUploadDir)) fs.mkdirSync(backupUploadDir, { recursive: true });
+
+        fs.writeFileSync(path.join(uploadDir, filename), buffer);
+        fs.writeFileSync(path.join(backupUploadDir, filename), buffer);
+
+        const fileUrl = `/uploads/${filename}`;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, url: fileUrl, filename }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
       }
     }
 
@@ -1246,6 +1300,15 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
       const userId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
       const requestedBotId = parsed.botId || parsed.bot_id;
+      const images: string[] = Array.isArray(parsed.images)
+        ? parsed.images
+        : (parsed.image ? [parsed.image] : []);
+
+      let promptWithImages = text;
+      if (images.length > 0) {
+        const imageMarkdown = images.map((img: string, i: number) => `![用户附图 ${i + 1}](${img})`).join('\n');
+        promptWithImages = promptWithImages ? `${promptWithImages}\n\n${imageMarkdown}` : imageMarkdown;
+      }
 
       // 1. 先进行多 Bot 路由解析 (@Mention 优先，再考虑 session_id 与 bot_id)
       let routeResult: RouteResult;
@@ -1301,7 +1364,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
 
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
-        text,
+        promptWithImages,
         refreshTools(),
         sentinel,
         userScopedCaller,
@@ -1319,7 +1382,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
           (res as any).flush?.();
         }
 
-        session.messages.push({ role: 'user', content: text });
+        session.messages.push({ role: 'user', content: promptWithImages });
         if (fullAssistantText) {
           session.messages.push({ role: 'assistant', content: fullAssistantText });
         }
@@ -1404,6 +1467,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
           '.png': 'image/png',
           '.jpg': 'image/jpeg',
           '.jpeg': 'image/jpeg',
+          '.gif': 'image/gif',
           '.svg': 'image/svg+xml',
           '.ico': 'image/x-icon',
           '.woff2': 'font/woff2',
