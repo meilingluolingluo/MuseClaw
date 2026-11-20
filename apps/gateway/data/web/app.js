@@ -144,18 +144,225 @@ const dom = {
 };
 
 // ============================================================================
-// Markdown 渲染器与安全转义
+// Markdown 渲染器与排版增强系统 (表格卡片化、状态微徽章、代码块复制与断网兜底)
 // ============================================================================
+let isMarkedRendererInitialized = false;
+
+function initMarkedRenderer() {
+  if (!window.marked || isMarkedRendererInitialized) return;
+  try {
+    const customRenderer = {
+      table(header, body) {
+        return `<div class="markdown-table-wrapper"><table class="markdown-table"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+      },
+      tablecell(content, flags) {
+        const alignAttr = flags.align ? ` style="text-align: ${flags.align};"` : '';
+        if (flags.header) {
+          return `<th${alignAttr}>${content}</th>`;
+        }
+        const formatted = formatStatusBadge(content);
+        return `<td${alignAttr}>${formatted}</td>`;
+      },
+      link(href, title, text) {
+        const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+        const cleanText = String(text || '').trim();
+        // 自动识别常见的工单/卡片编号 (例如 bcop-sop-77244, TASK-102, ISSUE-88 等)
+        const isIssue = /^[A-Za-z0-9_-]+-\d+$/i.test(cleanText) || /(?:icafe|bcop|jira|issue|task)/i.test(cleanText);
+        const extraClass = isIssue ? ' issue-link' : '';
+        return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener noreferrer" class="markdown-link${extraClass}">${text}</a>`;
+      },
+      code(code, lang) {
+        const language = (lang || '').trim().toLowerCase();
+        let highlighted = escapeHtml(code);
+        if (window.hljs) {
+          try {
+            if (language && window.hljs.getLanguage(language)) {
+              highlighted = window.hljs.highlight(code, { language }).value;
+            } else {
+              highlighted = window.hljs.highlightAuto(code).value;
+            }
+          } catch {
+            highlighted = escapeHtml(code);
+          }
+        }
+        const langLabel = language ? `<span class="code-lang">${escapeHtml(language)}</span>` : '<span class="code-lang">TEXT</span>';
+        const rawCodeAttr = escapeHtml(code);
+        return `
+          <div class="code-block-wrapper">
+            <div class="code-block-header">
+              ${langLabel}
+              <button type="button" class="btn-code-copy" data-code="${rawCodeAttr}" onclick="window.copyCodeFromBlock(this)">
+                <span>复制</span>
+              </button>
+            </div>
+            <pre><code class="hljs ${language}">${highlighted}</code></pre>
+          </div>
+        `;
+      }
+    };
+
+    window.marked.use({
+      renderer: customRenderer,
+      gfm: true,
+      breaks: true
+    });
+    isMarkedRendererInitialized = true;
+  } catch (err) {
+    console.warn('初始化 Marked 自定义渲染器失败:', err);
+  }
+}
+
+// 自动识别状态词汇并转换为微徽章
+function formatStatusBadge(rawContent) {
+  if (!rawContent || typeof rawContent !== 'string') return rawContent;
+  const trimmed = rawContent.trim();
+
+  // 若已经包含 HTML 标签或链接，直接返回
+  if (/<[a-z][\s\S]*>/i.test(trimmed)) {
+    return rawContent;
+  }
+
+  const successPattern = /^(?:开发完成|已完成|已上线|成功|通过|resolved|done|success|closed|active|ready)$/i;
+  const infoPattern = /^(?:开发中|进行中|执行中|处理中|排队中|in_progress|running|ongoing)$/i;
+  const warningPattern = /^(?:待审批|待处理|待确认|审核中|测试中|联调中|灰度中|pending|review|testing)$/i;
+  const dangerPattern = /^(?:高危|阻断|失败|驳回|异常|错误|blocked|rejected|failed|error)$/i;
+  const neutralPattern = /^(?:已关闭|已废弃|挂起|草稿|暂停|draft|paused|inactive)$/i;
+
+  if (successPattern.test(trimmed)) {
+    return `<span class="status-badge status-success">${escapeHtml(trimmed)}</span>`;
+  }
+  if (infoPattern.test(trimmed)) {
+    return `<span class="status-badge status-info">${escapeHtml(trimmed)}</span>`;
+  }
+  if (warningPattern.test(trimmed)) {
+    return `<span class="status-badge status-warning">${escapeHtml(trimmed)}</span>`;
+  }
+  if (dangerPattern.test(trimmed)) {
+    return `<span class="status-badge status-danger">${escapeHtml(trimmed)}</span>`;
+  }
+  if (neutralPattern.test(trimmed)) {
+    return `<span class="status-badge status-neutral">${escapeHtml(trimmed)}</span>`;
+  }
+
+  return rawContent;
+}
+
+// 全局代码块一键复制函数
+window.copyCodeFromBlock = async function (btn) {
+  const code = btn.getAttribute('data-code') || '';
+  if (!code) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(code);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = code;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    const span = btn.querySelector('span');
+    if (span) {
+      const originalText = span.textContent;
+      span.textContent = '已复制！';
+      btn.style.borderColor = 'var(--accent-green, #10b981)';
+      btn.style.color = 'var(--accent-green, #10b981)';
+      setTimeout(() => {
+        span.textContent = originalText;
+        btn.style.borderColor = '';
+        btn.style.color = '';
+      }, 1500);
+    }
+    showToast('代码已复制到剪贴板', 'success');
+  } catch (err) {
+    console.error('复制代码失败:', err);
+  }
+};
+
+// 离线轻量 Markdown 兜底解析器 (保证断网情况下表格与链接依然正常渲染)
+function renderMarkdownFallback(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  const output = [];
+  let inTable = false;
+  let tableHeader = [];
+  let tableRows = [];
+
+  const flushTable = () => {
+    if (!inTable) return;
+    let tHtml = '<div class="markdown-table-wrapper"><table class="markdown-table">';
+    if (tableHeader.length > 0) {
+      tHtml += '<thead><tr>' + tableHeader.map((h) => `<th>${h}</th>`).join('') + '</tr></thead>';
+    }
+    if (tableRows.length > 0) {
+      tHtml += '<tbody>' + tableRows.map((r) => '<tr>' + r.map((c) => `<td>${formatStatusBadge(c)}</td>`).join('') + '</tr>').join('') + '</tbody>';
+    }
+    tHtml += '</table></div>';
+    output.push(tHtml);
+    inTable = false;
+    tableHeader = [];
+    tableRows = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+
+    // 检查表格行
+    if (line.startsWith('|') && line.endsWith('|')) {
+      const cells = line.slice(1, -1).split('|').map((c) => {
+        let cell = c.trim();
+        // 链接转换
+        cell = cell.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+          const isIssue = /^[A-Za-z0-9_-]+-\d+$/i.test(text.trim()) || /(?:icafe|bcop|jira|issue|task)/i.test(text);
+          const issueClass = isIssue ? ' issue-link' : '';
+          return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="markdown-link${issueClass}">${escapeHtml(text)}</a>`;
+        });
+        return cell;
+      });
+
+      // 检查是否是分割线
+      if (cells.every((c) => /^:?-+:?$/.test(c))) {
+        continue;
+      }
+
+      if (!inTable) {
+        inTable = true;
+        tableHeader = cells;
+      } else {
+        tableRows.push(cells);
+      }
+    } else {
+      flushTable();
+      if (line) {
+        // 普通文本行内样式解析
+        let formatted = escapeHtml(rawLine);
+        formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="markdown-link">$1</a>');
+        formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+        formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        output.push(`<p>${formatted}</p>`);
+      }
+    }
+  }
+
+  flushTable();
+  return output.join('');
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
+  initMarkedRenderer();
   if (window.marked && typeof window.marked.parse === 'function') {
     try {
       return `<div class="markdown-body">${window.marked.parse(text)}</div>`;
-    } catch {
-      // fallback
+    } catch (e) {
+      console.warn('Marked 解析异常，使用兜底解析器:', e);
     }
   }
-  return `<div class="markdown-body" style="white-space: pre-wrap;">${escapeHtml(text)}</div>`;
+  return `<div class="markdown-body">${renderMarkdownFallback(text)}</div>`;
 }
 
 function escapeHtml(str) {
@@ -994,7 +1201,7 @@ function appendMessageBubble(role, content) {
   row.className = `message-row ${role}`;
 
   const bot = state.bots.find((b) => b.id === state.activeBotId);
-  const avatar = role === 'user' ? '<div style="font-size: 20px;">👤</div>' : renderBotAvatar(bot, { size: 36, motion: 'avatar-idle' });
+  const avatar = role === 'user' ? '<div style="font-size: 20px;">👤</div>' : renderBotAvatar(bot, { size: 38, motion: 'avatar-idle' });
 
   const bubbleContent = role === 'user' ? `<div class="message-bubble">${escapeHtml(content || '')}</div>` : `<div class="message-bubble">${renderMarkdown(content || '')}</div>`;
 
@@ -1384,7 +1591,7 @@ async function sendMessage() {
     assistantRow = document.createElement('div');
     assistantRow.className = 'message-row assistant';
     assistantRow.innerHTML = `
-      <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${bot ? renderBotAvatar(bot, { size: 36, motion: 'avatar-working', mood: 'working', useVideo: true }) : '🤖'}</div>
+      <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${bot ? renderBotAvatar(bot, { size: 38, motion: 'avatar-working', mood: 'working', useVideo: true }) : '🤖'}</div>
       <div class="message-bubble" id="streaming-bubble">
         <div id="plan-steps-container"></div>
         <div id="activity-container"></div>
