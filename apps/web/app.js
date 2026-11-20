@@ -161,7 +161,7 @@ function initMarkedRenderer() {
           return `<th${alignAttr} class="cell-nowrap">${content}</th>`;
         }
         const clean = String(content || '').trim();
-        // 自动识别短字段 (如类型 Task/Story/Feature、负责人、单号、日期、状态)，避免单词中途折断
+        // 自动识别短字段 (如类型、负责人、单号、日期、状态)，保持单行完整展示
         const isShortField = /^[\w\s.-]{1,24}$/.test(clean);
         const hasBadgeOrLink = clean.includes('status-badge') || clean.includes('issue-link') || clean.includes('<a ');
         const nowrapClass = (isShortField || hasBadgeOrLink) ? ' class="cell-nowrap"' : '';
@@ -171,10 +171,48 @@ function initMarkedRenderer() {
       link(href, title, text) {
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
         const cleanText = String(text || '').trim();
-        // 自动识别常见的工单/卡片编号 (例如 bcop-sop-77244, TASK-102, ISSUE-88 等)
+        // 自动识别工单、卡片或任务编号 (例如 bcop-sop-77244, TASK-102 等)
         const isIssue = /^[A-Za-z0-9_-]+-\d+$/i.test(cleanText) || /(?:icafe|bcop|jira|issue|task)/i.test(cleanText);
         const extraClass = isIssue ? ' issue-link' : '';
         return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener noreferrer" class="markdown-link${extraClass}">${text}</a>`;
+      },
+      blockquote(quote) {
+        // GitHub Alerts 体系解析 (支持 [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION])
+        const alertMatch = quote.match(/^\s*<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s*<br\s*\/?>)?([\s\S]*?)<\/p>/i);
+        if (alertMatch) {
+          const type = alertMatch[1].toLowerCase();
+          const icons = {
+            note: 'ℹ️',
+            tip: '💡',
+            important: '📢',
+            warning: '⚠️',
+            caution: '🛑'
+          };
+          const titleMap = {
+            note: 'Note',
+            tip: 'Tip',
+            important: 'Important',
+            warning: 'Warning',
+            caution: 'Caution'
+          };
+          const body = alertMatch[2];
+          return `
+            <div class="markdown-alert markdown-alert-${type}">
+              <div class="markdown-alert-title">
+                <span class="markdown-alert-icon">${icons[type] || 'ℹ️'}</span>
+                <span>${titleMap[type] || type.toUpperCase()}</span>
+              </div>
+              <div class="markdown-alert-content">${body}</div>
+            </div>
+          `;
+        }
+        return `<blockquote>${quote}</blockquote>`;
+      },
+      listitem(text, task) {
+        if (task) {
+          return `<li class="task-list-item">${text}</li>`;
+        }
+        return `<li>${text}</li>`;
       },
       code(code, lang) {
         const language = (lang || '').trim().toLowerCase();
@@ -287,7 +325,7 @@ window.copyCodeFromBlock = async function (btn) {
   }
 };
 
-// 离线轻量 Markdown 兜底解析器 (保证断网情况下表格与链接依然正常渲染)
+// 离线轻量 Markdown 兜底解析器 (保证断网与离线环境完整渲染)
 function renderMarkdownFallback(text) {
   if (!text) return '';
   const lines = text.split('\n');
@@ -295,15 +333,23 @@ function renderMarkdownFallback(text) {
   let inTable = false;
   let tableHeader = [];
   let tableRows = [];
+  let inCode = false;
+  let codeLang = '';
+  let codeBuffer = [];
 
   const flushTable = () => {
     if (!inTable) return;
     let tHtml = '<div class="markdown-table-wrapper"><table class="markdown-table">';
     if (tableHeader.length > 0) {
-      tHtml += '<thead><tr>' + tableHeader.map((h) => `<th>${h}</th>`).join('') + '</tr></thead>';
+      tHtml += '<thead><tr>' + tableHeader.map((h) => `<th class="cell-nowrap">${h}</th>`).join('') + '</tr></thead>';
     }
     if (tableRows.length > 0) {
-      tHtml += '<tbody>' + tableRows.map((r) => '<tr>' + r.map((c) => `<td>${formatStatusBadge(c)}</td>`).join('') + '</tr>').join('') + '</tbody>';
+      tHtml += '<tbody>' + tableRows.map((r) => '<tr>' + r.map((c) => {
+        const clean = c.replace(/<[^>]+>/g, '').trim();
+        const isShort = /^[\w\s.-]{1,24}$/.test(clean) || c.includes('status-badge') || c.includes('issue-link');
+        const cls = isShort ? ' class="cell-nowrap"' : '';
+        return `<td${cls}>${formatStatusBadge(c)}</td>`;
+      }).join('') + '</tr>').join('') + '</tbody>';
     }
     tHtml += '</table></div>';
     output.push(tHtml);
@@ -312,96 +358,186 @@ function renderMarkdownFallback(text) {
     tableRows = [];
   };
 
+  const flushCode = () => {
+    if (!inCode) return;
+    const rawCode = codeBuffer.join('\n');
+    const langLabel = codeLang ? `<span class="code-lang">${escapeHtml(codeLang.toUpperCase())}</span>` : '<span class="code-lang">TEXT</span>';
+    output.push(`
+      <div class="code-block-wrapper">
+        <div class="code-block-header">
+          ${langLabel}
+          <button type="button" class="btn-code-copy" data-code="${escapeHtml(rawCode)}" onclick="window.copyCodeFromBlock(this)">
+            <span>复制</span>
+          </button>
+        </div>
+        <pre><code>${escapeHtml(rawCode)}</code></pre>
+      </div>
+    `);
+    inCode = false;
+    codeLang = '';
+    codeBuffer = [];
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i];
-    const line = rawLine.trim();
+    const trimmed = rawLine.trim();
 
-    // 检查表格行
-    if (line.startsWith('|') && line.endsWith('|')) {
-      const cells = line.slice(1, -1).split('|').map((c) => {
+    if (trimmed.startsWith('```')) {
+      if (inCode) {
+        flushCode();
+      } else {
+        flushTable();
+        inCode = true;
+        codeLang = trimmed.slice(3).trim();
+      }
+      continue;
+    }
+
+    if (inCode) {
+      codeBuffer.push(rawLine);
+      continue;
+    }
+
+    if (trimmed.includes('|')) {
+      let cells = trimmed;
+      if (cells.startsWith('|')) cells = cells.slice(1);
+      if (cells.endsWith('|')) cells = cells.slice(0, -1);
+      const row = cells.split('|').map((c) => {
         let cell = c.trim();
-        // 链接转换
-        cell = cell.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
-          const isIssue = /^[A-Za-z0-9_-]+-\d+$/i.test(text.trim()) || /(?:icafe|bcop|jira|issue|task)/i.test(text);
+        cell = cell.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, txt, url) => {
+          const isIssue = /^[A-Za-z0-9_-]+-\d+$/i.test(txt.trim()) || /(?:icafe|bcop|jira|issue|task)/i.test(txt);
           const issueClass = isIssue ? ' issue-link' : '';
-          return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="markdown-link${issueClass}">${escapeHtml(text)}</a>`;
+          return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="markdown-link${issueClass}">${escapeHtml(txt)}</a>`;
         });
         return cell;
       });
 
-      // 检查是否是分割线
-      if (cells.every((c) => /^:?-+:?$/.test(c))) {
+      if (row.every((c) => /^:?-+:?$/.test(c.trim()))) {
         continue;
       }
 
       if (!inTable) {
         inTable = true;
-        tableHeader = cells;
+        tableHeader = row;
       } else {
-        tableRows.push(cells);
+        tableRows.push(row);
       }
-    } else {
-      flushTable();
-      if (line) {
-        // 普通文本行内样式解析
-        let formatted = escapeHtml(rawLine);
-        formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="markdown-link">$1</a>');
-        formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
-        formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        output.push(`<p>${formatted}</p>`);
-      }
+      continue;
     }
+
+    flushTable();
+
+    if (!trimmed) continue;
+
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      const level = trimmed.match(/^(#{1,6})\s+/)[1].length;
+      const text = trimmed.replace(/^#{1,6}\s+/, '');
+      output.push(`<h${level}>${escapeHtml(text)}</h${level}>`);
+      continue;
+    }
+
+    if (trimmed.startsWith('>')) {
+      const quote = trimmed.replace(/^>\s*/, '');
+      output.push(`<blockquote><p>${escapeHtml(quote)}</p></blockquote>`);
+      continue;
+    }
+
+    let formatted = escapeHtml(rawLine);
+    formatted = formatted.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="markdown-link">$1</a>');
+    formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
+    formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    output.push(`<p>${formatted}</p>`);
   }
 
   flushTable();
-  return output.join('');
+  flushCode();
+  return output.join('\n');
 }
 
-// 规范化 Markdown 表格排版，确保表格前后必然有空行隔离，杜绝普通正文被误识别为表格末行
-function normalizeMarkdownTables(md) {
-  if (!md || typeof md !== 'string') return '';
-  const lines = md.split('\n');
-  const result = [];
+// Markdown 结构预处理器：规范块级边界隔离、思考链折叠与流式代码块闭合
+function prepareMarkdownContent(text) {
+  if (!text || typeof text !== 'string') return '';
+  let content = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // 1. 抽取并规范化思考过程 <think>...</think>
+  content = content.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, (match, thought) => {
+    const isFinished = match.includes('</think>');
+    const trimmed = (thought || '').trim();
+    if (!trimmed && !isFinished) {
+      return '<div class="thought-container in-progress"><div class="thought-header"><span class="thought-icon">🧠</span><span class="thought-title">思考中...</span></div></div>\n\n';
+    }
+    const stateClass = isFinished ? 'completed' : 'in-progress';
+    const titleText = isFinished ? '思考过程' : '思考中...';
+    const openAttr = isFinished ? '' : ' open';
+    return `<details class="thought-container ${stateClass}"${openAttr}><summary class="thought-header"><span class="thought-icon">🧠</span><span class="thought-title">${titleText}</span><span class="thought-toggle"></span></summary><div class="thought-body">${escapeHtml(trimmed)}</div></details>\n\n`;
+  });
+
+  // 2. 块级边界隔离：保障表格与普通段落之间具备标准换行隔离
+  const lines = content.split('\n');
+  const sanitizedLines = [];
+  let inCodeBlock = false;
   let inTable = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    const isTableRow = trimmed.startsWith('|') && trimmed.endsWith('|');
+
+    if (trimmed.startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      if (inTable) {
+        sanitizedLines.push('');
+        inTable = false;
+      }
+      sanitizedLines.push(line);
+      continue;
+    }
+
+    if (inCodeBlock) {
+      sanitizedLines.push(line);
+      continue;
+    }
+
+    const isTableRow = trimmed.length > 0 && trimmed.includes('|');
 
     if (isTableRow) {
       if (!inTable) {
-        if (result.length > 0 && result[result.length - 1].trim() !== '') {
-          result.push('');
+        if (sanitizedLines.length > 0 && sanitizedLines[sanitizedLines.length - 1].trim() !== '') {
+          sanitizedLines.push('');
         }
         inTable = true;
       }
-      result.push(line);
+      sanitizedLines.push(line);
     } else {
       if (inTable) {
         if (trimmed.length > 0) {
-          result.push('');
+          sanitizedLines.push('');
         }
         inTable = false;
       }
-      result.push(line);
+      sanitizedLines.push(line);
     }
   }
-  return result.join('\n');
+
+  // 3. 流式生成时未闭合代码块自动闭合
+  if (inCodeBlock) {
+    sanitizedLines.push('```');
+  }
+
+  return sanitizedLines.join('\n');
 }
 
 function renderMarkdown(text) {
   if (!text) return '';
-  const normalized = normalizeMarkdownTables(text);
+  const prepared = prepareMarkdownContent(text);
   initMarkedRenderer();
   if (window.marked && typeof window.marked.parse === 'function') {
     try {
-      return `<div class="markdown-body">${window.marked.parse(normalized)}</div>`;
+      return `<div class="markdown-body">${window.marked.parse(prepared)}</div>`;
     } catch (e) {
       console.warn('Marked 解析异常，使用兜底解析器:', e);
     }
   }
-  return `<div class="markdown-body">${renderMarkdownFallback(normalized)}</div>`;
+  return `<div class="markdown-body">${renderMarkdownFallback(prepared)}</div>`;
 }
 
 function escapeHtml(str) {

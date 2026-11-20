@@ -1867,21 +1867,26 @@ html[data-theme="dark"] .pill-red {
   border-left: 3.5px solid var(--om-accent);
 }
 
-/* Markdown Content Styles */
+/* ============================================================================
+   Markdown 富文本与对话交互渲染系统
+   ============================================================================ */
 .markdown-body {
   font-size: 14.5px;
   line-height: 1.65;
   color: var(--om-fg);
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
+
 .markdown-body p {
-  margin-bottom: 12px;
+  margin: 0 0 12px 0;
 }
+
 .markdown-body p:last-child {
   margin-bottom: 0;
 }
 
-/* 1. 现代化响应式卡片化表格体系 */
+/* 1. 响应式卡片化表格系统 */
 .markdown-table-wrapper {
   width: 100%;
   margin: 14px 0;
@@ -1895,8 +1900,8 @@ html[data-theme="dark"] .pill-red {
 
 .markdown-table {
   width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
+  min-width: max-content;
+  border-collapse: collapse;
   font-size: 13px;
   line-height: 1.5;
   text-align: left;
@@ -1929,17 +1934,21 @@ html[data-theme="dark"] .pill-red {
   background-color: var(--om-surface);
   transition: background-color 0.15s ease;
   word-break: normal;
-  overflow-wrap: normal;
+  overflow-wrap: break-word;
 }
 
-/* 单元格单行保持，避免短词或人名生硬断行 */
+/* 单元格单行保持，保证短字段、徽章与工单号完整展示 */
 .markdown-table th.cell-nowrap,
 .markdown-table td.cell-nowrap {
-  white-space: nowrap;
+  white-space: nowrap !important;
 }
 
 .markdown-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.markdown-table tbody tr:nth-child(even) td {
+  background-color: rgba(125, 125, 125, 0.025);
 }
 
 .markdown-table tbody tr:hover td {
@@ -2023,7 +2032,7 @@ html[data-theme="dark"] .pill-red {
   background-color: var(--om-muted);
 }
 
-/* 3. 现代化超链接与工单卡片胶囊 */
+/* 3. 超链接与工单卡片胶囊 */
 .markdown-body a {
   color: var(--om-accent, #0064d4);
   text-decoration: none;
@@ -2031,7 +2040,7 @@ html[data-theme="dark"] .pill-red {
   padding: 1px 4px;
   border-radius: 4px;
   transition: all 0.15s ease;
-  word-break: break-all;
+  word-break: normal;
 }
 
 .markdown-body a:hover {
@@ -2041,7 +2050,6 @@ html[data-theme="dark"] .pill-red {
   text-underline-offset: 3px;
 }
 
-/* 工单/卡片编号链接胶囊强化 (如 bcop-sop-xxx, icafe, task-xxx 等) */
 .markdown-body a.issue-link {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -2139,6 +2147,7 @@ html[data-theme="dark"] .pill-red {
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
+
 .markdown-body code {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -2147,23 +2156,220 @@ html[data-theme="dark"] .pill-red {
   border-radius: 6px;
   border: 1px solid var(--om-border);
 }
+
 .markdown-body pre code {
   background-color: transparent;
   padding: 0;
   border: none;
 }
-.markdown-body ul, .markdown-body ol {
-  margin-left: 20px;
-  margin-bottom: 12px;
+
+/* 5. 思考过程折叠卡片 (Thinking Process Container) */
+.thought-container {
+  margin: 12px 0 16px 0;
+  border: 1px solid var(--om-border);
+  border-radius: 10px;
+  background-color: var(--om-surface-2);
+  overflow: hidden;
+  font-size: 13px;
+  transition: all 0.2s ease;
 }
+
+.thought-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--om-muted);
+  cursor: pointer;
+  user-select: none;
+  background-color: rgba(0, 0, 0, 0.02);
+  list-style: none;
+}
+
+.thought-header::-webkit-details-marker {
+  display: none;
+}
+
+.thought-header::marker {
+  display: none;
+}
+
+.thought-icon {
+  font-size: 14px;
+}
+
+.thought-title {
+  flex: 1;
+}
+
+.thought-toggle {
+  font-size: 11px;
+  color: var(--om-muted);
+}
+
+.thought-toggle::after {
+  content: '▼';
+  font-size: 9px;
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+details[open] .thought-toggle::after {
+  transform: rotate(180deg);
+}
+
+.thought-body {
+  padding: 12px 14px;
+  color: var(--om-fg);
+  font-size: 12.5px;
+  line-height: 1.6;
+  border-top: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
+.thought-container.in-progress .thought-header {
+  color: var(--om-accent);
+}
+
+@keyframes thoughtPulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+.thought-container.in-progress .thought-title {
+  animation: thoughtPulse 1.6s infinite ease-in-out;
+}
+
+/* 6. GitHub Alerts 提示块体系 */
+.markdown-alert {
+  margin: 14px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border-left: 4px solid var(--om-accent);
+  background-color: rgba(59, 130, 246, 0.06);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+  font-size: 12px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.markdown-alert-note {
+  border-left-color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.06);
+}
+.markdown-alert-note .markdown-alert-title {
+  color: #2563eb;
+}
+
+.markdown-alert-tip {
+  border-left-color: #10b981;
+  background-color: rgba(16, 185, 129, 0.06);
+}
+.markdown-alert-tip .markdown-alert-title {
+  color: #059669;
+}
+
+.markdown-alert-important {
+  border-left-color: #8b5cf6;
+  background-color: rgba(139, 92, 246, 0.06);
+}
+.markdown-alert-important .markdown-alert-title {
+  color: #7c3aed;
+}
+
+.markdown-alert-warning {
+  border-left-color: #f59e0b;
+  background-color: rgba(245, 158, 11, 0.06);
+}
+.markdown-alert-warning .markdown-alert-title {
+  color: #d97706;
+}
+
+.markdown-alert-caution {
+  border-left-color: #ef4444;
+  background-color: rgba(239, 68, 68, 0.06);
+}
+.markdown-alert-caution .markdown-alert-title {
+  color: #dc2626;
+}
+
+.markdown-alert-content p {
+  margin-bottom: 0;
+}
+
+/* 7. 列表、任务清单与标题层级排版 */
+.markdown-body ul, .markdown-body ol {
+  margin: 0 0 12px 20px;
+  padding: 0;
+}
+
 .markdown-body li {
   margin-bottom: 4px;
 }
-.markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  margin: 16px 0 8px 0;
+
+.markdown-body li.task-list-item {
+  list-style: none;
+  margin-left: -20px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.markdown-body li.task-list-item input[type="checkbox"] {
+  accent-color: var(--om-accent);
+  cursor: default;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  margin: 18px 0 8px 0;
   font-weight: 650;
   color: var(--om-fg);
+  line-height: 1.35;
 }
+
+.markdown-body h1 {
+  font-size: 1.45em;
+  border-bottom: 1px solid var(--om-border);
+  padding-bottom: 6px;
+}
+
+.markdown-body h2 {
+  font-size: 1.25em;
+  border-bottom: 1px solid var(--om-border);
+  padding-bottom: 4px;
+}
+
+.markdown-body h3 {
+  font-size: 1.1em;
+}
+
+.markdown-body h4 {
+  font-size: 1em;
+}
+
+.markdown-body hr {
+  height: 1px;
+  background-color: var(--om-border);
+  border: none;
+  margin: 16px 0;
+}
+
 .markdown-body blockquote {
   border-left: 3.5px solid var(--om-accent);
   padding: 6px 14px;
