@@ -431,9 +431,10 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
     }
 
-    // B. 静态主页：Web 控制台 (优先载入现代化数字员工工作台 apps/web，回退兼容 data/web 或旧版 ui.html)
+    // B. 静态主页：Web 控制台 (提供 Web UI 工作台)
     if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/index.html')) {
       const modernWebCandidates = [
+        path.resolve(__dirname, '../../web/dist/index.html'),
         path.resolve(__dirname, '../../web/index.html'),
         path.resolve(__dirname, '../data/web/index.html'),
       ];
@@ -1521,6 +1522,7 @@ fi
 
     // 静态前端资源托管 (SPA 模式: 提供 MuseClaw 数字员工工作台 Web UI)
     const webDirCandidates = [
+      path.resolve(__dirname, '../../web/dist'),
       path.resolve(__dirname, '../../web'),
       path.resolve(__dirname, '../data/web'),
     ];
