@@ -34,6 +34,7 @@ export interface SentinelHook {
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content?: string;
+  reasoning_content?: string;
   tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
 }
@@ -44,6 +45,7 @@ export type LLMCaller = (
   onChunk?: (delta: string) => void
 ) => Promise<{
   content: string;
+  reasoning_content?: string;
   toolCalls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
 }>;
 
@@ -315,6 +317,7 @@ export async function* runAgentLoop(
       messages.push({
         role: 'assistant',
         content: response.content,
+        reasoning_content: response.reasoning_content ?? '',
         tool_calls: [{ id: call.id, function: { name: call.name, arguments: JSON.stringify(call.args) } }]
       });
       messages.push({

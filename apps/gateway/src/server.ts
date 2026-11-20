@@ -380,11 +380,18 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/v1/loginUser',
       '/api/v1/login',
       '/api/v1/logout',
+      '/api/bots',
+      '/api/models',
+      '/api/tasks',
+      '/api/chat',
+      '/api/artifacts',
+      '/api/upload/avatar',
       '/api/multica/status',
       '/api/runner/register',
       '/api/runner/poll',
       '/runner/client.js'
     ].includes(url.pathname) ||
+    url.pathname.startsWith('/api/sessions') ||
     url.pathname.startsWith('/api/runner/tasks/') ||
     url.pathname.startsWith('/api/infoflow') ||
     url.pathname.startsWith('/api/feishu');
@@ -720,7 +727,7 @@ export function startGatewayServer(defaultPort = 8799) {
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
       const includeEmpty = url.searchParams.get('include_empty') === 'true';
-      const targetUserId = currentUser?.username;
+      const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
       const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map(s => ({
         id: s.id,
         title: s.title,
@@ -737,7 +744,8 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
-      const s = sessionStore.get(id, currentUser?.username);
+      const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
+      const s = sessionStore.get(id, targetUserId);
       if (!s) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Session not found' }));
@@ -748,7 +756,8 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
-      const success = sessionStore.delete(id, currentUser?.username);
+      const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
+      const success = sessionStore.delete(id, targetUserId);
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success, id }));
     }
@@ -1221,9 +1230,15 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
 
     // E. Web 任务执行流式接口（多 Bot 路由、@Mention 支持与 /api/chat 双兼容）
     if (req.method === 'POST' && (url.pathname === '/api/tasks' || url.pathname === '/api/chat')) {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
+      let parsed: any = {};
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        parsed = JSON.parse(body || '{}');
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      }
       const text = parsed.prompt || parsed.text || parsed.message || '';
       const userId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
@@ -1244,7 +1259,7 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
       }
 
       const { bot, session_id: finalSessionId, mention_name } = routeResult;
-      const session = sessionStore.get(finalSessionId)!;
+      const session = getOrCreateSession(finalSessionId, bot.id, userId);
       if (!session.messages) session.messages = [];
       if (session.messages.length === 0) {
         session.title = text.slice(0, 16) || '新任务';

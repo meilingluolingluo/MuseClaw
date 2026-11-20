@@ -141,7 +141,7 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
           };
         }
         if (m.role === 'assistant' && m.tool_calls) {
-          return {
+          const item: Record<string, unknown> = {
             role: 'assistant',
             content: m.content || '',
             tool_calls: m.tool_calls.map((c) => ({
@@ -150,6 +150,10 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
               function: c.function
             }))
           };
+          if (m.reasoning_content !== undefined) {
+            item.reasoning_content = m.reasoning_content;
+          }
+          return item;
         }
         return {
           role: m.role,
@@ -193,6 +197,7 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let accumulatedContent = '';
+      let accumulatedReasoning = '';
       const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
 
       while (true) {
@@ -213,6 +218,9 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
               if (!choice) continue;
 
               const delta = choice.delta;
+              if (delta?.reasoning_content) {
+                accumulatedReasoning += delta.reasoning_content;
+              }
               if (delta?.content) {
                 accumulatedContent += delta.content;
                 onChunk(delta.content);
@@ -252,6 +260,7 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
 
       return {
         content: accumulatedContent,
+        reasoning_content: accumulatedReasoning || undefined,
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined
       };
     }
@@ -282,6 +291,7 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
 
     return {
       content: choice.content || '',
+      reasoning_content: choice.reasoning_content,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined
     };
   };

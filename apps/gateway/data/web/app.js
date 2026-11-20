@@ -776,7 +776,8 @@ function pruneEmptySessions(excludeId = null) {
 
 async function loadSessionsForBot(botId) {
   try {
-    const res = await fetch(`/api/sessions?bot_id=${encodeURIComponent(botId)}`);
+    const userId = getOrCreateUserId();
+    const res = await fetch(`/api/sessions?bot_id=${encodeURIComponent(botId)}&userId=${encodeURIComponent(userId)}`);
     const sessions = await res.json();
     // 过滤服务端返回的历史空会话
     const validSessions = sessions.filter((s) => !isSessionEmpty(s));
@@ -820,6 +821,7 @@ async function selectSession(sessionId, switchToChat = false) {
   }
 
   state.activeSessionId = sessionId;
+  state.isStreaming = false;
   localStorage.setItem('museclaw_active_session', sessionId);
   renderSessionList();
 
@@ -828,7 +830,8 @@ async function selectSession(sessionId, switchToChat = false) {
   }
 
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+    const userId = getOrCreateUserId();
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(userId)}`);
     if (res.ok) {
       const session = await res.json();
       state.messages = session.messages || [];
@@ -836,14 +839,25 @@ async function selectSession(sessionId, switchToChat = false) {
     }
   } catch (err) {
     console.error('加载会话详情失败:', err);
+  } finally {
+    updateSendButtonState();
   }
 }
 
 function createNewSession() {
+  state.isStreaming = false;
+
   // 1. 如果当前已经处于空会话（无消息），幂等保持当前会话，避免重复产出无用空会话
   const currentSession = state.sessions.find((s) => s.id === state.activeSessionId);
   if (currentSession && isSessionEmpty(currentSession) && state.messages.length === 0) {
-    if (dom.composerInput) dom.composerInput.focus();
+    if (dom.composerInput) {
+      dom.composerInput.value = '';
+      dom.composerInput.style.height = 'auto';
+      dom.composerInput.focus();
+    }
+    clearComposerAttachments();
+    updateComposerClearButton();
+    updateSendButtonState();
     return;
   }
 
@@ -865,7 +879,15 @@ function createNewSession() {
   localStorage.setItem('museclaw_active_session', newId);
   renderSessionList();
   renderChatMessages();
-  if (dom.composerInput) dom.composerInput.focus();
+
+  if (dom.composerInput) {
+    dom.composerInput.value = '';
+    dom.composerInput.style.height = 'auto';
+    dom.composerInput.focus();
+  }
+  clearComposerAttachments();
+  updateComposerClearButton();
+  updateSendButtonState();
 }
 
 async function deleteSession(sessionId, event) {
@@ -879,7 +901,8 @@ async function deleteSession(sessionId, event) {
   if (!ok) return;
 
   try {
-    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+    const userId = getOrCreateUserId();
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
     showToast('会话已成功删除', 'success');
   } catch (e) {
     // 忽略异常
@@ -1027,14 +1050,17 @@ function renderComposerAttachments() {
       if (!isNaN(idx)) {
         state.composerAttachments.splice(idx, 1);
         renderComposerAttachments();
+        updateSendButtonState();
       }
     };
   });
+  updateSendButtonState();
 }
 
 function clearComposerAttachments() {
   state.composerAttachments = [];
   renderComposerAttachments();
+  updateSendButtonState();
 }
 
 function closeAllComposerPopovers() {
@@ -1050,6 +1076,24 @@ function updateComposerClearButton() {
     dom.btnComposerClear.style.display = 'inline-flex';
   } else {
     dom.btnComposerClear.style.display = 'none';
+  }
+}
+
+function updateSendButtonState() {
+  if (!dom.btnSendMessage) return;
+  if (state.isStreaming) {
+    dom.btnSendMessage.disabled = true;
+    dom.btnSendMessage.title = '正在思考生成中...';
+    return;
+  }
+  const text = (dom.composerInput ? dom.composerInput.value : '').trim();
+  const hasAttachments = Boolean(state.composerAttachments && state.composerAttachments.length > 0);
+  if (text.length > 0 || hasAttachments) {
+    dom.btnSendMessage.disabled = false;
+    dom.btnSendMessage.title = '发送指令 (Enter)';
+  } else {
+    dom.btnSendMessage.disabled = true;
+    dom.btnSendMessage.title = '请输入指令内容';
   }
 }
 
@@ -1246,6 +1290,7 @@ function initComposerControls() {
       dom.composerInput.value = '';
       dom.composerInput.style.height = 'auto';
       updateComposerClearButton();
+      updateSendButtonState();
       closeAllComposerPopovers();
       dom.composerInput.focus();
     };
@@ -1254,6 +1299,7 @@ function initComposerControls() {
   if (dom.composerInput) {
     dom.composerInput.oninput = () => {
       updateComposerClearButton();
+      updateSendButtonState();
       dom.composerInput.style.height = 'auto';
       dom.composerInput.style.height = Math.min(dom.composerInput.scrollHeight, 160) + 'px';
 
@@ -1275,20 +1321,17 @@ function initComposerControls() {
       closeAllComposerPopovers();
     }
   });
+
+  updateSendButtonState();
 }
 
 // 发送用户指令并开启 SSE 流式接收
 async function sendMessage() {
-  if (!state.currentUser) {
-    showToast('请先登录或注册账号后再发送指令', 'info');
-    openAuthModal('login');
-    return;
-  }
-
-  const rawText = dom.composerInput.value.trim();
-  const hasAttachments = state.composerAttachments && state.composerAttachments.length > 0;
+  const rawText = dom.composerInput ? dom.composerInput.value.trim() : '';
+  const hasAttachments = Boolean(state.composerAttachments && state.composerAttachments.length > 0);
   if ((!rawText && !hasAttachments) || state.isStreaming) return;
 
+  const effectiveUserId = getOrCreateUserId();
   let displayText = rawText;
   let effectivePrompt = rawText;
 
@@ -1309,98 +1352,105 @@ async function sendMessage() {
     effectivePrompt = effectivePrompt ? `${attachBlocks}\n\n${effectivePrompt}` : attachBlocks;
   }
 
-  dom.composerInput.value = '';
-  dom.composerInput.style.height = 'auto';
+  if (dom.composerInput) {
+    dom.composerInput.value = '';
+    dom.composerInput.style.height = 'auto';
+  }
   clearComposerAttachments();
   updateComposerClearButton();
   closeAllComposerPopovers();
 
   state.isStreaming = true;
-  dom.btnSendMessage.disabled = true;
+  updateSendButtonState();
 
-  // 1. 添加用户消息气泡
-  state.messages.push({ role: 'user', content: displayText });
-  appendMessageBubble('user', displayText);
-
-  const curSession = state.sessions.find((s) => s.id === state.activeSessionId);
-  if (curSession) {
-    curSession.messageCount = state.messages.length;
-    curSession.messages = state.messages;
-    renderSessionList();
-  }
-
-  // 2. 创建 Assistant 占位气泡
-  const bot = state.bots.find((b) => b.id === state.activeBotId);
-  const assistantRow = document.createElement('div');
-  assistantRow.className = 'message-row assistant';
-  assistantRow.innerHTML = `
-    <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${bot ? renderBotAvatar(bot, { size: 36, motion: 'avatar-working', mood: 'working', useVideo: true }) : '🤖'}</div>
-    <div class="message-bubble" id="streaming-bubble">
-      <div id="plan-steps-container"></div>
-      <div id="activity-container"></div>
-      <div id="stream-text" style="line-height: 1.6;">
-        <div class="agent-thinking-pulse" style="display: flex; align-items: center; gap: 8px; color: var(--om-muted); font-size: 13px; padding: 4px 0;">
-          <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid var(--om-border); border-top-color: var(--om-fg); border-radius: 50%; animation: om-spin 0.8s linear infinite;"></span>
-          <span>正在连接并调度 Agent 推理执行...</span>
-        </div>
-      </div>
-    </div>
-  `;
-  dom.chatMessages.appendChild(assistantRow);
-  dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-
-  const streamTextEl = assistantRow.querySelector('#stream-text');
-  const activityContainer = assistantRow.querySelector('#activity-container');
-  const planContainer = assistantRow.querySelector('#plan-steps-container');
-
-  let fullAssistantText = '';
-  let rawAccumulatedText = '';
-  let renderedCharCount = 0;
-  let typeTimer = null;
-  let isStreamFinished = false;
-
-  const removeThinkingPulse = () => {
-    const pulse = streamTextEl.querySelector('.agent-thinking-pulse');
-    if (pulse) pulse.remove();
-  };
-
-  const tickTyping = () => {
-    if (renderedCharCount < rawAccumulatedText.length) {
-      removeThinkingPulse();
-      const remaining = rawAccumulatedText.length - renderedCharCount;
-      const step = isStreamFinished
-        ? Math.max(1, Math.min(8, Math.ceil(remaining / 6)))
-        : Math.max(1, Math.min(4, Math.ceil(remaining / 4)));
-      renderedCharCount += step;
-      if (renderedCharCount > rawAccumulatedText.length) {
-        renderedCharCount = rawAccumulatedText.length;
-      }
-      const partial = rawAccumulatedText.slice(0, renderedCharCount);
-      streamTextEl.innerHTML = renderMarkdown(partial);
-      dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-    }
-
-    if (renderedCharCount < rawAccumulatedText.length) {
-      typeTimer = setTimeout(tickTyping, 16);
-    } else {
-      typeTimer = null;
-      if (isStreamFinished) {
-        removeThinkingPulse();
-        streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
-        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-      }
-    }
-  };
-
-  const pushDeltaText = (delta) => {
-    if (!delta) return;
-    rawAccumulatedText += delta;
-    if (!typeTimer) {
-      tickTyping();
-    }
-  };
+  let assistantRow = null;
+  let streamTextEl = null;
+  let removeThinkingPulse = () => {};
 
   try {
+    // 1. 添加用户消息气泡
+    state.messages.push({ role: 'user', content: displayText });
+    appendMessageBubble('user', displayText);
+
+    const curSession = state.sessions.find((s) => s.id === state.activeSessionId);
+    if (curSession) {
+      curSession.messageCount = state.messages.length;
+      curSession.messages = state.messages;
+      renderSessionList();
+    }
+
+    // 2. 创建 Assistant 占位气泡
+    const bot = state.bots.find((b) => b.id === state.activeBotId);
+    assistantRow = document.createElement('div');
+    assistantRow.className = 'message-row assistant';
+    assistantRow.innerHTML = `
+      <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${bot ? renderBotAvatar(bot, { size: 36, motion: 'avatar-working', mood: 'working', useVideo: true }) : '🤖'}</div>
+      <div class="message-bubble" id="streaming-bubble">
+        <div id="plan-steps-container"></div>
+        <div id="activity-container"></div>
+        <div id="stream-text" style="line-height: 1.6;">
+          <div class="agent-thinking-pulse" style="display: flex; align-items: center; gap: 8px; color: var(--om-muted); font-size: 13px; padding: 4px 0;">
+            <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid var(--om-border); border-top-color: var(--om-fg); border-radius: 50%; animation: om-spin 0.8s linear infinite;"></span>
+            <span>正在连接并调度 Agent 推理执行...</span>
+          </div>
+        </div>
+      </div>
+    `;
+    dom.chatMessages.appendChild(assistantRow);
+    dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+
+    streamTextEl = assistantRow.querySelector('#stream-text');
+    const activityContainer = assistantRow.querySelector('#activity-container');
+    const planContainer = assistantRow.querySelector('#plan-steps-container');
+
+    let fullAssistantText = '';
+    let rawAccumulatedText = '';
+    let renderedCharCount = 0;
+    let typeTimer = null;
+    let isStreamFinished = false;
+
+    removeThinkingPulse = () => {
+      const pulse = streamTextEl ? streamTextEl.querySelector('.agent-thinking-pulse') : null;
+      if (pulse) pulse.remove();
+    };
+
+    const tickTyping = () => {
+      if (!streamTextEl) return;
+      if (renderedCharCount < rawAccumulatedText.length) {
+        removeThinkingPulse();
+        const remaining = rawAccumulatedText.length - renderedCharCount;
+        const step = isStreamFinished
+          ? Math.max(1, Math.min(8, Math.ceil(remaining / 6)))
+          : Math.max(1, Math.min(4, Math.ceil(remaining / 4)));
+        renderedCharCount += step;
+        if (renderedCharCount > rawAccumulatedText.length) {
+          renderedCharCount = rawAccumulatedText.length;
+        }
+        const partial = rawAccumulatedText.slice(0, renderedCharCount);
+        streamTextEl.innerHTML = renderMarkdown(partial);
+        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+      }
+
+      if (renderedCharCount < rawAccumulatedText.length) {
+        typeTimer = setTimeout(tickTyping, 16);
+      } else {
+        typeTimer = null;
+        if (isStreamFinished) {
+          removeThinkingPulse();
+          streamTextEl.innerHTML = renderMarkdown(rawAccumulatedText);
+          dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+        }
+      }
+    };
+
+    const pushDeltaText = (delta) => {
+      if (!delta) return;
+      rawAccumulatedText += delta;
+      if (!typeTimer) {
+        tickTyping();
+      }
+    };
+
     // 兼容 /api/tasks 和 /api/chat
     const response = await fetch('/api/tasks', {
       method: 'POST',
@@ -1411,7 +1461,7 @@ async function sendMessage() {
         message: effectivePrompt,
         session_id: state.activeSessionId,
         bot_id: state.activeBotId,
-        user_id: getOrCreateUserId()
+        user_id: effectiveUserId
       })
     });
 
@@ -1463,11 +1513,14 @@ async function sendMessage() {
       renderSessionList();
     }
   } catch (err) {
+    console.error('发送指令或接收流式响应异常:', err);
     removeThinkingPulse();
-    streamTextEl.innerHTML += `<div style="color: var(--accent-red); margin-top: 8px;">[通信失败: ${err.message}]</div>`;
+    if (streamTextEl) {
+      streamTextEl.innerHTML += `<div style="color: var(--accent-red); margin-top: 8px;">[通信失败: ${escapeHtml(err.message)}]</div>`;
+    }
   } finally {
     state.isStreaming = false;
-    dom.btnSendMessage.disabled = false;
+    updateSendButtonState();
   }
 }
 
@@ -4655,7 +4708,11 @@ function initEventHandlers() {
   dom.composerInput.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      const text = dom.composerInput.value.trim();
+      const hasAttach = Boolean(state.composerAttachments && state.composerAttachments.length > 0);
+      if ((text || hasAttach) && !state.isStreaming) {
+        sendMessage();
+      }
     }
   };
 
@@ -4768,9 +4825,7 @@ initEventHandlers();
 getLoginUser().finally(() => {
   loadBots();
   loadModelsConfig();
-  if (!state.currentUser) {
-    openAuthModal('login');
-  }
+  updateSendButtonState();
 });
 const initialTab = getTabFromLocation();
 switchTab(initialTab, true);
