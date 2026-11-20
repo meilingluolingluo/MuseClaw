@@ -2415,3 +2415,480 @@ html[data-theme="dark"] .pill-red {
   gap: 10px;
 }
 
+/* ============================================================================
+   8. nanoMuse 风格虚拟形象动效与多模态渲染体系
+============================================================================ */
+@keyframes avatarBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+
+@keyframes avatarSway {
+  0%, 100% { transform: rotate(-3deg) scale(1.02); }
+  50% { transform: rotate(3deg) scale(1.02); }
+}
+
+@keyframes avatarHop {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px) scale(1.02); }
+}
+
+@keyframes avatarWiggle {
+  0% { transform: scale(1); }
+  20% { transform: scale(1.15) rotate(-6deg); }
+  40% { transform: scale(1.15) rotate(6deg); }
+  60% { transform: scale(1.08) rotate(-3deg); }
+  80% { transform: scale(1.04) rotate(2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+.avatar-idle {
+  animation: avatarBreathe 3.6s ease-in-out infinite;
+}
+
+.avatar-working {
+  animation: avatarSway 1.8s ease-in-out infinite;
+}
+
+.avatar-waiting {
+  animation: avatarHop 1.2s ease-in-out infinite;
+}
+
+.avatar-wiggle {
+  animation: avatarWiggle 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.nanomuse-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.nanomuse-avatar-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  position: relative;
+}
+
+.nanomuse-avatar-circle img,
+.nanomuse-avatar-circle video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.nanomuse-avatar-circle .avatar-emoji-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  line-height: 1;
+}
+
+/* 浮动在头像右下角的编辑徽章 */
+.avatar-edit-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--om-surface);
+  border: 1px solid var(--om-border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--om-fg);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 5;
+}
+
+.avatar-edit-badge:hover {
+  transform: scale(1.1);
+  background-color: var(--om-surface-2);
+  color: var(--om-accent);
+  border-color: var(--om-accent);
+}
+
+/* ============================================================================
+   9. nanoMuse 数字员工主档案卡片 (Bot Profile Modal)
+============================================================================ */
+.bot-profile-modal-content {
+  max-width: 480px;
+  width: 100%;
+  border-radius: 28px;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--om-surface);
+}
+
+.bot-profile-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 24px 16px;
+  position: relative;
+  border-bottom: 1px solid var(--om-border);
+}
+
+.bot-profile-close-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--om-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.bot-profile-close-btn:hover {
+  background-color: var(--om-surface-2);
+  color: var(--om-fg);
+}
+
+.bot-profile-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--om-fg);
+  margin-top: 14px;
+  letter-spacing: -0.3px;
+}
+
+.bot-profile-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #10b981;
+}
+
+.bot-status-dot-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+/* 分段选项卡 (Segmented Tabs) */
+.bot-segmented-tabs {
+  display: flex;
+  background-color: var(--om-surface-2);
+  padding: 4px;
+  border-radius: 9999px;
+  margin: 18px auto 0;
+  width: fit-content;
+  border: 1px solid var(--om-border);
+  gap: 4px;
+}
+
+.bot-segmented-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 20px;
+  border-radius: 9999px;
+  background: transparent;
+  border: none;
+  color: var(--om-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 13px;
+}
+
+.bot-segmented-tab:hover {
+  color: var(--om-fg);
+}
+
+.bot-segmented-tab.active {
+  background-color: var(--om-surface);
+  color: var(--om-fg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.bot-tab-body {
+  padding: 20px 24px 28px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+/* 预定任务折叠卡片 */
+.bot-task-group-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--om-fg);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bot-task-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  margin-bottom: 8px;
+  transition: transform 0.12s ease;
+}
+
+.bot-task-card:hover {
+  background-color: var(--om-surface-2);
+}
+
+.bot-task-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.bot-task-details {
+  flex: 1;
+  overflow: hidden;
+}
+
+.bot-task-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.bot-task-sub {
+  font-size: 11.5px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+/* ============================================================================
+   10. nanoMuse 虚拟形象工坊 (Avatar Studio) 样式
+============================================================================ */
+.avatar-studio-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.avatar-studio-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  background-color: var(--om-surface-2);
+  border-radius: 20px;
+  border: 1px solid var(--om-border);
+}
+
+.avatar-studio-preview-box {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border: 3px solid var(--om-surface);
+  position: relative;
+  background-color: #f1efeb;
+}
+
+.avatar-studio-preview-box img,
+.avatar-studio-preview-box video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-mood-pills {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.avatar-mood-pill {
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  background-color: var(--om-surface);
+  color: var(--om-muted);
+  border: 1px solid var(--om-border);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.avatar-mood-pill:hover {
+  color: var(--om-fg);
+}
+
+.avatar-mood-pill.active {
+  background-color: var(--om-accent);
+  color: #fff;
+  border-color: var(--om-accent);
+}
+
+.avatar-source-nav {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--om-border);
+  padding-bottom: 8px;
+  overflow-x: auto;
+}
+
+.avatar-source-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--om-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.avatar-source-tab:hover {
+  background-color: var(--om-surface-2);
+  color: var(--om-fg);
+}
+
+.avatar-source-tab.active {
+  background-color: var(--om-accent-soft);
+  color: var(--om-accent);
+}
+
+.avatar-grid-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.avatar-preset-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 14px;
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.avatar-preset-tile:hover {
+  border-color: var(--om-accent);
+  background-color: var(--om-surface-2);
+}
+
+.avatar-preset-tile.selected {
+  border-color: var(--om-accent);
+  box-shadow: 0 0 0 2px var(--om-accent);
+  background-color: var(--om-accent-soft);
+}
+
+.avatar-preset-img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: #f1efeb;
+}
+
+.avatar-preset-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.avatar-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+}
+
+.avatar-emoji-btn {
+  aspect-ratio: 1;
+  border-radius: 12px;
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface-2);
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.avatar-emoji-btn:hover {
+  transform: scale(1.1);
+  background-color: var(--om-surface);
+}
+
+.avatar-emoji-btn.selected {
+  border-color: var(--om-accent);
+  box-shadow: 0 0 0 2px var(--om-accent);
+}
+
+.avatar-color-strip {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.avatar-color-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.12s ease;
+}
+
+.avatar-color-circle:hover {
+  transform: scale(1.15);
+}
+
+.avatar-color-circle.selected {
+  border-color: var(--om-fg);
+  box-shadow: 0 0 0 2px var(--om-border);
+}
+
+

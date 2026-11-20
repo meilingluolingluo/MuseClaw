@@ -51,13 +51,14 @@ export class BotRegistry {
     if (this.bots.size === 0) {
       const defaultBot: AgentProfile = {
         id: 'muse',
-        name: 'Muse',
-        description: 'MuseClaw 默认常驻数字员工与协调助手',
-        system_prompt: '你是一个企业内部严谨、高效的自动化数字员工。你可以自主调用提供的工具链完成任务。',
+        name: '小哀',
+        description: 'MuseClaw 智能数字员工与协调助手',
+        system_prompt: '你是一个严谨、高效且富有同理心的自动化数字员工。你可以自主调用工具链与沙箱执行任务。',
         tool_allowlist: ['*'],
         memory_ns: 'bots/muse',
         is_coordinator: true,
         enabled: true,
+        avatar: 'haibara',
         created_at: Date.now(),
         updated_at: Date.now()
       };
@@ -66,7 +67,12 @@ export class BotRegistry {
       return defaultBot;
     }
     // 返回现有的 coordinator 或第一个
-    return this.getCoordinator() || this.list()[0];
+    const firstBot = this.getCoordinator() || this.list()[0];
+    if (firstBot && !firstBot.avatar) {
+      firstBot.avatar = 'haibara';
+      this.save();
+    }
+    return firstBot;
   }
 
   public list(): AgentProfile[] {
@@ -119,6 +125,7 @@ export class BotRegistry {
       memory_ns: data.memory_ns || `bots/${id}`,
       is_coordinator: isCoordinator,
       enabled: data.enabled !== false,
+      avatar: data.avatar || 'haibara',
       created_at: now,
       updated_at: now
     };

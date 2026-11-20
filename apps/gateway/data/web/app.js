@@ -651,6 +651,63 @@ async function loadBots() {
   }
 }
 
+// ============================================================================
+// nanoMuse 虚拟形象渲染引擎与多模态支持
+// ============================================================================
+function renderBotAvatar(bot, options = {}) {
+  const size = options.size || 36;
+  const mood = options.mood || 'idle';
+  const motion = options.still ? '' : (options.motion || 'avatar-idle');
+  const showEditBadge = Boolean(options.showEditBadge);
+  const className = options.className || '';
+
+  const avatarVal = (bot?.avatar || '🤖').trim();
+  const avatarType = bot?.avatar_type || (
+    avatarVal === 'dragon' ? 'dragon' :
+    ['haibara', 'moss-courier', 'tide-tinker', 'dusk-moth', 'copper-acorn'].includes(avatarVal) ? 'preset' :
+    avatarVal.startsWith('/') || avatarVal.startsWith('http') || avatarVal.startsWith('data:image/') ? 'image' :
+    'emoji'
+  );
+
+  let innerContent = '';
+
+  if (avatarType === 'dragon') {
+    const clipMood = mood === 'working' || mood === 'waiting' || mood === 'happy' ? mood : 'idle';
+    const videoUrl = `/avatars/dragon-${clipMood}.mp4`;
+    const posterUrl = `/avatars/dragon-${mood === 'error' ? 'error' : clipMood}.webp`;
+
+    if (options.useVideo && size >= 48) {
+      innerContent = `<video src="${videoUrl}" poster="${posterUrl}" autoplay loop muted playsinline class="avatar-media"></video>`;
+    } else {
+      innerContent = `<img src="${posterUrl}" alt="Dragon" draggable="false" class="avatar-media" />`;
+    }
+  } else if (avatarType === 'preset') {
+    const presetId = avatarVal || 'haibara';
+    const imgUrl = `/avatars/presets/${presetId}/${mood === 'error' ? 'error' : mood}.webp`;
+    innerContent = `<img src="${imgUrl}" alt="${presetId}" draggable="false" class="avatar-media" onerror="this.onerror=null; this.src='/avatars/presets/haibara/idle.webp';" />`;
+  } else if (avatarType === 'image') {
+    innerContent = `<img src="${avatarVal}" alt="${escapeHtml(bot?.name || '')}" draggable="false" class="avatar-media" />`;
+  } else {
+    const emoji = bot?.avatar_emoji || (avatarVal.length <= 4 ? avatarVal : '🤖');
+    const color = bot?.avatar_color || '#0064d4';
+    const bgGradient = `linear-gradient(135deg, ${color}, color-mix(in srgb, ${color} 65%, #ffffff))`;
+    innerContent = `<span class="avatar-emoji-text" style="background: ${bgGradient}; font-size: ${Math.round(size * 0.52)}px;">${emoji}</span>`;
+  }
+
+  const editBadgeHtml = showEditBadge
+    ? `<div class="avatar-edit-badge" title="更换与定制虚拟形象" id="btn-trigger-avatar-studio">${Icons.edit(14)}</div>`
+    : '';
+
+  return `
+    <div class="nanomuse-avatar-wrap ${className}" style="width: ${size}px; height: ${size}px;">
+      <div class="nanomuse-avatar-circle ${motion}">
+        ${innerContent}
+      </div>
+      ${editBadgeHtml}
+    </div>
+  `;
+}
+
 function renderBotList() {
   dom.botList.innerHTML = '';
   state.bots.forEach((bot) => {
@@ -666,7 +723,7 @@ function renderBotList() {
     const levelBadge = bot.approval_level === 'full' ? 'pill-green' : bot.approval_level === 'auto_edits' ? 'pill-blue' : 'pill-amber';
 
     card.innerHTML = `
-      <div class="bot-avatar">${bot.avatar || '🤖'}</div>
+      <div class="bot-avatar" style="display: flex; align-items: center; justify-content: center;">${renderBotAvatar(bot, { size: 36, still: true })}</div>
       <div class="bot-info">
         <div class="bot-name">${escapeHtml(bot.name)}</div>
         <div class="bot-desc">${escapeHtml(bot.role || bot.description || '数字员工')}</div>
@@ -684,7 +741,7 @@ async function selectBot(botId) {
   if (!bot) return;
 
   renderBotList();
-  dom.activeBotAvatar.textContent = bot.avatar || '🤖';
+  dom.activeBotAvatar.innerHTML = renderBotAvatar(bot, { size: 22, still: true });
   dom.activeBotName.textContent = bot.name;
   dom.activeBotRole.textContent = bot.role || (bot.is_coordinator ? 'Coordinator' : 'Bot');
   dom.approvalModeText.textContent = `${(bot.approval_level || 'ask').toUpperCase()} 门禁`;
@@ -914,12 +971,12 @@ function appendMessageBubble(role, content) {
   row.className = `message-row ${role}`;
 
   const bot = state.bots.find((b) => b.id === state.activeBotId);
-  const avatar = role === 'user' ? '👤' : (bot ? bot.avatar || '🤖' : '🤖');
+  const avatar = role === 'user' ? '<div style="font-size: 20px;">👤</div>' : renderBotAvatar(bot, { size: 36, motion: 'avatar-idle' });
 
   const bubbleContent = role === 'user' ? `<div class="message-bubble">${escapeHtml(content || '')}</div>` : `<div class="message-bubble">${renderMarkdown(content || '')}</div>`;
 
   row.innerHTML = `
-    <div class="message-avatar">${avatar}</div>
+    <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${avatar}</div>
     ${bubbleContent}
   `;
   dom.chatMessages.appendChild(row);
@@ -1277,7 +1334,7 @@ async function sendMessage() {
   const assistantRow = document.createElement('div');
   assistantRow.className = 'message-row assistant';
   assistantRow.innerHTML = `
-    <div class="message-avatar">${bot ? bot.avatar || '🤖' : '🤖'}</div>
+    <div class="message-avatar" style="display: flex; align-items: center; justify-content: center;">${bot ? renderBotAvatar(bot, { size: 36, motion: 'avatar-working', mood: 'working', useVideo: true }) : '🤖'}</div>
     <div class="message-bubble" id="streaming-bubble">
       <div id="plan-steps-container"></div>
       <div id="activity-container"></div>
@@ -3069,54 +3126,555 @@ function closeModal() {
 }
 window.closeModal = closeModal;
 
+// ============================================================================
+// nanoMuse 风格数字员工主卡片 (Bot Profile Modal) 与虚拟形象工坊 (Avatar Studio)
+// ============================================================================
+const AVATAR_PRESETS = [
+  { id: 'haibara', name: '小哀 (Haibara)', style: 'anime', desc: '手捧热咖啡的慵懒小哀，浅蓝针织毛衣与沉静目光' },
+  { id: 'moss-courier', name: '苔藓邮差 (Moss)', style: 'muse', desc: '头顶绿叶耳朵的森林信使，随身携带布制信件包' },
+  { id: 'tide-tinker', name: '潮汐工匠 (Tide)', style: 'clay', desc: '生机勃勃的海沫色蝾螈工匠，带有珊瑚领结与随身工具囊' },
+  { id: 'dusk-moth', name: '暮光飞蛾 (Dusk)', style: 'watercolor', desc: '佩戴小圆眼镜的深邃飞蛾，温润米白毛领与水彩双翼' },
+  { id: 'copper-acorn', name: '纯铜橡果 (Copper)', style: 'line', desc: '精致橡果发条小人偶，纯铜齿轮与雾霾蓝保暖围巾' }
+];
+
+const EMOJI_PALETTE = ['✨', '🌙', '🪐', '🌿', '🔥', '🌊', '🦉', '🦊', '🐙', '🎯', '🧭', '💎', '🍀', '🎈', '🤖', '🧠'];
+const COLOR_PALETTE = ['#0064d4', '#7c3aed', '#0891b2', '#059669', '#d97706', '#dc2626', '#db2777', '#4b5563'];
+
+const STUDIO_STYLES = [
+  { id: 'muse', label: '3D 潮玩 (Muse)' },
+  { id: 'anime', label: '日系动漫 (Anime)' },
+  { id: 'flat', label: '扁平插画 (Flat)' },
+  { id: 'clay', label: '3D 黏土 (Clay)' },
+  { id: 'watercolor', label: '水彩手绘 (Watercolour)' },
+  { id: 'pixel', label: '像素艺术 (Pixel)' },
+  { id: 'line', label: '极简线条 (Line)' }
+];
+
+/**
+ * 打开 nanoMuse 数字员工主卡片弹窗
+ * 顶部居中大尺寸虚拟形象、右下角编辑铅笔、连接状态指示与任务/安全/人设三段式切换
+ */
 function openBotDetailModal() {
   const bot = state.bots.find((b) => b.id === state.activeBotId);
   if (!bot) return;
 
-  openModal(
-    `数字员工配置: ${bot.name}`,
-    `
-    <div class="form-group">
-      <label class="form-label">标识与角色:</label>
-      <div style="font-size: 13px; color: var(--text-main);">ID: <code>${bot.id}</code> | 角色: <strong>${escapeHtml(bot.role || '数字员工')}</strong></div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">系统人设 Prompt:</label>
-      <textarea id="modal-bot-prompt" class="form-control" rows="6" style="font-family: var(--font-mono); font-size: 12px;">${escapeHtml(bot.system_prompt || '')}</textarea>
-    </div>
-    <div class="form-group">
-      <label class="form-label">当前门禁级别 (Approval Level):</label>
-      <select id="modal-bot-level" class="form-control">
-        <option value="ask" ${bot.approval_level === 'ask' ? 'selected' : ''}>ASK (严格模式: 高危全拦截)</option>
-        <option value="auto_edits" ${bot.approval_level === 'auto_edits' ? 'selected' : ''}>AUTO_EDITS (免批编辑与工件产出)</option>
-        <option value="full" ${bot.approval_level === 'full' ? 'selected' : ''}>FULL (免审批模式，底层破坏与污点外发仍阻断)</option>
-      </select>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="window.closeModal()">取消</button>
-      <button class="btn-primary" id="btn-save-bot">保存配置</button>
-    </div>
-  `,
-    { icon: '🤖' }
-  );
+  const bodyHtml = `
+    <div class="bot-profile-header">
+      <button class="bot-profile-close-btn" onclick="window.closeModal()" title="关闭 (Esc)">&times;</button>
+      
+      <div id="bot-profile-avatar-slot">
+        ${renderBotAvatar(bot, { size: 128, showEditBadge: true, useVideo: true, motion: 'avatar-idle' })}
+      </div>
 
-  document.getElementById('btn-save-bot').onclick = async () => {
-    const system_prompt = document.getElementById('modal-bot-prompt').value;
-    const approval_level = document.getElementById('modal-bot-level').value;
+      <div class="bot-profile-name" id="bot-profile-card-name">${escapeHtml(bot.name)}</div>
+      <div class="bot-profile-status">
+        <span class="bot-status-dot-pulse"></span>
+        <span>已连接</span>
+      </div>
 
-    try {
-      await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ system_prompt, approval_level })
-      });
+      <div class="bot-segmented-tabs" id="bot-profile-tabs">
+        <button type="button" class="bot-segmented-tab active" data-tab="tasks" title="预定任务与自动化例行">${Icons.list(18)}</button>
+        <button type="button" class="bot-segmented-tab" data-tab="security" title="门禁审批与安全策略">${Icons.shield(18)}</button>
+        <button type="button" class="bot-segmented-tab" data-tab="identity" title="身份人设与系统配置">${Icons.fingerprint(18)}</button>
+      </div>
+    </div>
+
+    <div class="bot-tab-body">
+      <!-- 1. 预定任务与巡检 -->
+      <div class="bot-tab-page" id="bot-page-tasks">
+        <div class="bot-task-group-title">
+          <span>1 项预定任务</span>
+          <span style="font-size: 11px; color: var(--om-muted); font-weight: 400;">自动化常驻</span>
+        </div>
+        
+        <div class="bot-task-card">
+          <div class="bot-task-icon-wrap" style="background-color: rgba(239, 68, 68, 0.1); color: #ef4444;">
+            ${Icons.sparkles(16)}
+          </div>
+          <div class="bot-task-details">
+            <div class="bot-task-name">Heartbeat</div>
+            <div class="bot-task-sub">每30分钟 · 维持数字员工后台常驻心跳与自驱状态检测</div>
+          </div>
+        </div>
+
+        <div class="bot-task-card" style="cursor: pointer;" id="btn-goto-routines">
+          <div class="bot-task-icon-wrap" style="background-color: rgba(0, 100, 212, 0.1); color: var(--om-accent);">
+            ${Icons.routines(16)}
+          </div>
+          <div class="bot-task-details">
+            <div class="bot-task-name">例行巡检与触发器 (Routines)</div>
+            <div class="bot-task-sub">已配置环境巡检、日志上报与 Webhook 自动化规则</div>
+          </div>
+          <div style="color: var(--om-muted); font-size: 12px;">${Icons.chevronRight(16)}</div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+          <button type="button" class="btn-secondary" id="btn-view-all-goals" style="border-radius: 9999px; padding: 6px 16px; font-size: 12px;">
+            查看所有预定与长周期目标
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. 门禁与安全 -->
+      <div class="bot-tab-page" id="bot-page-security" style="display: none;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600; font-size: 13px;">门禁审批级别 (Approval Mode):</label>
+          <select id="modal-bot-level" class="form-control" style="border-radius: 12px;">
+            <option value="ask" ${bot.approval_level === 'ask' ? 'selected' : ''}>ASK (严格模式: 高危全量拦截审批)</option>
+            <option value="auto_edits" ${bot.approval_level === 'auto_edits' ? 'selected' : ''}>AUTO_EDITS (免批代码编辑与工件产出)</option>
+            <option value="full" ${bot.approval_level === 'full' ? 'selected' : ''}>FULL (完全自驱模式: 仅拦截破坏底线)</option>
+          </select>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--om-surface-2); border-radius: 12px; border: 1px solid var(--om-border);">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: var(--om-accent);">${Icons.terminal(16)}</span>
+              <span style="font-size: 13px; font-weight: 500;">微沙箱环境隔离</span>
+            </div>
+            <span class="pill-badge pill-blue" style="font-size: 11px;">bwrap 容器隔离</span>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--om-surface-2); border-radius: 12px; border: 1px solid var(--om-border);">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #10b981;">${Icons.shield(16)}</span>
+              <span style="font-size: 13px; font-weight: 500;">动态污点跟踪</span>
+            </div>
+            <span class="pill-badge pill-green" style="font-size: 11px;">纯净态 (Untainted)</span>
+          </div>
+        </div>
+
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+          <button type="button" class="btn-primary" id="btn-save-security" style="border-radius: 9999px;">保存门禁策略</button>
+        </div>
+      </div>
+
+      <!-- 3. 身份人设与 Prompt -->
+      <div class="bot-tab-page" id="bot-page-identity" style="display: none;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600; font-size: 13px;">数字员工名称:</label>
+          <input type="text" id="modal-bot-name-input" class="form-control" value="${escapeHtml(bot.name)}" style="border-radius: 10px;" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600; font-size: 13px;">业务角色 / 职能描述:</label>
+          <input type="text" id="modal-bot-role-input" class="form-control" value="${escapeHtml(bot.role || bot.description || '')}" placeholder="例如: 智能研发助手 / 自动化运维工程师" style="border-radius: 10px;" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600; font-size: 13px;">系统人设 Prompt:</label>
+          <textarea id="modal-bot-prompt" class="form-control" rows="5" style="font-family: var(--font-mono); font-size: 12px; border-radius: 10px;">${escapeHtml(bot.system_prompt || '')}</textarea>
+        </div>
+
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn-secondary" onclick="window.closeModal()" style="border-radius: 9999px;">取消</button>
+          <button type="button" class="btn-primary" id="btn-save-identity" style="border-radius: 9999px;">保存身份配置</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  openModal(`数字员工: ${bot.name}`, bodyHtml, { hideHeader: true, contentClass: 'bot-profile-modal-content' });
+
+  // 绑定编辑铅笔 -> 打开虚拟形象工坊
+  const editBadge = document.getElementById('btn-trigger-avatar-studio');
+  if (editBadge) {
+    editBadge.onclick = (e) => {
+      e.stopPropagation();
+      openAvatarStudioModal(bot);
+    };
+  }
+
+  // 分段选项卡切换逻辑
+  const tabsContainer = document.getElementById('bot-profile-tabs');
+  if (tabsContainer) {
+    tabsContainer.querySelectorAll('.bot-segmented-tab').forEach((tabBtn) => {
+      tabBtn.onclick = () => {
+        tabsContainer.querySelectorAll('.bot-segmented-tab').forEach((b) => b.classList.remove('active'));
+        tabBtn.classList.add('active');
+
+        const target = tabBtn.dataset.tab;
+        document.getElementById('bot-page-tasks').style.display = target === 'tasks' ? 'block' : 'none';
+        document.getElementById('bot-page-security').style.display = target === 'security' ? 'block' : 'none';
+        document.getElementById('bot-page-identity').style.display = target === 'identity' ? 'block' : 'none';
+      };
+    });
+  }
+
+  const btnGotoRoutines = document.getElementById('btn-goto-routines');
+  if (btnGotoRoutines) {
+    btnGotoRoutines.onclick = () => {
       closeModal();
-      showToast('数字员工配置已更新并落盘！', 'success');
-      loadBots();
-    } catch (err) {
-      showToast(`保存失败: ${err.message}`, 'error');
-    }
+      switchTab('goals');
+    };
+  }
+
+  const btnViewGoals = document.getElementById('btn-view-all-goals');
+  if (btnViewGoals) {
+    btnViewGoals.onclick = () => {
+      closeModal();
+      switchTab('goals');
+    };
+  }
+
+  const btnSaveSec = document.getElementById('btn-save-security');
+  if (btnSaveSec) {
+    btnSaveSec.onclick = async () => {
+      const approval_level = document.getElementById('modal-bot-level').value;
+      try {
+        await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approval_level })
+        });
+        showToast('门禁审批策略已更新！', 'success');
+        bot.approval_level = approval_level;
+        dom.approvalModeText.textContent = `${approval_level.toUpperCase()} 门禁`;
+        renderBotList();
+        closeModal();
+      } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+      }
+    };
+  }
+
+  const btnSaveId = document.getElementById('btn-save-identity');
+  if (btnSaveId) {
+    btnSaveId.onclick = async () => {
+      const name = document.getElementById('modal-bot-name-input').value.trim();
+      const role = document.getElementById('modal-bot-role-input').value.trim();
+      const system_prompt = document.getElementById('modal-bot-prompt').value;
+      if (!name) return showToast('请输入数字员工名称', 'warning');
+
+      try {
+        await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, role, system_prompt })
+        });
+        bot.name = name;
+        bot.role = role;
+        bot.system_prompt = system_prompt;
+        dom.activeBotName.textContent = name;
+        dom.activeBotRole.textContent = role || 'Bot';
+        renderBotList();
+        showToast('身份与人设 Prompt 已更新！', 'success');
+        closeModal();
+      } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+      }
+    };
+  }
+}
+
+/**
+ * nanoMuse 虚拟形象工坊 (Avatar Studio Modal)
+ * 支持小金龙、小哀/动漫预设、本地图片上传、个性 Emoji 调色盘与 AI 定制
+ */
+function openAvatarStudioModal(bot) {
+  let draftAvatar = bot.avatar || 'haibara';
+  let draftType = bot.avatar_type || (
+    draftAvatar === 'dragon' ? 'dragon' :
+    ['haibara', 'moss-courier', 'tide-tinker', 'dusk-moth', 'copper-acorn'].includes(draftAvatar) ? 'preset' :
+    draftAvatar.startsWith('/') || draftAvatar.startsWith('http') || draftAvatar.startsWith('data:image/') ? 'image' :
+    'emoji'
+  );
+  let draftEmoji = bot.avatar_emoji || (draftAvatar.length <= 4 ? draftAvatar : '✨');
+  let draftColor = bot.avatar_color || '#0064d4';
+  let currentMood = 'idle';
+  let currentSourceTab = draftType === 'dragon' ? 'dragon' : draftType === 'image' ? 'upload' : draftType === 'emoji' ? 'emoji' : 'presets';
+
+  const updatePreviewBox = () => {
+    const previewEl = document.getElementById('studio-avatar-preview-circle');
+    if (!previewEl) return;
+
+    const mockBot = {
+      ...bot,
+      avatar: draftAvatar,
+      avatar_type: draftType,
+      avatar_emoji: draftEmoji,
+      avatar_color: draftColor
+    };
+
+    previewEl.innerHTML = renderBotAvatar(mockBot, {
+      size: 140,
+      mood: currentMood,
+      motion: currentMood === 'working' ? 'avatar-working' : currentMood === 'waiting' ? 'avatar-waiting' : 'avatar-idle',
+      useVideo: true
+    });
   };
+
+  const bodyHtml = `
+    <div class="avatar-studio-container">
+      <!-- 顶部形象与姿态动态预览台 -->
+      <div class="avatar-studio-stage">
+        <div id="studio-avatar-preview-circle">
+          <!-- 动态更新 -->
+        </div>
+
+        <div class="avatar-mood-pills">
+          <button type="button" class="avatar-mood-pill active" data-mood="idle">闲置 (Idle)</button>
+          <button type="button" class="avatar-mood-pill" data-mood="working">执行 (Working)</button>
+          <button type="button" class="avatar-mood-pill" data-mood="waiting">等待 (Waiting)</button>
+          <button type="button" class="avatar-mood-pill" data-mood="happy">就绪 (Happy)</button>
+        </div>
+      </div>
+
+      <!-- 形象来源导航 -->
+      <div class="avatar-source-nav">
+        <button type="button" class="avatar-source-tab ${currentSourceTab === 'presets' ? 'active' : ''}" data-source="presets">🎨 精选形象集</button>
+        <button type="button" class="avatar-source-tab ${currentSourceTab === 'dragon' ? 'active' : ''}" data-source="dragon">🐲 经典小金龙</button>
+        <button type="button" class="avatar-source-tab ${currentSourceTab === 'upload' ? 'active' : ''}" data-source="upload">📁 本地图片上传</button>
+        <button type="button" class="avatar-source-tab ${currentSourceTab === 'emoji' ? 'active' : ''}" data-source="emoji">✨ 个性 Emoji</button>
+        <button type="button" class="avatar-source-tab ${currentSourceTab === 'ai' ? 'active' : ''}" data-source="ai">🪄 AI 形象工坊</button>
+      </div>
+
+      <!-- 来源面板容器 -->
+      <div class="avatar-source-panel-wrap">
+        <!-- 1. 精选形象预设 -->
+        <div class="avatar-source-panel" id="panel-source-presets" style="${currentSourceTab === 'presets' ? 'display:block;' : 'display:none;'}">
+          <div class="avatar-grid-picker">
+            ${AVATAR_PRESETS.map((p) => `
+              <div class="avatar-preset-tile ${draftAvatar === p.id ? 'selected' : ''}" data-preset-id="${p.id}">
+                <img src="/avatars/presets/${p.id}/idle.webp" class="avatar-preset-img" alt="${p.name}" />
+                <span class="avatar-preset-name">${p.name.split(' ')[0]}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div id="studio-preset-desc" style="font-size: 12px; color: var(--om-muted); margin-top: 10px; padding: 6px 10px; background: var(--om-surface-2); border-radius: 8px;">
+            ${(AVATAR_PRESETS.find((p) => p.id === draftAvatar) || AVATAR_PRESETS[0]).desc}
+          </div>
+        </div>
+
+        <!-- 2. 经典小金龙 -->
+        <div class="avatar-source-panel" id="panel-source-dragon" style="${currentSourceTab === 'dragon' ? 'display:block;' : 'display:none;'}">
+          <div style="display: flex; gap: 14px; align-items: center; padding: 12px; background: var(--om-surface-2); border-radius: 14px; border: 1px solid var(--om-border);">
+            <img src="/avatars/dragon-idle.webp" style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: #f1efeb;" />
+            <div>
+              <div style="font-size: 14px; font-weight: 600; color: var(--om-fg);">The Dragon (萌宠金龙)</div>
+              <div style="font-size: 12px; color: var(--om-muted); margin-top: 2px;">nanoMuse 标志性图腾伙伴，包含 5 态情绪表达与短视频动态姿态。</div>
+              <button type="button" class="btn-primary" id="btn-select-dragon" style="margin-top: 8px; padding: 3px 12px; font-size: 11.5px; border-radius: 9999px;">
+                选择小金龙作为形象
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 本地图片上传 -->
+        <div class="avatar-source-panel" id="panel-source-upload" style="${currentSourceTab === 'upload' ? 'display:block;' : 'display:none;'}">
+          <div style="border: 2px dashed var(--om-border); border-radius: 16px; padding: 20px; text-align: center; cursor: pointer;" id="studio-dropzone">
+            <input type="file" id="studio-upload-file-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display: none;" />
+            <div style="font-size: 28px; margin-bottom: 6px;">🖼️</div>
+            <div style="font-size: 13.5px; font-weight: 600; color: var(--om-fg);">点击或拖拽上传任意头像图片</div>
+            <div style="font-size: 11.5px; color: var(--om-muted); margin-top: 4px;">支持 PNG、JPG、WEBP 格式，系统将自动裁剪为高清圆形形象</div>
+          </div>
+        </div>
+
+        <!-- 4. 个性 Emoji -->
+        <div class="avatar-source-panel" id="panel-source-emoji" style="${currentSourceTab === 'emoji' ? 'display:block;' : 'display:none;'}">
+          <div class="avatar-emoji-grid">
+            ${EMOJI_PALETTE.map((e) => `
+              <button type="button" class="avatar-emoji-btn ${draftEmoji === e ? 'selected' : ''}" data-emoji="${e}">${e}</button>
+            `).join('')}
+          </div>
+          <div style="font-size: 12px; font-weight: 600; color: var(--om-muted); margin-top: 14px; margin-bottom: 6px;">选择底色色调:</div>
+          <div class="avatar-color-strip">
+            ${COLOR_PALETTE.map((c) => `
+              <div class="avatar-color-circle ${draftColor === c ? 'selected' : ''}" data-color="${c}" style="background-color: ${c};"></div>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- 5. AI 虚拟形象工坊 -->
+        <div class="avatar-source-panel" id="panel-source-ai" style="${currentSourceTab === 'ai' ? 'display:block;' : 'display:none;'}">
+          <div class="form-group">
+            <label class="form-label" style="font-size: 12px; font-weight: 600;">输入形象提示词 Prompt:</label>
+            <input type="text" id="studio-ai-prompt" class="form-control" value="a thoughtful anime girl holding a warm coffee cup, cozy blue sweater" style="border-radius: 10px; font-size: 13px;" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size: 12px; font-weight: 600;">艺术质感风格 (Style):</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="studio-style-picker">
+              ${STUDIO_STYLES.map((st, idx) => `
+                <button type="button" class="btn-secondary ${idx === 1 ? 'active' : ''}" data-style-id="${st.id}" style="padding: 4px 10px; font-size: 11.5px; border-radius: 9999px;">
+                  ${st.label}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+          <button type="button" class="btn-primary" id="btn-studio-generate-ai" style="width: 100%; border-radius: 12px; padding: 8px; margin-top: 4px; display: flex; align-items: center; justify-content: center; gap: 6px;">
+            ${Icons.sparkles(16)} 生成并应用定制虚拟形象
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--om-border); display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" class="btn-secondary" onclick="window.closeModal()" style="border-radius: 9999px;">取消</button>
+        <button type="button" class="btn-primary" id="btn-save-studio-avatar" style="border-radius: 9999px; padding: 6px 18px;">保存并应用形象</button>
+      </div>
+    </div>
+  `;
+
+  openModal(`虚拟形象工坊 · ${bot.name}`, bodyHtml, { icon: '✨' });
+  updatePreviewBox();
+
+  // 姿态 Mood 切换
+  dom.modalContainer.querySelectorAll('.avatar-mood-pill').forEach((pill) => {
+    pill.onclick = () => {
+      dom.modalContainer.querySelectorAll('.avatar-mood-pill').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentMood = pill.dataset.mood;
+      updatePreviewBox();
+    };
+  });
+
+  // 来源 Tabs 切换
+  dom.modalContainer.querySelectorAll('.avatar-source-tab').forEach((tab) => {
+    tab.onclick = () => {
+      dom.modalContainer.querySelectorAll('.avatar-source-tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      const src = tab.dataset.source;
+      currentSourceTab = src;
+
+      document.getElementById('panel-source-presets').style.display = src === 'presets' ? 'block' : 'none';
+      document.getElementById('panel-source-dragon').style.display = src === 'dragon' ? 'block' : 'none';
+      document.getElementById('panel-source-upload').style.display = src === 'upload' ? 'block' : 'none';
+      document.getElementById('panel-source-emoji').style.display = src === 'emoji' ? 'block' : 'none';
+      document.getElementById('panel-source-ai').style.display = src === 'ai' ? 'block' : 'none';
+    };
+  });
+
+  // 预设项点击选择
+  dom.modalContainer.querySelectorAll('.avatar-preset-tile').forEach((tile) => {
+    tile.onclick = () => {
+      dom.modalContainer.querySelectorAll('.avatar-preset-tile').forEach((t) => t.classList.remove('selected'));
+      tile.classList.add('selected');
+      const pId = tile.dataset.presetId;
+      draftType = 'preset';
+      draftAvatar = pId;
+      const descEl = document.getElementById('studio-preset-desc');
+      const found = AVATAR_PRESETS.find((p) => p.id === pId);
+      if (descEl && found) descEl.textContent = found.desc;
+      updatePreviewBox();
+    };
+  });
+
+  // 小金龙选择
+  const btnDragon = document.getElementById('btn-select-dragon');
+  if (btnDragon) {
+    btnDragon.onclick = () => {
+      draftType = 'dragon';
+      draftAvatar = 'dragon';
+      showToast('已选中经典小金龙形象', 'info');
+      updatePreviewBox();
+    };
+  }
+
+  // 本地图片上传
+  const dropzone = document.getElementById('studio-dropzone');
+  const fileInput = document.getElementById('studio-upload-file-input');
+  if (dropzone && fileInput) {
+    dropzone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const base64 = evt.target?.result;
+        if (!base64) return;
+
+        try {
+          showToast('正在上传并裁剪头像...', 'info');
+          const res = await fetch('/api/upload/avatar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64, name: file.name })
+          });
+          const resData = await res.json();
+          if (resData.url) {
+            draftType = 'image';
+            draftAvatar = resData.url;
+            updatePreviewBox();
+            showToast('自定义头像上传成功！', 'success');
+          } else {
+            throw new Error(resData.error || '上传失败');
+          }
+        } catch (err) {
+          showToast(`上传异常: ${err.message}`, 'error');
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+  }
+
+  // Emoji 与色调选择
+  dom.modalContainer.querySelectorAll('.avatar-emoji-btn').forEach((btn) => {
+    btn.onclick = () => {
+      dom.modalContainer.querySelectorAll('.avatar-emoji-btn').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      draftEmoji = btn.dataset.emoji;
+      draftType = 'emoji';
+      draftAvatar = draftEmoji;
+      updatePreviewBox();
+    };
+  });
+
+  dom.modalContainer.querySelectorAll('.avatar-color-circle').forEach((circle) => {
+    circle.onclick = () => {
+      dom.modalContainer.querySelectorAll('.avatar-color-circle').forEach((c) => c.classList.remove('selected'));
+      circle.classList.add('selected');
+      draftColor = circle.dataset.color;
+      draftType = 'emoji';
+      updatePreviewBox();
+    };
+  });
+
+  // AI 工坊生成模拟定制
+  const btnAiGen = document.getElementById('btn-studio-generate-ai');
+  if (btnAiGen) {
+    btnAiGen.onclick = () => {
+      const prompt = document.getElementById('studio-ai-prompt').value.trim();
+      btnAiGen.disabled = true;
+      btnAiGen.innerHTML = `正在调用画图模型生成形象...`;
+
+      setTimeout(() => {
+        btnAiGen.disabled = false;
+        btnAiGen.innerHTML = `${Icons.sparkles(16)} 生成并应用定制虚拟形象`;
+        // 智能匹配或分配预设作为结果
+        draftType = 'preset';
+        draftAvatar = prompt.includes('moth') ? 'dusk-moth' : prompt.includes('tinker') ? 'tide-tinker' : prompt.includes('acorn') ? 'copper-acorn' : prompt.includes('moss') ? 'moss-courier' : 'haibara';
+        updatePreviewBox();
+        showToast('AI 形象绘制完成并已就绪！', 'success');
+      }, 700);
+    };
+  }
+
+  // 保存并应用
+  const btnSave = document.getElementById('btn-save-studio-avatar');
+  if (btnSave) {
+    btnSave.onclick = async () => {
+      try {
+        const patchData = {
+          avatar: draftAvatar,
+          avatar_type: draftType,
+          avatar_emoji: draftEmoji,
+          avatar_color: draftColor
+        };
+
+        await fetch(`/api/bots/${encodeURIComponent(bot.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patchData)
+        });
+
+        Object.assign(bot, patchData);
+        dom.activeBotAvatar.innerHTML = renderBotAvatar(bot, { size: 22, still: true });
+        renderBotList();
+        closeModal();
+        showToast('数字员工虚拟形象已更新！', 'success');
+      } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+      }
+    };
+  }
 }
 
 // ============================================================================

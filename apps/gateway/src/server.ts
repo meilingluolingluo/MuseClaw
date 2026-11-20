@@ -412,6 +412,49 @@ export function startGatewayServer(defaultPort = 8799) {
       }
     }
 
+    // B1.1 虚拟形象图片上传接口 (Avatar Upload)
+    if (req.method === 'POST' && url.pathname === '/api/upload/avatar') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const { image } = JSON.parse(body || '{}');
+        if (!image) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Image data is required' }));
+        }
+
+        let buffer: Buffer;
+        let ext = '.png';
+        if (image.startsWith('data:image/')) {
+          const matches = image.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+          if (matches) {
+            ext = `.${matches[1] === 'jpeg' ? 'jpg' : matches[1]}`;
+            buffer = Buffer.from(matches[2], 'base64');
+          } else {
+            throw new Error('Invalid base64 image data');
+          }
+        } else {
+          throw new Error('Unsupported image format');
+        }
+
+        const filename = `avatar_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${ext}`;
+        const uploadDir = path.resolve(__dirname, '../../web/avatars/uploads');
+        const backupUploadDir = path.resolve(__dirname, '../data/web/avatars/uploads');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        if (!fs.existsSync(backupUploadDir)) fs.mkdirSync(backupUploadDir, { recursive: true });
+
+        fs.writeFileSync(path.join(uploadDir, filename), buffer);
+        fs.writeFileSync(path.join(backupUploadDir, filename), buffer);
+
+        const avatarUrl = `/avatars/uploads/${filename}`;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, url: avatarUrl }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
     // B2. 多 Bot 管理接口 (BotRegistry)
     if (req.method === 'GET' && url.pathname === '/api/bots') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1345,7 +1388,8 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
           '.svg': 'image/svg+xml',
           '.ico': 'image/x-icon',
           '.woff2': 'font/woff2',
-          '.webp': 'image/webp'
+          '.webp': 'image/webp',
+          '.mp4': 'video/mp4'
         };
         const contentType = mimeTypes[ext] || 'application/octet-stream';
         res.writeHead(200, { 'Content-Type': contentType });
