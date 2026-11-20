@@ -30,6 +30,7 @@ Thumbs.db
 # Scratch / Local testing
 scratch/
 tmp/
+/data/
 apps/web/uploads/*
 !apps/web/uploads/.gitkeep
 apps/gateway/data/*

@@ -425,6 +425,11 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname.startsWith('/api/feed') ||
     url.pathname.startsWith('/api/goals') ||
     url.pathname.startsWith('/api/audit') ||
+    url.pathname.startsWith('/api/policy') ||
+    url.pathname.startsWith('/api/grants') ||
+    url.pathname.startsWith('/api/memory') ||
+    url.pathname.startsWith('/api/sandbox') ||
+    url.pathname.startsWith('/api/mcp') ||
     url.pathname.startsWith('/api/hooks') ||
     url.pathname.startsWith('/api/skills') ||
     url.pathname.startsWith('/api/infoflow') ||
@@ -611,33 +616,63 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(session));
     }
 
-    if (req.method === 'GET' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
-      const id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
-      const memory = botMemory.getMemory(id, currentUser?.username);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ bot_id: id, userId: currentUser?.username, memory }));
-    }
-
-    if (req.method === 'PUT' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
-      const id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const { memory } = JSON.parse(body || '{}');
-      if (typeof memory !== 'string') {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Field "memory" must be a string' }));
+    if (req.method === 'GET' && (
+      (url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) ||
+      url.pathname.startsWith('/api/memory/')
+    ) && !url.pathname.includes('/consolidate') && !url.pathname.includes('/undo') && !url.pathname.includes('/reports')) {
+      let id = '';
+      if (url.pathname.startsWith('/api/bots/')) {
+        id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
+      } else {
+        id = url.pathname.replace('/api/memory/', '').split('/')[0];
       }
-      botMemory.saveMemory(id, memory, currentUser?.username);
+      id = id || 'muse';
+      const targetUserId = currentUser?.username || 'user_web';
+      const memory = botMemory.getMemory(id, targetUserId);
+      const reports = botMemory.getConsolidationHistory(id, targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: true, bot_id: id, userId: currentUser?.username, memory }));
+      return res.end(JSON.stringify({
+        bot_id: id,
+        userId: targetUserId,
+        memory,
+        content: memory,
+        items: [],
+        reports
+      }));
     }
 
-    // 记忆受控自整理 (Memory Consolidation: POST /api/bots/:id/memory/consolidate)
-    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/consolidate$/)) {
-      const id = url.pathname.split('/')[3];
+    if (req.method === 'PUT' && (
+      (url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) ||
+      url.pathname.startsWith('/api/memory/')
+    )) {
+      let id = '';
+      if (url.pathname.startsWith('/api/bots/')) {
+        id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
+      } else {
+        id = url.pathname.replace('/api/memory/', '').split('/')[0];
+      }
+      id = id || 'muse';
+      const targetUserId = currentUser?.username || 'user_web';
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { dry_run, budget_share } = JSON.parse(body || '{}');
+      const parsed = JSON.parse(body || '{}');
+      const memory = typeof parsed.memory === 'string' ? parsed.memory : (typeof parsed.content === 'string' ? parsed.content : '');
+      botMemory.saveMemory(id, memory, targetUserId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, bot_id: id, userId: targetUserId, memory, content: memory }));
+    }
+
+    // 记忆受控自整理 (Memory Consolidation)
+    if (req.method === 'POST' && (
+      url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/consolidate$/) ||
+      url.pathname.match(/^\/api\/memory\/[^/]+\/consolidate$/)
+    )) {
+      const parts = url.pathname.split('/');
+      const id = parts[2] === 'memory' ? parts[3] : parts[3];
+      const targetUserId = currentUser?.username || 'user_web';
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { dry_run, budget_share, dryRun } = JSON.parse(body || '{}');
 
       try {
         const report = await botMemory.consolidateMemory(
@@ -646,31 +681,41 @@ export function startGatewayServer(defaultPort = 8799) {
             const resp = await callLLM([{ role: 'user', content: prompt }], []);
             return resp.content || '';
           },
-          { dryRun: Boolean(dry_run), budgetShare: typeof budget_share === 'number' ? budget_share : 0.2 },
-          currentUser?.username
+          { dryRun: Boolean(dry_run || dryRun), budgetShare: typeof budget_share === 'number' ? budget_share : 0.2 },
+          targetUserId
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ success: true, bot_id: id, userId: currentUser?.username, report }));
+        return res.end(JSON.stringify({ success: true, bot_id: id, userId: targetUserId, report, summary: report.summary }));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: false, error: err.message }));
       }
     }
 
-    // 记忆整理一键撤销 (Memory Consolidation Undo: POST /api/bots/:id/memory/undo)
-    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/undo$/)) {
-      const id = url.pathname.split('/')[3];
-      const result = botMemory.undoLastConsolidation(id, currentUser?.username);
+    // 记忆整理一键撤销 (Memory Consolidation Undo)
+    if (req.method === 'POST' && (
+      url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/undo$/) ||
+      url.pathname.match(/^\/api\/memory\/[^/]+\/undo$/)
+    )) {
+      const parts = url.pathname.split('/');
+      const id = parts[2] === 'memory' ? parts[3] : parts[3];
+      const targetUserId = currentUser?.username || 'user_web';
+      const result = botMemory.undoLastConsolidation(id, targetUserId);
       res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ bot_id: id, userId: currentUser?.username, ...result }));
+      return res.end(JSON.stringify({ bot_id: id, userId: targetUserId, ...result }));
     }
 
-    // 获取记忆整理历史审计报告 (GET /api/bots/:id/memory/reports)
-    if (req.method === 'GET' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/reports$/)) {
-      const id = url.pathname.split('/')[3];
-      const reports = botMemory.getConsolidationHistory(id, currentUser?.username);
+    // 获取记忆整理历史审计报告
+    if (req.method === 'GET' && (
+      url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/reports$/) ||
+      url.pathname.match(/^\/api\/memory\/[^/]+\/reports$/)
+    )) {
+      const parts = url.pathname.split('/');
+      const id = parts[2] === 'memory' ? parts[3] : parts[3];
+      const targetUserId = currentUser?.username || 'user_web';
+      const reports = botMemory.getConsolidationHistory(id, targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ bot_id: id, userId: currentUser?.username, reports }));
+      return res.end(JSON.stringify({ bot_id: id, userId: targetUserId, reports }));
     }
 
     // B3. 对外独立 Bot API (Headless Bot API: POST /api/bots/:id/chat)
@@ -763,12 +808,17 @@ export function startGatewayServer(defaultPort = 8799) {
       const files = fs.readdirSync(artifactsDir).map((file) => {
         const stat = fs.statSync(path.join(artifactsDir, file));
         return {
-          filename: file,
+          id: file,
+          title: file,
           name: file,
+          filename: file,
+          path: `/api/artifacts/${file}`,
           sizeBytes: stat.size,
           size: stat.size,
+          createdAt: stat.birthtimeMs || stat.mtimeMs,
           updatedAt: stat.mtimeMs,
-          url: `/api/artifacts/${encodeURIComponent(file)}`
+          url: `/api/artifacts/${encodeURIComponent(file)}`,
+          previewUrl: `/api/artifacts/${encodeURIComponent(file)}`
         };
       });
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -859,8 +909,23 @@ export function startGatewayServer(defaultPort = 8799) {
       const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
       const s = sessionStore.get(id, targetUserId);
       if (!s) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Session not found' }));
+        if (isMessagesRequest) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify([]));
+        }
+        const botId = id.startsWith('sess_') ? (id.split('_')[1] || 'muse') : 'muse';
+        const fallbackSession = {
+          id,
+          title: '新任务对话',
+          botId,
+          bot_id: botId,
+          userId: targetUserId,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          messages: []
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(fallbackSession));
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(isMessagesRequest ? (s.messages || []) : s));
@@ -922,7 +987,7 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(sentinel.getGrantStore().list()));
     }
 
-    if (req.method === 'POST' && url.pathname.startsWith('/api/grants/') && url.pathname.endsWith('/revoke')) {
+    if ((req.method === 'DELETE' || (req.method === 'POST' && url.pathname.endsWith('/revoke'))) && url.pathname.startsWith('/api/grants/')) {
       const grantId = url.pathname.replace('/api/grants/', '').replace('/revoke', '');
       const revoked = sentinel.getGrantStore().revoke(grantId);
       res.writeHead(revoked ? 200 : 404, { 'Content-Type': 'application/json' });
@@ -1228,9 +1293,14 @@ fi
       return res.end(JSON.stringify({ success: true, enabled }));
     }
 
-    if (req.method === 'GET' && url.pathname === '/api/routines/runs') {
+    if (req.method === 'GET' && (url.pathname === '/api/routines/runs' || (url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/runs')))) {
+      const routineId = url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/runs')
+        ? url.pathname.replace('/api/routines/', '').replace('/runs', '')
+        : undefined;
+      const allRuns = proactive.listRuns();
+      const filtered = routineId ? allRuns.filter(r => r.routineId === routineId) : allRuns;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(proactive.listRuns()));
+      return res.end(JSON.stringify(filtered));
     }
 
     // D3. 外部 Webhook 触发入口 (带 Bearer 鉴权与限流)
@@ -1360,16 +1430,23 @@ fi
       return res.end(JSON.stringify({ success: deleted }));
     }
 
-    // 智能体动态列表 (GET /api/feed/posts)
-    if (req.method === 'GET' && url.pathname === '/api/feed/posts') {
+    // 智能体动态列表 (GET /api/feed 或 GET /api/feed/posts)
+    if (req.method === 'GET' && (url.pathname === '/api/feed' || url.pathname === '/api/feed/posts')) {
       const userId = currentUser?.username || 'user_web';
       const data = feedStore.getFeedPosts(userId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(data));
+      return res.end(JSON.stringify(url.pathname === '/api/feed' ? { posts: data.posts || [], settings: { daily: data.daily, time: data.time, instructions: data.instructions } } : data));
     }
 
-    // 更新动态定制指令与定时策略 (PUT /api/feed/instructions)
-    if (req.method === 'PUT' && url.pathname === '/api/feed/instructions') {
+    // 动态配置读取与更新 (GET/POST /api/feed/settings, PUT /api/feed/instructions)
+    if (req.method === 'GET' && url.pathname === '/api/feed/settings') {
+      const userId = currentUser?.username || 'user_web';
+      const data = feedStore.getFeedPosts(userId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ daily: data.daily, time: data.time, instructions: data.instructions }));
+    }
+
+    if ((req.method === 'PUT' || req.method === 'POST') && (url.pathname === '/api/feed/settings' || url.pathname === '/api/feed/instructions')) {
       const userId = currentUser?.username || 'user_web';
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -1379,8 +1456,8 @@ fi
       return res.end(JSON.stringify(data));
     }
 
-    // 立即撰写并生成动态 (POST /api/feed/posts/refresh)
-    if (req.method === 'POST' && url.pathname === '/api/feed/posts/refresh') {
+    // 立即撰写并生成动态 (POST /api/feed 或 POST /api/feed/posts/refresh)
+    if (req.method === 'POST' && (url.pathname === '/api/feed' || url.pathname === '/api/feed/posts/refresh')) {
       const userId = currentUser?.username || 'user_web';
       const caller = globalModelStore.getActiveCaller({ userId });
 

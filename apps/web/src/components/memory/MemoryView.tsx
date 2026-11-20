@@ -84,7 +84,7 @@ export const MemoryView: React.FC = () => {
           </div>
           <div className="view-sub">结构化 MEMORY.md 事实存储，[user] 声明严格受守卫保护，支持预算精简与一键 Undo 撤销</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
           <button
             type="button"
             className="btn-secondary"
@@ -92,6 +92,7 @@ export const MemoryView: React.FC = () => {
               setEditBuffer(content);
               setIsEditModalOpen(true);
             }}
+            style={{ whiteSpace: 'nowrap' }}
           >
             <Edit3 size={14} /> 编辑记忆
           </button>
@@ -99,6 +100,7 @@ export const MemoryView: React.FC = () => {
             type="button"
             className="btn-secondary"
             onClick={handleUndo}
+            style={{ whiteSpace: 'nowrap' }}
           >
             <Undo2 size={14} /> 一键撤销 (Undo)
           </button>

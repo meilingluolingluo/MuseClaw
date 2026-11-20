@@ -26,6 +26,20 @@ export const ArtifactsView: React.FC = () => {
     loadArtifacts();
   }, []);
 
+  const getArtifactName = (art: any) => {
+    if (art.title) return art.title;
+    if (art.name) return art.name;
+    if (art.filename) return art.filename;
+    if (typeof art.path === 'string' && art.path.length > 0) {
+      return art.path.split('/').pop() || art.path;
+    }
+    return '未命名工件';
+  };
+
+  const getDownloadUrl = (art: any) => {
+    return art.previewUrl || art.url || (art.filename ? `/api/artifacts/${encodeURIComponent(art.filename)}` : '#');
+  };
+
   return (
     <section className="view-stage">
       <div className="view-header">
@@ -36,7 +50,7 @@ export const ArtifactsView: React.FC = () => {
           </div>
           <div className="view-sub">Agent 运行产生的正式交付物（巡检报告、配置导出、数据总结、代码快照）</div>
         </div>
-        <button type="button" className="btn-secondary" onClick={loadArtifacts} disabled={loading}>
+        <button type="button" className="btn-secondary" onClick={loadArtifacts} disabled={loading} style={{ whiteSpace: 'nowrap' }}>
           <RefreshCw size={14} /> 刷新工件列表
         </button>
       </div>
@@ -51,68 +65,75 @@ export const ArtifactsView: React.FC = () => {
             </div>
           </div>
         ) : (
-          artifacts.map((art) => (
-            <div
-              key={art.id}
-              className="artifact-card"
-              style={{
-                background: 'var(--om-surface)',
-                border: '1px solid var(--om-border)',
-                borderRadius: '12px',
-                padding: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '8px',
-                    background: 'var(--om-surface-2)',
-                    color: 'var(--om-accent)',
-                    flexShrink: 0,
-                  }}
-                >
-                  <FileText size={18} />
-                </span>
-                <div style={{ overflow: 'hidden' }}>
-                  <div style={{ fontWeight: 600, fontSize: '13.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {art.title || art.path.split('/').pop()}
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
-                    {formatFileSize(art.size)} · {formatTime(art.createdAt)}
+          artifacts.map((art: any, index) => {
+            const displayName = getArtifactName(art);
+            const downloadUrl = getDownloadUrl(art);
+            const size = art.size || art.sizeBytes || 0;
+            const time = art.createdAt || art.updatedAt || Date.now();
+
+            return (
+              <div
+                key={art.id || art.filename || art.name || index}
+                className="artifact-card"
+                style={{
+                  background: 'var(--om-surface)',
+                  border: '1px solid var(--om-border)',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      background: 'var(--om-surface-2)',
+                      color: 'var(--om-accent)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <FileText size={18} />
+                  </span>
+                  <div style={{ overflow: 'hidden' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayName}>
+                      {displayName}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '4px' }}>
+                      {formatFileSize(size)} · {formatTime(time)}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ padding: '3px 8px', fontSize: '11px' }}
-                  onClick={() => setSelectedArtifact(art)}
-                >
-                  <ExternalLink size={12} /> 预览
-                </button>
-                {art.previewUrl && (
-                  <a
-                    href={art.previewUrl}
-                    download
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+                  <button
+                    type="button"
                     className="btn-secondary"
-                    style={{ padding: '3px 8px', fontSize: '11px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    style={{ padding: '3px 8px', fontSize: '11px', whiteSpace: 'nowrap' }}
+                    onClick={() => setSelectedArtifact({ ...art, title: displayName, previewUrl: downloadUrl })}
                   >
-                    <Download size={12} /> 下载
-                  </a>
-                )}
+                    <ExternalLink size={12} /> 预览
+                  </button>
+                  {downloadUrl && downloadUrl !== '#' && (
+                    <a
+                      href={downloadUrl}
+                      download
+                      className="btn-secondary"
+                      style={{ padding: '3px 8px', fontSize: '11px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}
+                    >
+                      <Download size={12} /> 下载
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 
@@ -126,7 +147,7 @@ export const ArtifactsView: React.FC = () => {
         >
           <div style={{ fontSize: '13px', color: 'var(--text-main)', lineHeight: 1.6 }}>
             <div style={{ marginBottom: '10px', color: 'var(--text-muted)' }}>
-              文件路径: <code>{selectedArtifact.path}</code>
+              文件路径: <code>{selectedArtifact.path || selectedArtifact.previewUrl || selectedArtifact.title}</code>
             </div>
             {selectedArtifact.previewUrl && (
               <iframe

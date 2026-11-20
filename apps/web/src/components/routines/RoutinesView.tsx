@@ -130,6 +130,8 @@ export const RoutinesView: React.FC = () => {
           className="routines-sidebar"
           style={{
             width: '280px',
+            minWidth: '220px',
+            flexShrink: 0,
             borderRight: '1px solid var(--om-border)',
             display: 'flex',
             flexDirection: 'column',
@@ -154,7 +156,7 @@ export const RoutinesView: React.FC = () => {
               type="button"
               className="btn-primary"
               onClick={() => setIsCreateOpen(true)}
-              style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '6px' }}
+              style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '6px', whiteSpace: 'nowrap' }}
             >
               <Plus size={12} /> 新建
             </button>
@@ -213,7 +215,7 @@ export const RoutinesView: React.FC = () => {
         </aside>
 
         {/* Right column detail */}
-        <main className="routines-main-content" style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+        <main className="routines-main-content" style={{ flex: 1, minWidth: '380px', overflowY: 'auto', padding: '24px' }}>
           {!activeRoutine ? (
             <div style={{ textAlign: 'center', padding: '60px 16px', color: 'var(--text-dim)' }}>
               <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏰</div>
@@ -224,16 +226,17 @@ export const RoutinesView: React.FC = () => {
             </div>
           ) : (
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-                <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', gap: '16px' }}>
+                <div style={{ flex: 1, minWidth: '220px' }}>
                   <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: 600 }}>{activeRoutine.name}</h3>
                   <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>调度表达式: <code>{activeRoutine.cron}</code></div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
                   <button
                     type="button"
                     className="btn-secondary"
                     onClick={() => handleToggleEnable(activeRoutine)}
+                    style={{ whiteSpace: 'nowrap' }}
                   >
                     <Power size={14} /> {activeRoutine.enabled ? '暂停任务' : '恢复任务'}
                   </button>
@@ -242,6 +245,7 @@ export const RoutinesView: React.FC = () => {
                     className="btn-primary"
                     onClick={handleRunNow}
                     disabled={isRunningNow}
+                    style={{ whiteSpace: 'nowrap' }}
                   >
                     <Play size={14} /> {isRunningNow ? '执行中...' : '立即运行'}
                   </button>
@@ -250,6 +254,7 @@ export const RoutinesView: React.FC = () => {
                     className="btn-secondary"
                     onClick={() => handleDelete(activeRoutine.id)}
                     title="删除"
+                    style={{ whiteSpace: 'nowrap' }}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -280,17 +285,20 @@ export const RoutinesView: React.FC = () => {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
+                          gap: '12px',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
                           {run.status === 'success' ? (
-                            <CheckCircle size={15} style={{ color: 'var(--accent-green)' }} />
+                            <CheckCircle size={15} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
                           ) : (
-                            <XCircle size={15} style={{ color: 'var(--accent-red)' }} />
+                            <XCircle size={15} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
                           )}
-                          <span style={{ fontSize: '13px' }}>{run.summary || '巡检执行完成'}</span>
+                          <span style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {run.summary || '巡检执行完成'}
+                          </span>
                         </div>
-                        <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--text-dim)', flexShrink: 0, whiteSpace: 'nowrap' }}>
                           {formatTime(run.startedAt)}
                         </span>
                       </div>

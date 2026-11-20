@@ -54,8 +54,8 @@ export const AuditView: React.FC = () => {
           </div>
           <div className="view-sub">声明式策略配置、已授予的复用权限 (Grants) 以及全生命周期追加式审计追踪流 (AuditLog)</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button type="button" className="btn-secondary" onClick={loadData} disabled={loading}>
+        <div style={{ display: 'flex', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+          <button type="button" className="btn-secondary" onClick={loadData} disabled={loading} style={{ whiteSpace: 'nowrap' }}>
             <RefreshCw size={14} /> 刷新审计流
           </button>
         </div>
@@ -82,32 +82,35 @@ export const AuditView: React.FC = () => {
             {grants.length === 0 ? (
               <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>暂无活跃授权</div>
             ) : (
-              grants.map((grant) => (
-                <div
-                  key={grant.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    background: 'var(--om-surface-2)',
-                    fontSize: '12px',
-                  }}
-                >
-                  <div>
-                    <span style={{ fontWeight: 600 }}>{grant.scope}</span>: {grant.permission}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRevokeGrant(grant.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-red)' }}
-                    title="撤销"
+              grants.map((grant: any, idx: number) => {
+                const permText = typeof grant.permission === 'object' ? JSON.stringify(grant.permission) : String(grant.permission || '');
+                return (
+                  <div
+                    key={grant.id || idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      background: 'var(--om-surface-2)',
+                      fontSize: '12px',
+                    }}
                   >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))
+                    <div>
+                      <span style={{ fontWeight: 600 }}>{grant.scope}</span>: {permText}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeGrant(grant.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-red)' }}
+                      title="撤销"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -136,16 +139,28 @@ export const AuditView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                auditLogs.map((log) => (
-                  <tr key={log.id} style={{ borderBottom: '1px solid var(--om-border)' }}>
-                    <td style={{ padding: '8px', color: 'var(--text-dim)' }}>{formatTime(log.timestamp)}</td>
-                    <td style={{ padding: '8px' }}>
-                      <span className="pill-badge pill-blue" style={{ fontSize: '10px' }}>{log.eventType}</span>
-                    </td>
-                    <td style={{ padding: '8px' }}>{log.target || '-'}</td>
-                    <td style={{ padding: '8px' }}>{log.decision || log.details || '-'}</td>
-                  </tr>
-                ))
+                auditLogs.map((log: any, idx: number) => {
+                  const time = log.timestamp || log.ts || Date.now();
+                  const eventType = log.eventType || log.event || 'EVENT';
+                  const detailsText = typeof log.details === 'string'
+                    ? log.details
+                    : log.details?.reason || log.details?.actionSummary || (log.details ? JSON.stringify(log.details) : '');
+                  const decisionRaw = log.decision || detailsText || '-';
+                  const decisionDisplay = typeof decisionRaw === 'object' ? JSON.stringify(decisionRaw) : String(decisionRaw);
+
+                  return (
+                    <tr key={log.id || `${eventType}_${idx}`} style={{ borderBottom: '1px solid var(--om-border)' }}>
+                      <td style={{ padding: '8px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{formatTime(time)}</td>
+                      <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
+                        <span className="pill-badge pill-blue" style={{ fontSize: '10px' }}>{eventType}</span>
+                      </td>
+                      <td style={{ padding: '8px' }}>{log.target || log.tool || '-'}</td>
+                      <td style={{ padding: '8px', maxWidth: '360px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={decisionDisplay}>
+                        {decisionDisplay}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
