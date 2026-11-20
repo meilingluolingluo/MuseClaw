@@ -110,13 +110,16 @@ export function discoverCodexModels(): { models: string[]; defaultModel: string 
     } catch {}
   }
 
-  fallback.models.forEach((m) => modelsSet.add(m));
   if (activeModel) modelsSet.add(activeModel);
 
   const list = Array.from(modelsSet);
+  if (list.length === 0) {
+    fallback.models.forEach((m) => modelsSet.add(m));
+  }
+  const finalList = Array.from(modelsSet);
   return {
-    models: list.length > 0 ? list : fallback.models,
-    defaultModel: activeModel || list[0] || fallback.defaultModel,
+    models: finalList.length > 0 ? finalList : fallback.models,
+    defaultModel: activeModel || finalList[0] || fallback.defaultModel,
   };
 }
 
@@ -167,11 +170,14 @@ export function discoverPiModels(): { models: string[]; defaultModel: string } {
     } catch {}
   }
 
-  fallback.models.forEach((m) => modelsSet.add(m));
   const list = Array.from(modelsSet);
+  if (list.length === 0) {
+    fallback.models.forEach((m) => modelsSet.add(m));
+  }
+  const finalList = Array.from(modelsSet);
   return {
-    models: list.length > 0 ? list : fallback.models,
-    defaultModel: list[0] || fallback.defaultModel,
+    models: finalList.length > 0 ? finalList : fallback.models,
+    defaultModel: finalList[0] || fallback.defaultModel,
   };
 }
 
@@ -254,11 +260,14 @@ export function discoverDuccModels(): { models: string[]; defaultModel: string }
     } catch {}
   }
 
-  fallback.models.forEach((m) => modelsSet.add(m));
   const list = Array.from(modelsSet);
+  if (list.length === 0) {
+    fallback.models.forEach((m) => modelsSet.add(m));
+  }
+  const finalList = Array.from(modelsSet);
   return {
-    models: list.length > 0 ? list : fallback.models,
-    defaultModel: activeModel || list[0] || fallback.defaultModel
+    models: finalList.length > 0 ? finalList : fallback.models,
+    defaultModel: activeModel || finalList[0] || fallback.defaultModel
   };
 }
 
@@ -338,11 +347,14 @@ export function discoverDucxModels(): { models: string[]; defaultModel: string }
     } catch {}
   }
 
-  fallback.models.forEach((m) => modelsSet.add(m));
   const list = Array.from(modelsSet);
+  if (list.length === 0) {
+    fallback.models.forEach((m) => modelsSet.add(m));
+  }
+  const finalList = Array.from(modelsSet);
   return {
-    models: list.length > 0 ? list : fallback.models,
-    defaultModel: activeModel || list[0] || fallback.defaultModel
+    models: finalList.length > 0 ? finalList : fallback.models,
+    defaultModel: activeModel || finalList[0] || fallback.defaultModel
   };
 }
 
@@ -585,12 +597,20 @@ export async function probeLocalAgents(): Promise<LocalAgentInfo[]> {
   for (const remote of remoteAgents) {
     const existing = results.find((r) => r.id === remote.id);
     if (existing) {
-      existing.installed = true;
-      existing.version = remote.version || existing.version;
+      if (!existing.installed) {
+        existing.installed = true;
+        existing.version = remote.version || existing.version;
+        existing.candidateModels = remote.candidateModels && remote.candidateModels.length > 0
+          ? remote.candidateModels
+          : existing.candidateModels;
+        existing.defaultModel = remote.defaultModel || existing.defaultModel;
+      } else {
+        existing.version = remote.version || existing.version;
+        const merged = Array.from(new Set([...(remote.candidateModels || []), ...(existing.candidateModels || [])]));
+        existing.candidateModels = merged.length > 0 ? merged : existing.candidateModels;
+        if (!existing.defaultModel) existing.defaultModel = remote.defaultModel;
+      }
       existing.description = `${existing.description} [由远程节点 ${remote.name} 提供]`;
-      const merged = Array.from(new Set([...(remote.candidateModels || []), ...(existing.candidateModels || [])]));
-      existing.candidateModels = merged.length > 0 ? merged : existing.candidateModels;
-      if (!existing.defaultModel) existing.defaultModel = remote.defaultModel;
     } else {
       results.push(remote);
     }

@@ -30,21 +30,113 @@ export interface LocalAgentRunResult {
 }
 
 /**
- * 快速测试指定本地 Agent 的健康度与延迟
+ * 解析用户指定模型代号在候选可用模型列表中的最佳匹配
  */
-export async function testLocalAgent(agentId: string): Promise<{ ok: boolean; latencyMs: number; version?: string; error?: string }> {
+export function resolveModelAlias(
+  requestedModel: string | undefined,
+  availableModels: string[],
+  defaultModel?: string
+): string {
+  if (!availableModels || availableModels.length === 0) {
+    return requestedModel || defaultModel || '';
+  }
+  if (!requestedModel || !requestedModel.trim()) {
+    return defaultModel || availableModels[0];
+  }
+
+  const clean = requestedModel.trim();
+
+  // 1. 精确匹配
+  if (availableModels.includes(clean)) {
+    return clean;
+  }
+
+  // 2. 忽略大小写精确匹配
+  const lower = clean.toLowerCase();
+  const exactCase = availableModels.find((m) => m.toLowerCase() === lower);
+  if (exactCase) {
+    return exactCase;
+  }
+
+  // 3. 常见模型别名/系列族模糊归一化
+  const keywords = ['deepseek', 'sonnet', 'opus', 'haiku', 'claude', 'gpt-6', 'gpt-5', 'gpt-4', 'glm', 'kimi', 'ernie', 'grok', 'minimax', 'qwen'];
+  for (const kw of keywords) {
+    if (lower.includes(kw)) {
+      const matched = availableModels.find((m) => m.toLowerCase().includes(kw));
+      if (matched) {
+        return matched;
+      }
+    }
+  }
+
+  // 4. 任意子串包含匹配
+  const partial = availableModels.find((m) => m.toLowerCase().includes(lower) || lower.includes(m.toLowerCase()));
+  if (partial) {
+    return partial;
+  }
+
+  // 5. 兜底回退为当前可用默认模型或列表首个模型
+  return defaultModel || availableModels[0];
+}
+
+/**
+ * 快速测试指定本地 Agent 的健康度与延迟 (支持携带具体模型与指定用户专属节点进行真实探针验证)
+ */
+export async function testLocalAgent(
+  agentId: string,
+  model?: string,
+  userId?: string
+): Promise<{ ok: boolean; latencyMs: number; version?: string; error?: string }> {
+  const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId, userId);
   const exe = findExecutableInPath(agentId);
-  if (!exe) {
-    const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId);
-    if (remoteRunner) {
-      const rt = remoteRunner.runtimes.find((r) => r.id === agentId);
+
+  // 1. 如果网关未安装但有远程节点，或明确路由至远程计算节点
+  if (remoteRunner && (!exe || userId)) {
+    const rt = remoteRunner.runtimes.find((r) => r.id === agentId);
+    if (!rt) {
+      return { ok: false, latencyMs: 0, error: `远程计算节点 (${remoteRunner.hostname}) 未就绪运行时: ${agentId}` };
+    }
+
+    // 若指定了模型，派发轻量级探针任务验证端到端可用性
+    if (model) {
+      const runResult = await globalRunnerMesh.dispatchTask(agentId, 'Hi', {
+        model,
+        userId,
+        timeoutMs: 15000
+      });
+      if (runResult.ok) {
+        return {
+          ok: true,
+          latencyMs: runResult.latencyMs,
+          version: `${rt.version || '在线就绪'} (节点: ${remoteRunner.hostname})`
+        };
+      }
       return {
-        ok: true,
-        latencyMs: 15,
-        version: `${rt?.version || '在线就绪'} (节点: ${remoteRunner.hostname})`
+        ok: false,
+        latencyMs: runResult.latencyMs,
+        error: runResult.error || `远程计算节点 (${remoteRunner.hostname}) 模型验证未通过`
       };
     }
-    return { ok: false, latencyMs: 0, error: `未在系统 PATH 或已连接的远程计算节点中找到: ${agentId}` };
+
+    return {
+      ok: true,
+      latencyMs: 15,
+      version: `${rt.version || '在线就绪'} (节点: ${remoteRunner.hostname})`
+    };
+  }
+
+  // 2. 本地执行程序检测
+  if (!exe) {
+    const userHint = userId ? ` (所属用户: ${userId})` : '';
+    return { ok: false, latencyMs: 0, error: `未在系统 PATH 或已连接的远程计算节点${userHint}中找到: ${agentId}` };
+  }
+
+  if (model) {
+    const runResult = await runLocalAgent(agentId, 'Hi', { model, userId, timeoutMs: 15000 });
+    if (runResult.ok) {
+      return { ok: true, latencyMs: runResult.latencyMs, version: `本地就绪 (${runResult.latencyMs}ms)` };
+    }
+    return { ok: false, latencyMs: runResult.latencyMs, error: runResult.error || '本地 Agent 模型验证未通过' };
   }
 
   const start = Date.now();
@@ -110,22 +202,16 @@ export async function runLocalAgent(
 
   if (agentId === 'codex') {
     args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
-    let targetModel = options.model;
-    if (!targetModel) {
-      const codexInfo = discoverCodexModels();
-      targetModel = codexInfo.defaultModel;
-    }
+    const codexInfo = discoverCodexModels();
+    const targetModel = resolveModelAlias(options.model, codexInfo.models, codexInfo.defaultModel);
     if (targetModel) {
       args.push('--model', targetModel);
     }
     args.push('-');
   } else if (agentId === 'pi') {
     args = ['-p', '--no-session'];
-    let targetModel = options.model;
-    if (!targetModel) {
-      const piInfo = discoverPiModels();
-      targetModel = piInfo.defaultModel;
-    }
+    const piInfo = discoverPiModels();
+    const targetModel = resolveModelAlias(options.model, piInfo.models, piInfo.defaultModel);
     if (targetModel) {
       args.push('--model', targetModel);
     }
@@ -139,21 +225,15 @@ export async function runLocalAgent(
     args = isRoot
       ? ['-p', '--output-format=stream-json', '--verbose']
       : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
-    let targetModel = options.model;
-    if (!targetModel) {
-      const duccInfo = discoverDuccModels();
-      targetModel = duccInfo.defaultModel;
-    }
+    const duccInfo = discoverDuccModels();
+    const targetModel = resolveModelAlias(options.model, duccInfo.models, duccInfo.defaultModel);
     if (targetModel) {
       args.push('--model', targetModel);
     }
   } else if (agentId === 'ducx') {
     args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
-    let targetModel = options.model;
-    if (!targetModel) {
-      const ducxInfo = discoverDucxModels();
-      targetModel = ducxInfo.defaultModel;
-    }
+    const ducxInfo = discoverDucxModels();
+    const targetModel = resolveModelAlias(options.model, ducxInfo.models, ducxInfo.defaultModel);
     if (targetModel) {
       args.push('--model', targetModel);
     }

@@ -857,6 +857,9 @@ export function startGatewayServer(defaultPort = 8799) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const data = JSON.parse(body || '{}');
+      if (currentUser?.username && !data.userId) {
+        data.userId = currentUser.username;
+      }
       const result = await globalModelStore.testProvider(data);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(result));
@@ -1330,7 +1333,8 @@ curl -fsSL "\$SERVER_URL/runner/client.js" | node -
         });
       } catch (err: any) {
         res.write(`data: ${JSON.stringify({
-          type: 'stream:text-delta',
+          type: 'agent:error',
+          error: err.message,
           text: `\n[执行出错: ${err.message}]`,
           bot_id: bot.id,
           session_id: session.id

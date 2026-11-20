@@ -74,6 +74,53 @@ function queryCliModels(binPath: string, cmdArgs: string[] = ['models']): string
   return [];
 }
 
+function resolveModelAlias(
+  requestedModel: string | undefined,
+  availableModels: string[],
+  defaultModel?: string
+): string {
+  if (!availableModels || availableModels.length === 0) {
+    return requestedModel || defaultModel || '';
+  }
+  if (!requestedModel || !requestedModel.trim()) {
+    return defaultModel || availableModels[0];
+  }
+
+  const clean = requestedModel.trim();
+
+  // 1. 精确匹配
+  if (availableModels.includes(clean)) {
+    return clean;
+  }
+
+  // 2. 忽略大小写精确匹配
+  const lower = clean.toLowerCase();
+  const exactCase = availableModels.find((m) => m.toLowerCase() === lower);
+  if (exactCase) {
+    return exactCase;
+  }
+
+  // 3. 常见模型别名/系列族模糊归一化
+  const keywords = ['deepseek', 'sonnet', 'opus', 'haiku', 'claude', 'gpt-6', 'gpt-5', 'gpt-4', 'glm', 'kimi', 'ernie', 'grok', 'minimax', 'qwen'];
+  for (const kw of keywords) {
+    if (lower.includes(kw)) {
+      const matched = availableModels.find((m) => m.toLowerCase().includes(kw));
+      if (matched) {
+        return matched;
+      }
+    }
+  }
+
+  // 4. 任意子串包含匹配
+  const partial = availableModels.find((m) => m.toLowerCase().includes(lower) || lower.includes(m.toLowerCase()));
+  if (partial) {
+    return partial;
+  }
+
+  // 5. 兜底回退为当前可用默认模型或列表首个模型
+  return defaultModel || availableModels[0];
+}
+
 function detectLocalRuntimes(): RuntimeDef[] {
   const home = homedir();
   const runtimes: RuntimeDef[] = [];
@@ -124,11 +171,9 @@ function detectLocalRuntimes(): RuntimeDef[] {
       'Fable 5.2 尝鲜',
       'auto-内部'
     ];
-    const models = Array.from(new Set([
-      ...(activeModel ? [activeModel] : []),
-      ...detectedModels,
-      ...fallbackModels
-    ]));
+    const models = (detectedModels.length > 0 || activeModel)
+      ? Array.from(new Set([...(activeModel ? [activeModel] : []), ...detectedModels]))
+      : fallbackModels;
     runtimes.push({
       id: 'ducc',
       name: 'Baidu CC (本地 ducc)',
@@ -179,12 +224,9 @@ function detectLocalRuntimes(): RuntimeDef[] {
       'DeepSeek-V4-Flash-Vision-Exp',
       'ERNIE-5.5-Flash-Preview-内部'
     ];
-    const models = Array.from(new Set([
-      ...(activeModel ? [activeModel] : []),
-      ...detectedModels,
-      ...dynamicModels,
-      ...fallbackModels
-    ]));
+    const models = (detectedModels.length > 0 || dynamicModels.length > 0 || activeModel)
+      ? Array.from(new Set([...(activeModel ? [activeModel] : []), ...detectedModels, ...dynamicModels]))
+      : fallbackModels;
     runtimes.push({
       id: 'ducx',
       name: 'Baidu CX (本地 ducx)',
@@ -276,11 +318,9 @@ function detectLocalRuntimes(): RuntimeDef[] {
       'o1-mini'
     ];
 
-    const models = Array.from(new Set([
-      ...(activeModel ? [activeModel] : []),
-      ...dynamicModels,
-      ...fallbackModels
-    ]));
+    const models = (dynamicModels.length > 0 || activeModel)
+      ? Array.from(new Set([...(activeModel ? [activeModel] : []), ...dynamicModels]))
+      : fallbackModels;
 
     runtimes.push({
       id: 'codex',
@@ -331,10 +371,9 @@ function detectLocalRuntimes(): RuntimeDef[] {
       'openai/o3-mini'
     ];
 
-    const models = Array.from(new Set([
-      ...dynamicModels,
-      ...fallbackModels
-    ]));
+    const models = dynamicModels.length > 0
+      ? Array.from(new Set(dynamicModels))
+      : fallbackModels;
 
     runtimes.push({
       id: 'pi',
@@ -473,6 +512,14 @@ class MuseClawRunnerClient {
       return;
     }
 
+    let targetModel = task.model;
+    if (runtime && runtime.models && runtime.models.length > 0) {
+      targetModel = resolveModelAlias(task.model, runtime.models, runtime.defaultModel);
+      if (task.model && targetModel && task.model !== targetModel) {
+        console.log(`🔄 [${task.agentId}] 模型别名自动对齐: "${task.model}" -> "${targetModel}"`);
+      }
+    }
+
     let args: string[] = [];
     if (task.agentId === 'ducc') {
       const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
@@ -484,14 +531,14 @@ class MuseClawRunnerClient {
       args = isRoot
         ? ['-p', '--output-format=stream-json', '--verbose']
         : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
-      if (task.model) args.push('--model', task.model);
+      if (targetModel) args.push('--model', targetModel);
     } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
       args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
-      if (task.model) args.push('--model', task.model);
+      if (targetModel) args.push('--model', targetModel);
       args.push('-');
     } else if (task.agentId === 'pi') {
       args = ['-p', '--no-session'];
-      if (task.model) args.push('--model', task.model);
+      if (targetModel) args.push('--model', targetModel);
     } else {
       args = [task.prompt];
     }

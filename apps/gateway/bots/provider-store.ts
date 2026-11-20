@@ -11,6 +11,7 @@ import {
   resolveApiKey,
   runLocalAgent,
   testLocalAgent,
+  resolveModelAlias,
   probeLocalAgents,
   discoverCodexModels,
   discoverPiModels,
@@ -311,10 +312,12 @@ export class ModelProviderStore {
 
     if (provider.id === 'codex') {
       const codexInfo = discoverCodexModels();
-      const candidateModels = Array.from(new Set([...remoteModels, ...codexInfo.models, ...(provider.candidateModels || [])]));
-      const effectiveModel = (provider.model && candidateModels.includes(provider.model))
-        ? provider.model
-        : (codexInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Grok-4.7-baidu-oneapi');
+      const candidateModels = remoteModels.length > 0 ? remoteModels : codexInfo.models;
+      const effectiveModel = resolveModelAlias(
+        provider.model,
+        candidateModels,
+        remote?.defaultModel || codexInfo.defaultModel || candidateModels[0] || 'Grok-4.7-baidu-oneapi'
+      );
       return {
         ...provider,
         model: effectiveModel,
@@ -323,10 +326,12 @@ export class ModelProviderStore {
     }
     if (provider.id === 'pi') {
       const piInfo = discoverPiModels();
-      const candidateModels = Array.from(new Set([...remoteModels, ...piInfo.models, ...(provider.candidateModels || [])]));
-      const effectiveModel = (provider.model && candidateModels.includes(provider.model))
-        ? provider.model
-        : (piInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'Opus 5.5-baidu-oneapi');
+      const candidateModels = remoteModels.length > 0 ? remoteModels : piInfo.models;
+      const effectiveModel = resolveModelAlias(
+        provider.model,
+        candidateModels,
+        remote?.defaultModel || piInfo.defaultModel || candidateModels[0] || 'Opus 5.5-baidu-oneapi'
+      );
       return {
         ...provider,
         model: effectiveModel,
@@ -335,10 +340,12 @@ export class ModelProviderStore {
     }
     if (provider.id === 'ducc') {
       const duccInfo = discoverDuccModels();
-      const candidateModels = Array.from(new Set([...remoteModels, ...duccInfo.models, ...(provider.candidateModels || [])]));
-      const effectiveModel = (provider.model && candidateModels.includes(provider.model))
-        ? provider.model
-        : (duccInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'GLM-5.3-Flash-内部');
+      const candidateModels = remoteModels.length > 0 ? remoteModels : duccInfo.models;
+      const effectiveModel = resolveModelAlias(
+        provider.model,
+        candidateModels,
+        remote?.defaultModel || duccInfo.defaultModel || candidateModels[0] || 'GLM-5.3-Flash-内部'
+      );
       return {
         ...provider,
         model: effectiveModel,
@@ -347,10 +354,12 @@ export class ModelProviderStore {
     }
     if (provider.id === 'ducx') {
       const ducxInfo = discoverDucxModels();
-      const candidateModels = Array.from(new Set([...remoteModels, ...ducxInfo.models, ...(provider.candidateModels || [])]));
-      const effectiveModel = (provider.model && candidateModels.includes(provider.model))
-        ? provider.model
-        : (ducxInfo.defaultModel || remote?.defaultModel || candidateModels[0] || 'gpt-5.6-sol');
+      const candidateModels = remoteModels.length > 0 ? remoteModels : ducxInfo.models;
+      const effectiveModel = resolveModelAlias(
+        provider.model,
+        candidateModels,
+        remote?.defaultModel || ducxInfo.defaultModel || candidateModels[0] || 'gpt-5.6-sol'
+      );
       return {
         ...provider,
         model: effectiveModel,
@@ -429,18 +438,22 @@ export class ModelProviderStore {
         const remote = remoteAgents.find((r) => r.id === p.id);
 
         if (isLocal) {
-          let dynamicDiscovered: string[] = [];
-          if (p.id === 'codex') dynamicDiscovered = discoverCodexModels().models;
-          else if (p.id === 'pi') dynamicDiscovered = discoverPiModels().models;
-          else if (p.id === 'ducc') dynamicDiscovered = discoverDuccModels().models;
-          else if (p.id === 'ducx') dynamicDiscovered = discoverDucxModels().models;
+          let models: string[] = [];
+          if (remote?.candidateModels && remote.candidateModels.length > 0) {
+            models = remote.candidateModels;
+          } else {
+            let dynamicDiscovered: string[] = [];
+            if (p.id === 'codex') dynamicDiscovered = discoverCodexModels().models;
+            else if (p.id === 'pi') dynamicDiscovered = discoverPiModels().models;
+            else if (p.id === 'ducc') dynamicDiscovered = discoverDuccModels().models;
+            else if (p.id === 'ducx') dynamicDiscovered = discoverDucxModels().models;
 
-          const models = Array.from(new Set([
-            ...(remote?.candidateModels || []),
-            ...(localInfo?.candidateModels || []),
-            ...dynamicDiscovered,
-            ...(p.candidateModels || [])
-          ]));
+            models = Array.from(new Set([
+              ...(localInfo?.installed ? (localInfo.candidateModels || []) : []),
+              ...dynamicDiscovered,
+              ...(p.candidateModels || [])
+            ]));
+          }
           candidateModels = models;
           p.candidateModels = models;
         } else if (p.id === 'ollama') {
@@ -535,11 +548,11 @@ export class ModelProviderStore {
     return { success: true, activeProviderId: this.activeProviderId };
   }
 
-  public async testProvider(config: ModelProviderConfig & { providerId?: string }) {
+  public async testProvider(config: ModelProviderConfig & { providerId?: string; userId?: string }) {
     const id = config.id || config.providerId || '';
     const existing = this.providers.get(id);
     const merged = { ...existing, ...config, id };
-    return testProviderConnection(merged as ModelProviderConfig);
+    return testProviderConnection(merged as ModelProviderConfig & { userId?: string });
   }
 
   public async probeOllama(baseUrl?: string) {

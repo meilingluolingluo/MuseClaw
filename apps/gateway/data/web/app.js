@@ -1497,6 +1497,22 @@ async function sendMessage() {
       }
     }
 
+    // 处理流断开时末尾未换行的剩余缓冲数据
+    if (buffer && buffer.trim()) {
+      const line = buffer.trim();
+      if (line.startsWith('data: ')) {
+        try {
+          const event = JSON.parse(line.slice(6));
+          handleStreamEvent(event, { streamTextEl, activityContainer, planContainer, assistantRow, pushDeltaText });
+          if (event.type === 'stream:text-delta') {
+            fullAssistantText += event.text;
+          }
+        } catch (e) {
+          console.warn('解析流式尾部事件错误:', e);
+        }
+      }
+    }
+
     isStreamFinished = true;
     if (!typeTimer && renderedCharCount < rawAccumulatedText.length) {
       tickTyping();
@@ -1505,8 +1521,13 @@ async function sendMessage() {
       await new Promise((r) => setTimeout(r, 20));
     }
     removeThinkingPulse();
+    if (!rawAccumulatedText.trim() && streamTextEl && !streamTextEl.querySelector('.agent-error-banner')) {
+      streamTextEl.innerHTML = `<div style="color: var(--text-muted); font-size: 13px; font-style: italic;">（Agent 未返回有效内容，请检查连接与模型状态）</div>`;
+    }
     fullAssistantText = rawAccumulatedText;
-    state.messages.push({ role: 'assistant', content: fullAssistantText });
+    if (fullAssistantText) {
+      state.messages.push({ role: 'assistant', content: fullAssistantText });
+    }
     if (curSession) {
       curSession.messageCount = state.messages.length;
       curSession.messages = state.messages;
@@ -1526,6 +1547,18 @@ async function sendMessage() {
 
 // 处理每个流式事件 (SSE Events)
 function handleStreamEvent(event, { streamTextEl, activityContainer, planContainer, pushDeltaText }) {
+  if (event.type === 'agent:error' || event.type === 'stream:error') {
+    if (typeof removeThinkingPulse === 'function') removeThinkingPulse();
+    const errText = event.error || event.text || '执行出错';
+    if (streamTextEl) {
+      const pulse = streamTextEl.querySelector('.agent-thinking-pulse');
+      if (pulse) pulse.remove();
+      streamTextEl.innerHTML += `<div class="agent-error-banner" style="background-color: var(--bg-tertiary); border-left: 3px solid var(--accent-red); padding: 10px 14px; border-radius: var(--radius-sm); margin-top: 8px; color: var(--accent-red); font-size: 13px; line-height: 1.5;"><strong>❌ 执行失败</strong>: ${escapeHtml(errText)}</div>`;
+      dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+    }
+    return;
+  }
+
   if (event.type === 'session:init') {
     if (event.sessionId) state.activeSessionId = event.sessionId;
     if (event.title) {

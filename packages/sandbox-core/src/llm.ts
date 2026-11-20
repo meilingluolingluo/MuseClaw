@@ -300,14 +300,14 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
 /**
  * 测试模型服务连通性探针 (Ping / Test Connection)
  */
-export async function testProviderConnection(config: ModelProviderConfig): Promise<{
+export async function testProviderConnection(config: ModelProviderConfig & { userId?: string }): Promise<{
   ok: boolean;
   latencyMs: number;
   model?: string;
   error?: string;
 }> {
   if (config.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(config.id)) {
-    const res = await testLocalAgent(config.id);
+    const res = await testLocalAgent(config.id, config.model, config.userId);
     return {
       ok: res.ok,
       latencyMs: res.latencyMs,
