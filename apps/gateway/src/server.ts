@@ -235,10 +235,32 @@ const proactive = new ProactiveManager({
 
     feedStore.recordActivity('user_web', {
       kind: 'routine',
-      title: `例行巡检: ${run.routineName}`,
+      title: `例行任务: ${run.routineName}`,
       text: run.quiet ? '未发现新异常 (NOTHING NEW)' : output.slice(0, 300),
+      sessionId: run.sessionId,
+      sessionTitle: session.title,
       quiet: run.quiet
     });
+
+    // 定时任务执行产出精简展示到动态 (Feed)，并挂接直通完整执行会话的链接
+    const routine = proactive.getRoutine(run.routineId);
+    const shouldPublishToFeed = (routine?.feedPublish !== false) && !run.quiet && output && output.trim().length > 0;
+    if (shouldPublishToFeed) {
+      const cleanOutput = output.trim();
+      let conciseBody = cleanOutput;
+      if (conciseBody.length > 280) {
+        conciseBody = conciseBody.slice(0, 260).trim() + '...\n\n*(内容较长，已自动精简展示，点击下方链接可查看完整会话过程与日志)*';
+      }
+      feedStore.appendPost('user_web', {
+        title: `[定时播报] ${run.routineName}`,
+        body: conciseBody,
+        area: 'research',
+        prompt: `针对本次【${run.routineName}】的执行结论进行深入分析`,
+        sessionId: run.sessionId,
+        routineId: run.routineId,
+        routineName: run.routineName
+      });
+    }
 
     // 静默抑制 (Quiet When Green)：正常无异常时静默沉淀历史，不向飞书/如流骚扰推送
     if (run.quiet) {
@@ -394,6 +416,12 @@ export function startGatewayServer(defaultPort = 8799) {
       '/runner/client.js'
     ].includes(url.pathname) ||
     url.pathname.startsWith('/api/sessions') ||
+    url.pathname.startsWith('/api/routines') ||
+    url.pathname.startsWith('/api/feed') ||
+    url.pathname.startsWith('/api/goals') ||
+    url.pathname.startsWith('/api/audit') ||
+    url.pathname.startsWith('/api/hooks') ||
+    url.pathname.startsWith('/api/skills') ||
     url.pathname.startsWith('/api/runner/tasks/') ||
     url.pathname.startsWith('/api/infoflow') ||
     url.pathname.startsWith('/api/feishu');
@@ -1075,6 +1103,62 @@ fi
       return res.end(JSON.stringify(proactive.listRoutines()));
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/routines') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        if (!payload.name || !payload.instructions) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '任务名称与执行指令为必填项' }));
+        }
+        const created = proactive.createRoutine(payload);
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, routine: created }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/routines\/[^/]+$/) && !url.pathname.endsWith('/runs')) {
+      const id = url.pathname.split('/')[3];
+      const r = proactive.getRoutine(id);
+      if (!r) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Routine not found' }));
+      }
+      const runs = proactive.listRunsByRoutineId(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ routine: r, runs }));
+    }
+
+    if (req.method === 'PUT' && url.pathname.match(/^\/api\/routines\/[^/]+$/)) {
+      const id = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const updated = proactive.updateRoutine(id, payload);
+        if (!updated) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Routine not found' }));
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, routine: updated }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/routines\/[^/]+$/)) {
+      const id = url.pathname.split('/')[3];
+      const deleted = proactive.deleteRoutine(id);
+      res.writeHead(deleted ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: deleted }));
+    }
+
     if (req.method === 'POST' && url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/run')) {
       const id = url.pathname.replace('/api/routines/', '').replace('/run', '');
       const r = proactive.getRoutine(id);
@@ -1281,6 +1365,12 @@ fi
         for (const s of recentSessions) {
           if (s.title) contextLines.push(`  * 会话: ${s.title}`);
         }
+      }
+
+      const recentRoutineRuns = proactive.listRuns(5);
+      if (recentRoutineRuns.length > 0) {
+        const summaries = recentRoutineRuns.map(r => `  * [定时任务: ${r.routineName}] 状态: ${r.status}, 简报: ${r.summary || r.output?.slice(0, 100) || '顺利完成'}`);
+        contextLines.push(`- 近期定时任务巡检与执行情况:\n${summaries.join('\n')}`);
       }
 
       contextLines.push(`- 当前系统时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);

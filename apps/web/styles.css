@@ -2545,6 +2545,326 @@ details[open] .thought-toggle::after {
   font-size: 12px;
 }
 
+/* ============================================================================
+   定时任务专业工作台与历史运行会话 (Routines Workspace & Timeline)
+============================================================================ */
+.routines-workspace {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: var(--om-bg);
+}
+
+.routines-sidebar {
+  width: 290px;
+  min-width: 260px;
+  border-right: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.routines-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--om-border);
+}
+
+.routines-sidebar-title {
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--om-fg);
+}
+
+.routines-search-wrap {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--om-border);
+}
+
+.routines-search-input {
+  font-size: 12.5px !important;
+  padding: 6px 12px !important;
+  border-radius: 8px !important;
+}
+
+.routines-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+
+.routines-group {
+  margin-bottom: 14px;
+}
+
+.routines-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--om-muted);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.routines-group-header:hover {
+  background-color: var(--om-surface-2);
+}
+
+.routines-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.routines-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: 3px;
+  position: relative;
+  border: 1px solid transparent;
+}
+
+.routines-item:hover {
+  background-color: var(--om-surface-2);
+}
+
+.routines-item.active {
+  background-color: var(--om-surface-2);
+  border-color: rgba(0, 100, 212, 0.3);
+  box-shadow: 0 1px 4px rgba(0, 100, 212, 0.08);
+}
+
+.routines-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--om-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routines-item.active .routines-item-title {
+  font-weight: 600;
+  color: var(--om-accent);
+}
+
+.routines-item-sub {
+  font-size: 11px;
+  color: var(--om-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routines-main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  background-color: var(--om-bg);
+}
+
+.routines-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 80%;
+  text-align: center;
+  color: var(--om-muted);
+}
+
+.routines-empty-icon {
+  font-size: 46px;
+  margin-bottom: 12px;
+  opacity: 0.85;
+}
+
+.routines-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--om-fg);
+  margin-bottom: 6px;
+}
+
+.routines-empty-desc {
+  font-size: 13px;
+  max-width: 440px;
+  line-height: 1.5;
+}
+
+.routine-detail-card {
+  background-color: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  margin-bottom: 24px;
+}
+
+.routine-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 16px;
+}
+
+.routine-detail-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--om-fg);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.routine-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.routine-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.routine-prompt-box {
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--om-fg);
+  margin-top: 12px;
+  word-break: break-word;
+}
+
+.routine-runs-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--om-fg);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.routine-run-card {
+  background-color: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+  transition: border-color 0.15s ease;
+}
+
+.routine-run-card:hover {
+  border-color: rgba(0, 100, 212, 0.4);
+}
+
+.routine-run-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.routine-run-duration {
+  color: var(--om-muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.routine-run-output {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--om-fg);
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background-color: var(--om-surface-2);
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+  margin-bottom: 10px;
+  word-break: break-word;
+}
+
+.routine-session-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--om-accent);
+  text-decoration: none;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 6px;
+  background-color: rgba(0, 100, 212, 0.08);
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  font-weight: 500;
+}
+
+.routine-session-link-btn:hover {
+  background-color: rgba(0, 100, 212, 0.16);
+  border-color: rgba(0, 100, 212, 0.3);
+}
+
+/* 动态卡片内直通完整执行会话的链接 */
+.feed-session-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--om-accent);
+  background-color: rgba(0, 100, 212, 0.08);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: all 0.15s ease;
+  border: 1px solid rgba(0, 100, 212, 0.2);
+  user-select: none;
+}
+
+.feed-session-link:hover {
+  background-color: rgba(0, 100, 212, 0.18);
+  transform: translateY(-1px);
+}
+
 /* Form Styles */
 .form-group {
   margin-bottom: 14px;

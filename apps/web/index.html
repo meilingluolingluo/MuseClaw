@@ -54,6 +54,11 @@
           <span class="nav-label">目标</span>
         </button>
 
+        <button class="nav-item" data-tab="routines" title="定时任务与主动例行">
+          <span class="nav-icon" id="icon-nav-routines"></span>
+          <span class="nav-label">定时</span>
+        </button>
+
         <button class="nav-item" data-tab="memory" title="受控长期记忆">
           <span class="nav-icon" id="icon-nav-memory"></span>
           <span class="nav-label">记忆</span>
@@ -299,6 +304,9 @@
               <div class="view-sub">基于您的工作习惯、长期记忆、近期对话与目标自动提炼的每日动态简报</div>
             </div>
             <div style="display: flex; gap: 8px;">
+              <button class="btn-secondary" id="btn-feed-routines" title="配置与管理定时任务">
+                <span id="icon-feed-routines"></span> 定时任务
+              </button>
               <button class="btn-secondary" id="btn-feed-settings" title="配置动态引导指令与自动撰写时间">
                 <span id="icon-feed-settings"></span> 偏好设置
               </button>
@@ -341,31 +349,47 @@
           </div>
         </section>
 
-        <!-- 视图 3: ⏰ 例行主动巡检与 Webhook (Routines) -->
-        <section class="view-stage" id="view-routines" style="display: none;">
-          <div class="view-header">
-            <div>
-              <div class="view-heading"><span id="icon-routines-heading"></span> 例行主动巡检与外部触发 (Routines)</div>
-              <div class="view-sub">后台无人值守定期巡检，具备 NOTHING NEW 静默抑噪能力；支持专属 Webhook 外部系统集成</div>
-            </div>
-            <button class="btn-secondary" id="btn-refresh-routines">
-              <span id="icon-refresh-routines"></span> 刷新巡检状态
-            </button>
-          </div>
-          
-          <div style="display: grid; grid-template-columns: 1fr 340px; gap: 24px;">
-            <div>
-              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">配置的任务列表</div>
-              <div id="routines-list-container" style="display: flex; flex-direction: column; gap: 12px;">
-                <!-- 动态渲染 Routines 列表 -->
+        <!-- 视图 3: ⏰ 定时任务工作台 (Routines) -->
+        <section class="view-stage" id="view-routines" style="display: none; padding: 0; height: calc(100vh - 54px); overflow: hidden;">
+          <div class="routines-workspace">
+            <!-- 1. 左侧专栏：任务列表与分组导航 -->
+            <aside class="routines-sidebar">
+              <div class="routines-sidebar-header">
+                <div class="routines-sidebar-title">
+                  <span id="icon-routines-heading"></span>
+                  <span>定时任务</span>
+                </div>
+                <div class="routines-sidebar-actions">
+                  <button type="button" class="btn-primary" id="btn-create-routine" title="新建定时任务" style="padding: 5px 12px; font-size: 12px; border-radius: 8px;">
+                    <span id="icon-create-routine"></span> 新建任务
+                  </button>
+                </div>
               </div>
-            </div>
-            <div>
-              <div style="font-weight: 600; font-size: 14px; margin-bottom: 12px;">最近巡检简报日志</div>
-              <div id="routine-runs-container" style="display: flex; flex-direction: column; gap: 10px;">
-                <!-- 动态渲染执行日志 -->
+
+              <div class="routines-search-wrap">
+                <input type="text" id="routines-search-input" placeholder="搜索定时任务..." class="form-control routines-search-input" />
               </div>
-            </div>
+
+              <div class="routines-list-scroll" id="routines-sidebar-list">
+                <!-- 动态渲染分组 (已开启 / 已暂停) -->
+              </div>
+            </aside>
+
+            <!-- 2. 右侧主工作台：当前选中任务详情与历史运行会话 -->
+            <main class="routines-main-content" id="routines-main-content">
+              <div class="routines-empty-state" id="routines-empty-state">
+                <div class="routines-empty-icon">⏰</div>
+                <div class="routines-empty-title">选择或创建定时任务</div>
+                <div class="routines-empty-desc">数字员工将按设定的定时周期在受控沙箱中执行自动化巡检、分析或数据收集，并将精简结论实时同步至动态。</div>
+                <button type="button" class="btn-primary" id="btn-empty-create-routine" style="margin-top: 14px; border-radius: 20px;">
+                  + 新建定时任务
+                </button>
+              </div>
+
+              <div class="routines-detail-view" id="routines-detail-view" style="display: none;">
+                <!-- 动态渲染任务配置面板与历史运行记录 -->
+              </div>
+            </main>
           </div>
         </section>
 

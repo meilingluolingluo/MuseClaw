@@ -26,6 +26,9 @@ const state = {
   goals: [],
   routines: [],
   routineRuns: [],
+  activeRoutineId: null,
+  routinesSearchQuery: '',
+  routinesGroupOpen: { enabled: true, paused: true },
   hooks: [],
   memoryText: '',
   memoryItems: [],
@@ -114,11 +117,18 @@ const dom = {
   btnComposerClear: document.getElementById('btn-composer-clear'),
   feedPostsContainer: document.getElementById('feed-posts-container'),
   feedActivityContainer: document.getElementById('feed-activity-container'),
+  btnFeedRoutines: document.getElementById('btn-feed-routines'),
   btnFeedSettings: document.getElementById('btn-feed-settings'),
   btnFeedWriteNow: document.getElementById('btn-feed-write-now'),
   btnRefreshFeedActivity: document.getElementById('btn-refresh-feed-activity'),
   goalsContainer: document.getElementById('goals-container'),
   btnCreateGoal: document.getElementById('btn-create-goal'),
+  btnCreateRoutine: document.getElementById('btn-create-routine'),
+  btnEmptyCreateRoutine: document.getElementById('btn-empty-create-routine'),
+  routinesSearchInput: document.getElementById('routines-search-input'),
+  routinesSidebarList: document.getElementById('routines-sidebar-list'),
+  routinesEmptyState: document.getElementById('routines-empty-state'),
+  routinesDetailView: document.getElementById('routines-detail-view'),
   routinesListContainer: document.getElementById('routines-list-container'),
   routineRunsContainer: document.getElementById('routine-runs-container'),
   btnRefreshRoutines: document.getElementById('btn-refresh-routines'),
@@ -873,11 +883,18 @@ function initIcons() {
   const elPopArt = document.getElementById('icon-popover-artifact');
   if (elPopArt) elPopArt.innerHTML = Icons.artifacts(16);
 
+  const elFeedRoutines = document.getElementById('icon-feed-routines');
+  if (elFeedRoutines) elFeedRoutines.innerHTML = Icons.routines(14);
+  const elCreateRoutine = document.getElementById('icon-create-routine');
+  if (elCreateRoutine) elCreateRoutine.innerHTML = Icons.plus(12);
+
   document.getElementById('icon-goals-heading').innerHTML = Icons.goals(22);
   document.getElementById('icon-plus-goal').innerHTML = Icons.plus(14);
 
-  document.getElementById('icon-routines-heading').innerHTML = Icons.routines(22);
-  document.getElementById('icon-refresh-routines').innerHTML = Icons.refresh(14);
+  const elRoutinesHeading = document.getElementById('icon-routines-heading');
+  if (elRoutinesHeading) elRoutinesHeading.innerHTML = Icons.routines(20);
+  const elRefreshRoutines = document.getElementById('icon-refresh-routines');
+  if (elRefreshRoutines) elRefreshRoutines.innerHTML = Icons.refresh(14);
 
   document.getElementById('icon-memory-heading').innerHTML = Icons.memory(22);
   document.getElementById('icon-edit-mem').innerHTML = Icons.edit(14);
@@ -2495,6 +2512,11 @@ function renderFeedPosts() {
               <div class="feed-post-content">
                 <div class="feed-post-title">${escapeHtml(p.title)}</div>
                 <div class="feed-post-body">${renderMarkdown(p.body)}</div>
+                ${p.sessionId ? `
+                  <div class="feed-session-link" onclick="window.navigateToSession('${escapeHtml(p.sessionId)}')">
+                    ${Icons.terminal(12)} 查验完整执行会话与长篇输出 →
+                  </div>
+                ` : ''}
               </div>
             </div>
             <div class="feed-post-actions">
@@ -2656,6 +2678,18 @@ function openPostInfoModal(postId) {
   }
 }
 window._openFeedPostInfo = openPostInfoModal;
+
+window.navigateToSession = async function (sessionId) {
+  if (!sessionId) return;
+  try {
+    switchTab('chat');
+    await selectSession(sessionId, true);
+    showToast('已载入该定时任务的完整执行会话', 'info');
+  } catch (err) {
+    console.error('跳转执行会话失败:', err);
+    showToast(`跳转会话失败: ${err.message}`, 'error');
+  }
+};
 
 async function deleteFeedPost(postId) {
   try {
@@ -2930,8 +2964,38 @@ window.deleteGoal = async function (goalId) {
 };
 
 // ============================================================================
-// 4. 例行主动巡检与 Webhook 模块 (Routines)
+// 4. 定时任务与主动例行工作台 (Routines Workspace)
 // ============================================================================
+function formatRoutineNextRun(ts, enabled) {
+  if (!enabled) return '已暂停';
+  if (!ts) return '待调度';
+  const target = new Date(ts);
+  const now = new Date();
+  const isToday = target.toDateString() === now.toDateString();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = target.toDateString() === tomorrow.toDateString();
+  const timeStr = `${String(target.getHours()).padStart(2, '0')}:${String(target.getMinutes()).padStart(2, '0')}`;
+
+  if (isToday) return `今天 ${timeStr}`;
+  if (isTomorrow) return `明天 ${timeStr}`;
+  return `${target.getMonth() + 1}月${target.getDate()}日 ${timeStr}`;
+}
+
+function formatCronExprDesc(expr) {
+  if (!expr) return '手动执行';
+  const trimmed = expr.trim();
+  if (trimmed === '@every 30m') return '每 30 分钟';
+  if (trimmed === '@every 15m') return '每 15 分钟';
+  if (trimmed === '@hourly') return '每小时整点';
+  if (trimmed === '@daily') return '每天 00:00';
+  if (trimmed === '0 9 * * *') return '每天 09:00';
+  if (trimmed === '0 9 * * 1-5') return '工作日 09:00';
+  if (trimmed === '0 18 * * 1-5') return '工作日 18:00';
+  if (trimmed === '0 12 * * 5') return '每周五 12:00';
+  return `Cron (${trimmed})`;
+}
+
 async function loadRoutines() {
   try {
     const [routinesRes, runsRes, hooksRes] = await Promise.all([
@@ -2943,107 +3007,248 @@ async function loadRoutines() {
     state.routineRuns = await runsRes.json();
     state.hooks = await hooksRes.json();
 
-    renderRoutinesList();
-    renderRoutineRuns();
+    if (!state.activeRoutineId && state.routines.length > 0) {
+      state.activeRoutineId = state.routines[0].id;
+    }
+
+    renderRoutinesWorkspace();
   } catch (err) {
-    console.error('加载巡检任务失败:', err);
+    console.error('加载定时任务失败:', err);
   }
 }
 
-function renderRoutinesList() {
-  dom.routinesListContainer.innerHTML = '';
-  if (!state.routines || state.routines.length === 0) {
-    dom.routinesListContainer.innerHTML = '<div style="color: var(--text-dim); padding: 20px;">暂无配置的主动巡检任务</div>';
+function renderRoutinesWorkspace() {
+  renderRoutinesSidebar();
+  renderRoutineDetail();
+}
+
+function renderRoutinesSidebar() {
+  if (!dom.routinesSidebarList) return;
+
+  const query = (state.routinesSearchQuery || '').trim().toLowerCase();
+  const filtered = state.routines.filter((r) => {
+    if (!query) return true;
+    return (r.name && r.name.toLowerCase().includes(query)) ||
+           (r.instructions && r.instructions.toLowerCase().includes(query));
+  });
+
+  const enabledList = filtered.filter((r) => r.enabled);
+  const pausedList = filtered.filter((r) => !r.enabled);
+
+  let html = '';
+
+  // 1. 已开启分组
+  html += `
+    <div class="routines-group">
+      <div class="routines-group-header" onclick="window.toggleRoutineGroup('enabled')">
+        <span class="routines-group-title">
+          <span>${state.routinesGroupOpen.enabled ? '▼' : '▶'}</span>
+          <span>已开启</span>
+        </span>
+        <span class="pill-badge pill-green" style="font-size: 10.5px; padding: 1px 6px;">${enabledList.length}</span>
+      </div>
+  `;
+
+  if (state.routinesGroupOpen.enabled) {
+    if (enabledList.length === 0) {
+      html += `<div style="padding: 6px 12px; font-size: 11.5px; color: var(--om-muted);">无开启的任务</div>`;
+    } else {
+      enabledList.forEach((r) => {
+        const isActive = state.activeRoutineId === r.id;
+        const nextTime = formatRoutineNextRun(r.nextRunAt, true);
+        const cronDesc = formatCronExprDesc(r.cronExpr);
+        html += `
+          <div class="routines-item ${isActive ? 'active' : ''}" onclick="window.selectRoutine('${r.id}')">
+            <div class="routines-item-title" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</div>
+            <div class="routines-item-sub">
+              <span>${cronDesc}</span>
+              <span>·</span>
+              <span>${nextTime}</span>
+            </div>
+          </div>
+        `;
+      });
+    }
+  }
+  html += `</div>`;
+
+  // 2. 已暂停分组
+  html += `
+    <div class="routines-group">
+      <div class="routines-group-header" onclick="window.toggleRoutineGroup('paused')">
+        <span class="routines-group-title">
+          <span>${state.routinesGroupOpen.paused ? '▼' : '▶'}</span>
+          <span>已暂停</span>
+        </span>
+        <span class="pill-badge pill-amber" style="font-size: 10.5px; padding: 1px 6px;">${pausedList.length}</span>
+      </div>
+  `;
+
+  if (state.routinesGroupOpen.paused) {
+    if (pausedList.length === 0) {
+      html += `<div style="padding: 6px 12px; font-size: 11.5px; color: var(--om-muted);">无暂停的任务</div>`;
+    } else {
+      pausedList.forEach((r) => {
+        const isActive = state.activeRoutineId === r.id;
+        const cronDesc = formatCronExprDesc(r.cronExpr);
+        html += `
+          <div class="routines-item ${isActive ? 'active' : ''}" onclick="window.selectRoutine('${r.id}')">
+            <div class="routines-item-title" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</div>
+            <div class="routines-item-sub">
+              <span>${cronDesc}</span>
+              <span>·</span>
+              <span>已暂停</span>
+            </div>
+          </div>
+        `;
+      });
+    }
+  }
+  html += `</div>`;
+
+  dom.routinesSidebarList.innerHTML = html;
+}
+
+function renderRoutineDetail() {
+  if (!dom.routinesMainContent) return;
+
+  const routine = state.routines.find((r) => r.id === state.activeRoutineId);
+  if (!routine) {
+    if (dom.routinesEmptyState) dom.routinesEmptyState.style.display = 'flex';
+    if (dom.routinesDetailView) dom.routinesDetailView.style.display = 'none';
     return;
   }
 
-  state.routines.forEach((r) => {
-    const card = document.createElement('div');
-    card.className = 'routine-card';
+  if (dom.routinesEmptyState) dom.routinesEmptyState.style.display = 'none';
+  if (dom.routinesDetailView) dom.routinesDetailView.style.display = 'block';
 
-    const webhookUrl = `${window.location.origin}/api/hooks/${r.id}?token=${r.webhookToken || 'sec_token'}`;
+  const bot = state.bots.find((b) => b.id === routine.agentId) || { name: routine.agentId || '数字员工' };
+  const cronDesc = formatCronExprDesc(routine.cronExpr);
+  const nextTime = formatRoutineNextRun(routine.nextRunAt, routine.enabled);
+  const runs = (state.routineRuns || []).filter((run) => run.routineId === routine.id);
 
-    card.innerHTML = `
-      <div class="routine-card-header">
+  let runsHtml = '';
+  if (runs.length === 0) {
+    runsHtml = `
+      <div style="padding: 32px 16px; text-align: center; color: var(--om-muted); background: var(--om-surface); border: 1px dashed var(--om-border); border-radius: 12px;">
+        <div style="font-size: 24px; margin-bottom: 6px;">⏱️</div>
+        <div style="font-size: 13.5px; font-weight: 500; color: var(--om-fg); margin-bottom: 4px;">暂无运行历史</div>
+        <div style="font-size: 12px;">该定时任务尚未触发过。您可以点击上方「立即执行」先行触发一次测试运转。</div>
+      </div>
+    `;
+  } else {
+    runsHtml = runs.map((run) => {
+      const isQuiet = run.quiet || run.output?.includes('NOTHING NEW');
+      const statusBadge = run.status === 'success'
+        ? (isQuiet ? '<span class="pill-badge pill-blue">静默完成</span>' : '<span class="pill-badge pill-green">顺利完成</span>')
+        : '<span class="pill-badge pill-red">执行异常</span>';
+
+      const timeStr = new Date(run.startedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+      const durationStr = run.finishedAt
+        ? `${((run.finishedAt - run.startedAt) / 1000).toFixed(1)}s`
+        : '执行中...';
+
+      return `
+        <div class="routine-run-card">
+          <div class="routine-run-card-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${statusBadge}
+              <span style="font-weight: 600; color: var(--om-fg);">${timeStr}</span>
+              <span class="routine-run-duration">⏱️ 用时 ${durationStr}</span>
+            </div>
+            <span style="font-size: 11.5px; color: var(--om-muted);">触发源: ${run.triggerSource === 'schedule' ? '⏰ 定时调度' : (run.triggerSource === 'manual' ? '👆 手动触发' : '⚡ Webhook')}</span>
+          </div>
+
+          <div class="routine-run-output markdown-body">
+            ${renderMarkdown(run.output || (run.error ? `**错误信息**: ${run.error}` : '暂无详细输出'))}
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
+            ${run.sessionId ? `
+              <button type="button" class="routine-session-link-btn" onclick="window.navigateToSession('${escapeHtml(run.sessionId)}')">
+                ${Icons.terminal(12)} 跳转至当次执行完整会话 →
+              </button>
+            ` : '<span></span>'}
+            <button type="button" class="btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="copyToClipboard(${JSON.stringify(run.output || '')}).then(() => showToast('已复制输出内容', 'success'))">
+              ${Icons.copy(11)} 复制输出
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  dom.routinesDetailView.innerHTML = `
+    <!-- 任务配置摘要卡片 -->
+    <div class="routine-detail-card">
+      <div class="routine-detail-header">
         <div>
-          <span style="font-weight: 600; font-size: 14px;">${escapeHtml(r.name)}</span>
-          <span class="pill-badge ${r.enabled ? 'pill-green' : 'pill-amber'}" style="margin-left: 8px;">
-            ${r.enabled ? '运行中 (Active)' : '已停用 (Paused)'}
-          </span>
+          <div class="routine-detail-name">
+            <span>${escapeHtml(routine.name)}</span>
+            <span class="pill-badge ${routine.enabled ? 'pill-green' : 'pill-amber'}">
+              ${routine.enabled ? '已开启' : '已暂停'}
+            </span>
+          </div>
+          <div class="routine-detail-meta">
+            <span>⏰ 周期: <strong>${cronDesc}</strong> (<code>${escapeHtml(routine.cronExpr)}</code>)</span>
+            <span>⏱️ 下次执行: <strong>${nextTime}</strong></span>
+            <span>🤖 指派 Bot: <strong>${escapeHtml(bot.name)}</strong></span>
+            <span>📰 同步动态: <strong>${routine.feedPublish !== false ? '是 (自动精简发布)' : '否'}</strong></span>
+          </div>
         </div>
-        <div style="display: flex; gap: 6px;">
-          <button class="btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.runRoutineNow('${r.id}')">
-            ${Icons.play(11)} 立即触发
+
+        <div class="routine-detail-actions">
+          <button type="button" class="btn-primary" style="padding: 6px 14px; font-size: 12px; border-radius: 8px;" onclick="window.runRoutineNow('${routine.id}')">
+            ${Icons.play(12)} 立即执行
           </button>
-          <button class="btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.toggleRoutine('${r.id}')">
-            ${r.enabled ? Icons.pause(11) : Icons.play(11)} ${r.enabled ? '停用' : '启用'}
+          <button type="button" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; border-radius: 8px;" onclick="window.toggleRoutine('${routine.id}')">
+            ${routine.enabled ? Icons.pause(12) : Icons.play(12)} ${routine.enabled ? '暂停' : '启用'}
+          </button>
+          <button type="button" class="btn-secondary" style="padding: 6px 12px; font-size: 12px; border-radius: 8px;" onclick="window.editRoutine('${routine.id}')">
+            ${Icons.edit(12)} 编辑
+          </button>
+          <button type="button" class="btn-secondary" style="padding: 6px 10px; font-size: 12px; border-radius: 8px; color: #ef4444;" onclick="window.deleteRoutine('${routine.id}')" title="删除任务">
+            ${Icons.trash(12)}
           </button>
         </div>
       </div>
 
-      <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
-        ${escapeHtml(r.prompt)}
+      <div style="font-size: 12px; font-weight: 600; color: var(--om-muted); margin-top: 12px;">任务执行指引与提示词 (Instructions):</div>
+      <div class="routine-prompt-box">
+        ${escapeHtml(routine.instructions || '')}
       </div>
+    </div>
 
-      <div style="display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-        <span><strong>定时调度:</strong> <code>${escapeHtml(r.schedule || '手动作业')}</code></span>
-        <span><strong>执行 Bot:</strong> <code>${escapeHtml(r.agentId || 'ops_bot')}</code></span>
-      </div>
-
-      <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
-        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); color: var(--accent-blue);">
-          🔗 ${webhookUrl}
-        </span>
-        <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="copyToClipboard('${webhookUrl}').then(() => showToast('已复制 Webhook 触发地址！', 'success'));">
-          ${Icons.copy(10)} 复制
+    <!-- 历史执行记录流 -->
+    <div class="routine-runs-section">
+      <div class="routine-runs-section-title">
+        <span>执行历史与运行报告 (${runs.length})</span>
+        <button type="button" class="btn-secondary" style="padding: 2px 10px; font-size: 11.5px;" onclick="loadRoutines()">
+          ${Icons.refresh(12)} 刷新
         </button>
       </div>
-    `;
-
-    dom.routinesListContainer.appendChild(card);
-  });
+      ${runsHtml}
+    </div>
+  `;
 }
 
-function renderRoutineRuns() {
-  dom.routineRunsContainer.innerHTML = '';
-  if (!state.routineRuns || state.routineRuns.length === 0) {
-    dom.routineRunsContainer.innerHTML = '<div style="color: var(--text-dim); font-size: 12px;">暂无历史巡检记录</div>';
-    return;
+window.selectRoutine = function (routineId) {
+  state.activeRoutineId = routineId;
+  renderRoutinesWorkspace();
+};
+
+window.toggleRoutineGroup = function (groupName) {
+  if (state.routinesGroupOpen[groupName] !== undefined) {
+    state.routinesGroupOpen[groupName] = !state.routinesGroupOpen[groupName];
+    renderRoutinesSidebar();
   }
-
-  state.routineRuns.slice(-8).reverse().forEach((run) => {
-    const item = document.createElement('div');
-    item.className = 'routine-run-item';
-
-    const isQuiet = run.output?.includes('NOTHING NEW') || run.isQuiet;
-    const badge = isQuiet
-      ? '<span class="pill-badge pill-blue" style="font-size: 10px;">静默沉淀</span>'
-      : run.status === 'success'
-      ? '<span class="pill-badge pill-green" style="font-size: 10px;">顺利完成</span>'
-      : '<span class="pill-badge pill-red" style="font-size: 10px;">异常</span>';
-
-    item.innerHTML = `
-      <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-        <strong style="color: var(--text-main);">${escapeHtml(run.routineName || '自动化作业')}</strong>
-        ${badge}
-      </div>
-      <div style="color: var(--text-dim); font-size: 11px;">
-        耗时: ${((run.durationMs || 0) / 1000).toFixed(1)}s | 时间: ${new Date(run.startedAt).toLocaleTimeString()}
-      </div>
-      <div style="margin-top: 6px; color: var(--text-muted); font-size: 11px; max-height: 40px; overflow: hidden; text-overflow: ellipsis;">
-        ${escapeHtml(run.output || '')}
-      </div>
-    `;
-
-    dom.routineRunsContainer.appendChild(item);
-  });
-}
+};
 
 window.runRoutineNow = async function (routineId) {
   try {
     await fetch(`/api/routines/${encodeURIComponent(routineId)}/run`, { method: 'POST' });
-    showToast('已触发例行任务执行，任务在后台沙箱中自驱运转！', 'success');
-    setTimeout(loadRoutines, 1000);
+    showToast('已手动触发定时任务执行，正在微沙箱中自驱运转！', 'success');
+    setTimeout(loadRoutines, 1200);
   } catch (err) {
     showToast(`触发失败: ${err.message}`, 'error');
   }
@@ -3051,13 +3256,183 @@ window.runRoutineNow = async function (routineId) {
 
 window.toggleRoutine = async function (routineId) {
   try {
-    await fetch(`/api/routines/${encodeURIComponent(routineId)}/toggle`, { method: 'POST' });
-    showToast('例行任务启用状态已更新', 'info');
+    const res = await fetch(`/api/routines/${encodeURIComponent(routineId)}/toggle`, { method: 'POST' });
+    const data = await res.json();
+    showToast(data.enabled ? '定时任务已开启调度' : '定时任务已暂停调度', 'info');
     loadRoutines();
   } catch (err) {
     showToast(`切换状态失败: ${err.message}`, 'error');
   }
 };
+
+window.deleteRoutine = async function (routineId) {
+  const r = state.routines.find((x) => x.id === routineId);
+  const ok = await showConfirm('删除定时任务', `确定要删除定时任务【${r?.name || routineId}】吗？历史执行记录将被清除。`);
+  if (!ok) return;
+
+  try {
+    const res = await fetch(`/api/routines/${encodeURIComponent(routineId)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast('定时任务已成功删除', 'success');
+    state.routines = state.routines.filter((x) => x.id !== routineId);
+    state.activeRoutineId = state.routines[0]?.id || null;
+    loadRoutines();
+  } catch (err) {
+    showToast(`删除失败: ${err.message}`, 'error');
+  }
+};
+
+window.editRoutine = function (routineId) {
+  const r = state.routines.find((x) => x.id === routineId);
+  if (r) openRoutineModal(r);
+};
+
+function openRoutineModal(routineToEdit = null) {
+  const isEdit = Boolean(routineToEdit);
+  const botOptions = state.bots.map((b) => {
+    const selected = (routineToEdit ? routineToEdit.agentId === b.id : b.id === state.activeBotId) ? 'selected' : '';
+    return `<option value="${escapeHtml(b.id)}" ${selected}>${escapeHtml(b.name)}</option>`;
+  }).join('');
+
+  const currentCron = routineToEdit?.cronExpr || '0 9 * * 1-5';
+  const feedPublishChecked = routineToEdit ? routineToEdit.feedPublish !== false : true;
+
+  const html = `
+    <div style="display: flex; flex-direction: column; gap: 14px; max-height: 70vh; overflow-y: auto; padding: 4px;">
+      <div class="form-group">
+        <label class="form-label">任务名称 <span style="color: #ef4444;">*</span></label>
+        <input type="text" id="modal-routine-name" class="form-control" placeholder="例如：工作日系统磁盘与资源巡检、每日业界动态汇总..." value="${escapeHtml(routineToEdit?.name || '')}" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">定时周期设置</label>
+        <select id="modal-routine-cron-preset" class="form-control">
+          <option value="0 9 * * 1-5" ${currentCron === '0 9 * * 1-5' ? 'selected' : ''}>工作日早 09:00 (0 9 * * 1-5)</option>
+          <option value="0 18 * * 1-5" ${currentCron === '0 18 * * 1-5' ? 'selected' : ''}>工作日傍晚 18:00 (0 18 * * 1-5)</option>
+          <option value="0 9 * * *" ${currentCron === '0 9 * * *' ? 'selected' : ''}>每天早 09:00 (0 9 * * *)</option>
+          <option value="@every 30m" ${currentCron === '@every 30m' ? 'selected' : ''}>每 30 分钟 (@every 30m)</option>
+          <option value="@hourly" ${currentCron === '@hourly' ? 'selected' : ''}>每小时整点 (@hourly)</option>
+          <option value="custom" ${!['0 9 * * 1-5', '0 18 * * 1-5', '0 9 * * *', '@every 30m', '@hourly'].includes(currentCron) ? 'selected' : ''}>自定义 Cron 表达式</option>
+        </select>
+        <div id="modal-routine-custom-cron-wrap" style="margin-top: 8px; display: ${!['0 9 * * 1-5', '0 18 * * 1-5', '0 9 * * *', '@every 30m', '@hourly'].includes(currentCron) ? 'block' : 'none'};">
+          <input type="text" id="modal-routine-cron-expr" class="form-control" placeholder="5 段式 Cron 表达式 (如 0 12 * * 5)" value="${escapeHtml(currentCron)}" />
+          <div style="font-size: 11px; color: var(--om-muted); margin-top: 4px;">格式: [分] [时] [日] [月] [周] (0 代表周日) 或 @every 30m</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">指派执行的数字员工 (Bot)</label>
+        <select id="modal-routine-bot" class="form-control">
+          ${botOptions || '<option value="muse">Muse (默认助理)</option>'}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">执行指令 / 想要获取的信息 (Instructions) <span style="color: #ef4444;">*</span></label>
+        <textarea id="modal-routine-instructions" class="form-control" rows="4" placeholder="例如：请对当前主机执行健康巡检：调用 Linux 命令 df -h 检查磁盘占用，调用 free -m 检查可用内存。列出今日未提交的文件清单并给出建议...">${escapeHtml(routineToEdit?.instructions || '')}</textarea>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--om-surface-2); border-radius: 8px; border: 1px solid var(--om-border);">
+        <input type="checkbox" id="modal-routine-feed-publish" ${feedPublishChecked ? 'checked' : ''} style="width: 16px; height: 16px; accent-color: var(--om-accent);" />
+        <div>
+          <div style="font-size: 13px; font-weight: 600; color: var(--om-fg);">自动精简发布到动态 (Feed)</div>
+          <div style="font-size: 11.5px; color: var(--om-muted);">任务执行成功且有有效结论时，自动将其精简为动态卡片，并附带直通完整执行会话的链接</div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+        <button type="button" class="btn-secondary" onclick="closeModal()">取消</button>
+        <button type="button" class="btn-primary" id="btn-save-routine">${isEdit ? '保存修改' : '立即创建'}</button>
+      </div>
+    </div>
+  `;
+
+  openModal(isEdit ? '编辑定时任务' : '新建定时任务', html, { icon: Icons.routines(18) });
+
+  const presetSelect = document.getElementById('modal-routine-cron-preset');
+  const customWrap = document.getElementById('modal-routine-custom-cron-wrap');
+  const customInput = document.getElementById('modal-routine-cron-expr');
+
+  if (presetSelect && customWrap) {
+    presetSelect.onchange = () => {
+      if (presetSelect.value === 'custom') {
+        customWrap.style.display = 'block';
+      } else {
+        customWrap.style.display = 'none';
+        if (customInput) customInput.value = presetSelect.value;
+      }
+    };
+  }
+
+  const btnSave = document.getElementById('btn-save-routine');
+  if (btnSave) {
+    btnSave.onclick = async () => {
+      const name = (document.getElementById('modal-routine-name')?.value || '').trim();
+      const instructions = (document.getElementById('modal-routine-instructions')?.value || '').trim();
+      const agentId = document.getElementById('modal-routine-bot')?.value || 'muse';
+      const feedPublish = Boolean(document.getElementById('modal-routine-feed-publish')?.checked);
+      const cronExpr = (presetSelect?.value === 'custom' ? customInput?.value : presetSelect?.value) || '0 9 * * 1-5';
+
+      if (!name) {
+        showToast('请输入任务名称', 'warning');
+        return;
+      }
+      if (!instructions) {
+        showToast('请输入执行指令与任务内容', 'warning');
+        return;
+      }
+
+      try {
+        btnSave.disabled = true;
+        btnSave.textContent = '保存中...';
+
+        const url = isEdit ? `/api/routines/${encodeURIComponent(routineToEdit.id)}` : '/api/routines';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, instructions, cronExpr, agentId, feedPublish })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        showToast(isEdit ? '定时任务已更新' : '定时任务创建成功', 'success');
+        closeModal();
+
+        if (data?.routine?.id) {
+          state.activeRoutineId = data.routine.id;
+        }
+        await loadRoutines();
+      } catch (err) {
+        showToast(`保存失败: ${err.message}`, 'error');
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = isEdit ? '保存修改' : '立即创建';
+      }
+    };
+  }
+}
+
+// 绑定搜索与创建按钮事件
+function initRoutinesControls() {
+  if (dom.btnCreateRoutine) {
+    dom.btnCreateRoutine.onclick = () => openRoutineModal();
+  }
+  if (dom.btnEmptyCreateRoutine) {
+    dom.btnEmptyCreateRoutine.onclick = () => openRoutineModal();
+  }
+  if (dom.routinesSearchInput) {
+    dom.routinesSearchInput.oninput = (e) => {
+      state.routinesSearchQuery = e.target.value;
+      renderRoutinesSidebar();
+    };
+  }
+}
 
 // ============================================================================
 // 5. 受控长期记忆与整理 (Memory)
@@ -5343,7 +5718,11 @@ function initEventHandlers() {
   };
 
   initComposerControls();
+  initRoutinesControls();
 
+  if (dom.btnFeedRoutines) {
+    dom.btnFeedRoutines.onclick = () => switchTab('routines');
+  }
   if (dom.btnFeedSettings) {
     dom.btnFeedSettings.onclick = openFeedSettingsModal;
   }

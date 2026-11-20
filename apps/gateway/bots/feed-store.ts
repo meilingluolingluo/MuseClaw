@@ -24,6 +24,9 @@ export interface FeedPost {
   area: FeedArea;
   prompt: string;
   ts: string;
+  sessionId?: string;
+  routineId?: string;
+  routineName?: string;
 }
 
 export interface FeedPostsData {
@@ -191,6 +194,25 @@ export class FeedStore {
       return true;
     }
     return false;
+  }
+
+  public appendPost(userId: string, post: Omit<FeedPost, 'id' | 'ts'>): FeedPost {
+    const data = this.getFeedPosts(userId);
+    const now = new Date().toISOString();
+    const newPost: FeedPost = {
+      id: `post_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: post.title.trim().slice(0, 120),
+      body: post.body.trim().slice(0, 2000),
+      area: VALID_AREAS.has(post.area as FeedArea) ? (post.area as FeedArea) : 'goals',
+      prompt: (post.prompt || '').trim().slice(0, 500),
+      ts: now,
+      sessionId: post.sessionId,
+      routineId: post.routineId,
+      routineName: post.routineName
+    };
+    data.posts = [newPost, ...data.posts].slice(0, 100);
+    this.saveFeedPosts(userId, data);
+    return newPost;
   }
 
   public async writeFeedPosts(

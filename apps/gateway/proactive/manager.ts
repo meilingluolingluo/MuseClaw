@@ -384,6 +384,61 @@ export class ProactiveManager {
     return this.routines.get(id);
   }
 
+  public createRoutine(data: {
+    name: string;
+    instructions: string;
+    cronExpr?: string;
+    agentId?: string;
+    enabled?: boolean;
+    feedPublish?: boolean;
+  }): Routine {
+    const id = `routine_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const cronExpr = data.cronExpr || '0 9 * * 1-5';
+    const routine: Routine = {
+      id,
+      name: data.name.trim(),
+      instructions: data.instructions.trim(),
+      cronExpr,
+      agentId: data.agentId || 'muse',
+      enabled: data.enabled !== false,
+      status: data.enabled !== false ? 'idle' : 'paused',
+      feedPublish: data.feedPublish !== false,
+      nextRunAt: computeNextRun(cronExpr),
+      createdAt: Date.now()
+    };
+    this.routines.set(id, routine);
+    this.saveData();
+    return routine;
+  }
+
+  public updateRoutine(id: string, patch: Partial<Routine>): Routine | undefined {
+    const r = this.routines.get(id);
+    if (!r) return undefined;
+    if (patch.name !== undefined) r.name = patch.name.trim();
+    if (patch.instructions !== undefined) r.instructions = patch.instructions.trim();
+    if (patch.cronExpr !== undefined) {
+      r.cronExpr = patch.cronExpr.trim();
+      r.nextRunAt = computeNextRun(r.cronExpr);
+    }
+    if (patch.agentId !== undefined) r.agentId = patch.agentId;
+    if (patch.feedPublish !== undefined) r.feedPublish = Boolean(patch.feedPublish);
+    if (patch.enabled !== undefined) {
+      r.enabled = Boolean(patch.enabled);
+      r.status = r.enabled ? 'idle' : 'paused';
+      if (r.enabled) r.nextRunAt = computeNextRun(r.cronExpr);
+    }
+    this.saveData();
+    return r;
+  }
+
+  public deleteRoutine(id: string): boolean {
+    const deleted = this.routines.delete(id);
+    if (deleted) {
+      this.saveData();
+    }
+    return deleted;
+  }
+
   public setRoutine(routine: Routine) {
     routine.nextRunAt = computeNextRun(routine.cronExpr);
     this.routines.set(routine.id, routine);
@@ -408,7 +463,11 @@ export class ProactiveManager {
     return Array.from(this.hooks.values());
   }
 
-  public listRuns(limit = 20): RoutineRun[] {
+  public listRuns(limit = 50): RoutineRun[] {
     return this.runs.slice(0, limit);
+  }
+
+  public listRunsByRoutineId(routineId: string, limit = 20): RoutineRun[] {
+    return this.runs.filter((r) => r.routineId === routineId).slice(0, limit);
   }
 }

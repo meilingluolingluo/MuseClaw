@@ -13,6 +13,8 @@ export interface Routine {
   lastRunAt?: number;
   nextRunAt?: number;
   status: 'idle' | 'running' | 'paused';
+  feedPublish?: boolean;          // 是否在执行完成后将精简结果发布至动态 (Feed)
+  createdAt?: number;
 }
 
 export interface RoutineRun {
