@@ -299,6 +299,26 @@ const goalEngine = new GoalEngine({
 /**
  * MuseClaw Gateway & Relay HTTP Server
  */
+/**
+ * React 前端的唯一托管目录：apps/web/dist（Vite 产物）。
+ * 源码目录与旧静态页面不再作为回退，避免把未打包的 index.html 当成应用发出去。
+ */
+function resolveWebDist(): string | null {
+  const dir = path.resolve(__dirname, '../../web/dist');
+  return fs.existsSync(path.join(dir, 'index.html')) ? dir : null;
+}
+
+const WEB_NOT_BUILT_PAGE = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><title>MuseClaw 前端尚未构建</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>body{font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#111;max-width:620px;margin:12vh auto;padding:0 24px}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f2f2f4;padding:2px 6px;border-radius:4px}
+h1{font-size:20px;margin:0 0 8px}p{color:#555}</style></head>
+<body><h1>前端还没有构建</h1>
+<p>这个工作台由 React + Vite 构建，仓库里不带 dist 产物。在项目根目录运行：</p>
+<p><code>pnpm --filter @museclaw/web build</code></p>
+<p>然后刷新本页。</p></body></html>`;
+
 export function startGatewayServer(defaultPort = 8799) {
   const port = Number(process.env.PORT) || defaultPort;
   const server = createServer(async (req, res) => {
@@ -440,21 +460,16 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
     }
 
-    // B. 静态主页：Web 控制台 (提供 Web UI 工作台)
+    // B. 静态主页：React 工作台（仅托管构建产物）
     if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/index.html')) {
-      const modernWebCandidates = [
-        path.resolve(__dirname, '../../web/dist/index.html'),
-        path.resolve(__dirname, '../../web/index.html'),
-        path.resolve(__dirname, '../data/web/index.html'),
-      ];
-      const htmlPath = modernWebCandidates.find((p) => fs.existsSync(p));
-      if (!htmlPath) {
-        res.writeHead(500);
-        return res.end('Web UI not found');
+      const webDist = resolveWebDist();
+      if (!webDist) {
+        res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(WEB_NOT_BUILT_PAGE);
       }
       try {
-        const html = fs.readFileSync(htmlPath, 'utf-8');
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        const html = fs.readFileSync(path.join(webDist, 'index.html'), 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         return res.end(html);
       } catch {
         res.writeHead(500);
@@ -497,13 +512,9 @@ export function startGatewayServer(defaultPort = 8799) {
         const safeName = (name || `upload_${Date.now()}`).replace(/[^\w.-]/g, '_');
         const finalExt = path.extname(safeName) || ext;
         const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${finalExt}`;
-        const uploadDir = path.resolve(__dirname, '../../web/uploads');
-        const backupUploadDir = path.resolve(__dirname, '../data/web/uploads');
+        const uploadDir = path.resolve(__dirname, '../data/uploads');
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-        if (!fs.existsSync(backupUploadDir)) fs.mkdirSync(backupUploadDir, { recursive: true });
-
         fs.writeFileSync(path.join(uploadDir, filename), buffer);
-        fs.writeFileSync(path.join(backupUploadDir, filename), buffer);
 
         const fileUrl = `/uploads/${filename}`;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -540,13 +551,9 @@ export function startGatewayServer(defaultPort = 8799) {
         }
 
         const filename = `avatar_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${ext}`;
-        const uploadDir = path.resolve(__dirname, '../../web/avatars/uploads');
-        const backupUploadDir = path.resolve(__dirname, '../data/web/avatars/uploads');
+        const uploadDir = path.resolve(__dirname, '../data/avatars/uploads');
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-        if (!fs.existsSync(backupUploadDir)) fs.mkdirSync(backupUploadDir, { recursive: true });
-
         fs.writeFileSync(path.join(uploadDir, filename), buffer);
-        fs.writeFileSync(path.join(backupUploadDir, filename), buffer);
 
         const avatarUrl = `/avatars/uploads/${filename}`;
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1644,14 +1651,46 @@ fi
       return res.end();
     }
 
-    // 静态前端资源托管 (SPA 模式: 提供 MuseClaw 数字员工工作台 Web UI)
-    const webDirCandidates = [
-      path.resolve(__dirname, '../../web/dist'),
-      path.resolve(__dirname, '../../web'),
-      path.resolve(__dirname, '../data/web'),
+    // B4. 运行时上传文件（工件、聊天图片、自定义头像）不在构建产物里，单独托管
+    const uploadRoots: Array<[string, string]> = [
+      ['/avatars/uploads/', path.resolve(__dirname, '../data/avatars/uploads')],
+      ['/uploads/', path.resolve(__dirname, '../data/uploads')]
     ];
-    const webDir = webDirCandidates.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) || path.resolve(__dirname, '../../web');
-    if (fs.existsSync(webDir) && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      for (const [prefix, dir] of uploadRoots) {
+        if (!url.pathname.startsWith(prefix)) continue;
+        const rel = path.normalize(decodeURIComponent(url.pathname.slice(prefix.length)));
+        const target = path.join(dir, rel);
+        if (!target.startsWith(dir) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Upload not found' }));
+        }
+        const ext = path.extname(target).toLowerCase();
+        const types: Record<string, string> = {
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.webp': 'image/webp',
+          '.gif': 'image/gif',
+          '.svg': 'image/svg+xml',
+          '.mp4': 'video/mp4',
+          '.txt': 'text/plain; charset=utf-8'
+        };
+        res.writeHead(200, {
+          'Content-Type': types[ext] || 'application/octet-stream',
+          'Cache-Control': 'public, max-age=86400'
+        });
+        return fs.createReadStream(target).pipe(res);
+      }
+    }
+
+    // 静态前端资源托管 (SPA 模式: 只读 apps/web/dist)
+    const webDir = resolveWebDist();
+    if (!webDir && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(WEB_NOT_BUILT_PAGE);
+    }
+    if (webDir && (req.method === 'GET' || req.method === 'HEAD')) {
       // 路径遍历攻击防御
       if (req.url && (req.url.includes('..') || req.url.includes('%2e%2e') || req.url.includes('%2E%2E'))) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -1714,7 +1753,12 @@ fi
           '.mp4': 'video/mp4'
         };
         const contentType = mimeTypes[ext] || 'application/octet-stream';
-        res.writeHead(200, { 'Content-Type': contentType });
+        // Vite 的 assets 带内容哈希，可以长期缓存；其余一律回源校验
+        const immutable = url.pathname.startsWith('/assets/');
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
+        });
         const stream = fs.createReadStream(filePath);
         return stream.pipe(res);
       }

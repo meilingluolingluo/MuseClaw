@@ -7,7 +7,7 @@ import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
 export const ChatView: React.FC = () => {
-  const { activeSessionId, activeBot, showToast, setTainted } = useApp();
+  const { activeSessionId, activeBot, showToast, setTainted, createNewSession } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
@@ -42,9 +42,15 @@ export const ChatView: React.FC = () => {
   }, [messages, streamingContent, streamingReasoning]);
 
   const handleSendMessage = async (text: string, attachments: MessageAttachment[]) => {
-    if (!activeSessionId) {
-      showToast('请先选择或新建一个会话', 'warning');
-      return;
+    // 第一条消息不该先让用户「去新建会话」：没有会话就静默开一个
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      const created = await createNewSession(true);
+      sessionId = created?.id ?? null;
+      if (!sessionId) {
+        showToast('还没有可用的数字员工，请检查 gateway 配置', 'warning');
+        return;
+      }
     }
 
     const userMessage: Message = {
@@ -70,8 +76,8 @@ export const ChatView: React.FC = () => {
           prompt: text,
           text,
           message: text,
-          session_id: activeSessionId,
-          sessionId: activeSessionId,
+          session_id: sessionId,
+          sessionId,
           bot_id: activeBot?.id,
           botId: activeBot?.id,
           attachments,

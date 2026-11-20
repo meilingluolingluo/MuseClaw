@@ -91,6 +91,28 @@ MuseClaw/
 └── README.md
 ```
 
+> `apps/web` 是 React 19 + TypeScript + Vite 的单页应用（源码在 `src/`，产物在 `dist/`）。
+> gateway 只托管 `dist/`，不再内置任何静态 HTML 页面。
+
+---
+
+## 🧑‍💻 本地运行
+
+```bash
+pnpm install
+
+# 1. 构建前端（gateway 只读 dist，没有构建会返回 503 提示页）
+pnpm --filter @museclaw/web build
+
+# 2. 启动网关 + 工作台
+pnpm dev            # http://localhost:8799
+
+# 前端热更新（可选，API 由 Vite 代理到 8799）
+pnpm dev:web        # http://localhost:5173
+```
+
+类型检查：`pnpm exec tsc -p apps/web/tsconfig.json --noEmit`
+
 ---
 
 ## 🚀 核心迭代路线 (Roadmap)

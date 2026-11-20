@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ProviderIcon } from '../../utils/icons';
 import {
   PanelLeftClose,
   PanelLeftOpen,
+  Menu,
   Shield,
   ShieldAlert,
   Box,
@@ -22,6 +23,7 @@ export const TopBar: React.FC = () => {
   const {
     isDrawerCollapsed,
     setIsDrawerCollapsed,
+    setIsMobileDrawerOpen,
     activeBot,
     isTainted,
     taintReasons,
@@ -33,6 +35,15 @@ export const TopBar: React.FC = () => {
     cycleApprovalMode,
     tab,
   } = useApp();
+
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   const activeProvider = modelsConfig?.providers?.find(
     (p) => p.id === modelsConfig.activeProviderId
@@ -58,10 +69,13 @@ export const TopBar: React.FC = () => {
           <button
             className="btn-toggle-drawer"
             type="button"
-            onClick={() => setIsDrawerCollapsed((prev) => !prev)}
-            title={isDrawerCollapsed ? '展开侧边栏' : '收起侧边栏'}
+            onClick={() => {
+              if (isMobile) setIsMobileDrawerOpen((prev) => !prev);
+              else setIsDrawerCollapsed((prev) => !prev);
+            }}
+            title={isMobile ? '打开数字员工与会话' : isDrawerCollapsed ? '展开侧边栏' : '收起侧边栏'}
           >
-            {isDrawerCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            {isMobile ? <Menu size={16} /> : isDrawerCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         )}
 

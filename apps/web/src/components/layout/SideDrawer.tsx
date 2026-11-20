@@ -14,18 +14,26 @@ export const SideDrawer: React.FC = () => {
     createNewSession,
     deleteSession,
     isDrawerCollapsed,
+    isMobileDrawerOpen,
+    setIsMobileDrawerOpen,
     tab,
     setTab,
   } = useApp();
 
-  const isVisible = (tab === 'chat' || tab === 'memory') && !isDrawerCollapsed;
-  if (!isVisible) return null;
+  if (tab !== 'chat' && tab !== 'memory') return null;
+
+  const closeMobileDrawer = () => setIsMobileDrawerOpen(false);
 
   return (
-    <aside
-      className={`side-drawer ${isDrawerCollapsed ? 'collapsed' : ''}`}
-      style={isDrawerCollapsed ? { display: 'none' } : {}}
-    >
+    <>
+      {isMobileDrawerOpen && (
+        <div className="drawer-scrim" onClick={closeMobileDrawer} aria-hidden="true" />
+      )}
+      <aside
+        className={`side-drawer ${isDrawerCollapsed ? 'drawer-collapsed' : ''} ${
+          isMobileDrawerOpen ? 'mobile-open' : ''
+        }`}
+      >
       <div className="drawer-header">
         <span className="drawer-title">{tab === 'memory' ? '选择数字员工' : '数字员工 (Bots)'}</span>
         <span className="pill-badge pill-blue">{bots.length} 个活跃</span>
@@ -50,6 +58,7 @@ export const SideDrawer: React.FC = () => {
                 if (tab !== 'chat' && tab !== 'memory') {
                   setTab('chat');
                 }
+                closeMobileDrawer();
               }}
               style={{ cursor: 'pointer' }}
             >
@@ -75,7 +84,10 @@ export const SideDrawer: React.FC = () => {
             <button
               type="button"
               className="btn-secondary"
-              onClick={createNewSession}
+              onClick={() => {
+                createNewSession();
+                closeMobileDrawer();
+              }}
               style={{ padding: '2px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
             >
               <Plus size={12} /> 新建
@@ -94,7 +106,10 @@ export const SideDrawer: React.FC = () => {
                   <div
                     key={sess.id}
                     className={`session-item ${isActive ? 'active' : ''}`}
-                    onClick={() => selectSession(sess.id)}
+                    onClick={() => {
+                      selectSession(sess.id);
+                      closeMobileDrawer();
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -136,6 +151,7 @@ export const SideDrawer: React.FC = () => {
           </div>
         </div>
       )}
-    </aside>
+      </aside>
+    </>
   );
 };

@@ -18,12 +18,14 @@ interface AppContextType {
   activeSessionId: string | null;
   activeSession: Session | null;
   selectSession: (sessionId: string) => void;
-  createNewSession: () => Promise<void>;
+  createNewSession: (silent?: boolean) => Promise<Session | undefined>;
   deleteSession: (sessionId: string) => Promise<void>;
   loadBots: () => Promise<void>;
   loadSessions: (botId: string) => Promise<void>;
   isDrawerCollapsed: boolean;
   setIsDrawerCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
+  isMobileDrawerOpen: boolean;
+  setIsMobileDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   modelsConfig: ModelsConfig | null;
   loadModelsConfig: () => Promise<void>;
   isModelModalOpen: boolean;
@@ -55,6 +57,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setTab = (newTab: TabType) => {
     setTabState(newTab);
+    setIsMobileDrawerOpen(false);
     const targetPath = newTab === 'chat' ? '/' : `/${newTab}`;
     if (window.location.pathname !== targetPath) {
       window.history.pushState(null, '', targetPath);
@@ -125,6 +128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   // Modals
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
@@ -210,8 +214,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveSessionId(sessionId);
   }, []);
 
-  const createNewSession = useCallback(async () => {
-    if (!activeBotId) return;
+  const createNewSession = useCallback(async (silent = false): Promise<Session | undefined> => {
+    if (!activeBotId) return undefined;
     const fallbackId = `sess_${activeBotId}_${Date.now()}`;
     const draftSession: Session = {
       id: fallbackId,
@@ -225,11 +229,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const sess = newSession || draftSession;
       setSessions((prev) => [sess, ...prev.filter((s) => s.id !== sess.id)]);
       setActiveSessionId(sess.id);
-      showToast('已新建会话', 'success');
+      if (!silent) showToast('已新建会话', 'success');
+      return sess;
     } catch {
       setSessions((prev) => [draftSession, ...prev.filter((s) => s.id !== draftSession.id)]);
       setActiveSessionId(draftSession.id);
-      showToast('已新建会话', 'success');
+      if (!silent) showToast('已新建会话', 'success');
+      return draftSession;
     }
   }, [activeBotId, user?.username, showToast]);
 
@@ -312,6 +318,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadSessions,
         isDrawerCollapsed,
         setIsDrawerCollapsed,
+        isMobileDrawerOpen,
+        setIsMobileDrawerOpen,
         modelsConfig,
         loadModelsConfig,
         isModelModalOpen,
