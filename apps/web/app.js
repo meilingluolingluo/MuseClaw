@@ -2319,7 +2319,7 @@ function renderRoutinesList() {
         <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); color: var(--accent-blue);">
           🔗 ${webhookUrl}
         </span>
-        <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="navigator.clipboard.writeText('${webhookUrl}'); showToast('已复制 Webhook 触发地址！', 'success');">
+        <button class="btn-secondary" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="copyToClipboard('${webhookUrl}').then(() => showToast('已复制 Webhook 触发地址！', 'success'));">
           ${Icons.copy(10)} 复制
         </button>
       </div>
@@ -3023,6 +3023,39 @@ function showToast(message, type = 'info', title = '') {
   setTimeout(removeToast, 3500);
 }
 window.showToast = showToast;
+
+async function copyToClipboard(text) {
+  if (!text) return false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // 降级使用传统选中复制模式
+    }
+  }
+
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    textArea.style.left = '-9999px';
+    textArea.style.opacity = '0';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    textArea.setSelectionRange(0, textArea.value.length);
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return Boolean(successful);
+  } catch (err) {
+    console.error('Copy to clipboard failed:', err);
+    return false;
+  }
+}
+window.copyToClipboard = copyToClipboard;
 
 function showConfirm({
   title = '确认操作',
@@ -3985,11 +4018,11 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(currentUserId
           <span>💻 个人电脑终端接入命令</span>
           <span style="font-size: 11px; color: var(--om-muted); font-weight: 400;">(免安装依赖 · Node.js 即时运行)</span>
         </div>
-        <button type="button" class="btn-secondary" onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(installCmd)}')); showToast('已复制接入命令', 'success');" style="padding: 2px 8px; font-size: 11px; cursor: pointer;">
+        <button type="button" class="btn-secondary" id="btn-copy-install-cmd" style="padding: 2px 8px; font-size: 11px; cursor: pointer;">
           📋 一键复制整组命令
         </button>
       </div>
-      <div style="position: relative; background: var(--om-surface-3); border: 1px solid var(--om-border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; word-break: break-all; color: var(--om-fg); white-space: pre-wrap;"><code>${escapeHtml(installCmd)}</code></div>
+      <div style="position: relative; background: var(--om-surface-3); border: 1px solid var(--om-border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; word-break: break-all; color: var(--om-fg); white-space: pre-wrap; user-select: all; -webkit-user-select: all; cursor: text;" id="install-cmd-code"><code>${escapeHtml(installCmd)}</code></div>
     </div>
 
     <div id="add-machine-status-box" style="background: var(--om-surface-2); border: 1px solid var(--om-border); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; margin-top: 16px;">
@@ -4003,6 +4036,18 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(currentUserId
   `;
 
   openModal('添加计算节点 · 个人电脑本地 Agent 接入', bodyHtml, { icon: '💻' });
+
+  const copyBtn = document.getElementById('btn-copy-install-cmd');
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      const ok = await copyToClipboard(installCmd);
+      if (ok) {
+        showToast('已复制接入命令到剪贴板！', 'success');
+      } else {
+        showToast('复制失败，请手动选中文本框命令进行复制', 'warning');
+      }
+    };
+  }
 
   let isDestroyed = false;
   const pollTimer = setInterval(async () => {
