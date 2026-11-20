@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   isOpen: boolean;
@@ -8,6 +9,9 @@ interface ModalProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   maxWidth?: string;
+  hideHeader?: boolean;
+  contentClass?: string;
+  zIndex?: number;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -17,7 +21,10 @@ export const Modal: React.FC<ModalProps> = ({
   icon,
   children,
   footer,
-  maxWidth = '580px',
+  maxWidth = '620px',
+  hideHeader = false,
+  contentClass = '',
+  zIndex = 1000,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -29,45 +36,45 @@ export const Modal: React.FC<ModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
+  return createPortal(
+    <div
+      className="modal-overlay"
+      style={{ zIndex }}
+      onClick={onClose}
+    >
       <div
-        className="modal-window"
+        className={`modal-content ${contentClass}`}
         style={{ maxWidth, width: '92%' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="modal-header">
-          <div className="modal-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {icon && <span className="modal-header-icon">{icon}</span>}
-            <h3 className="modal-title" style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
-              {title}
-            </h3>
+        {!hideHeader && (
+          <div className="modal-header">
+            <div className="modal-title-wrap">
+              {icon && <span className="modal-header-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>{icon}</span>}
+              <h3 className="modal-title">
+                {title}
+              </h3>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              onClick={onClose}
+              aria-label="关闭"
+            >
+              ✕
+            </button>
           </div>
-          <button
-            type="button"
-            className="modal-close"
-            onClick={onClose}
-            aria-label="关闭"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '18px',
-              cursor: 'pointer',
-              color: 'var(--text-muted)',
-            }}
-          >
-            ✕
-          </button>
-        </div>
+        )}
 
-        <div className="modal-body" style={{ maxHeight: '78vh', overflowY: 'auto' }}>
+        <div className="modal-body-scroll" style={{ flex: 1, overflowY: 'auto' }}>
           {children}
         </div>
 
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

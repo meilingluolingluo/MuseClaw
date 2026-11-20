@@ -11,6 +11,7 @@ import type {
   AuditLog,
   Grant,
   ModelsConfig,
+  ModelProvider,
   FeedPost,
   FeedActivity,
   SandboxStatus,
@@ -58,10 +59,21 @@ export const api = {
     request<Bot>(`/api/bots/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
   // Sessions
-  getSessions: (botId: string) => request<Session[]>(`/api/bots/${botId}/sessions`),
-  createSession: (botId: string, title?: string) =>
-    request<Session>(`/api/bots/${botId}/sessions`, { method: 'POST', body: JSON.stringify({ title }) }),
-  getMessages: (sessionId: string) => request<Message[]>(`/api/sessions/${sessionId}/messages`),
+  getSessions: (botId: string, userId?: string) =>
+    request<Session[]>(`/api/sessions?bot_id=${encodeURIComponent(botId)}&userId=${encodeURIComponent(userId || 'user_web')}&include_empty=true`),
+  createSession: (botId: string, title = '新任务对话', userId?: string) =>
+    request<Session>('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ botId, title, userId: userId || 'user_web' }),
+    }),
+  getMessages: async (sessionId: string, userId?: string) => {
+    try {
+      const res = await request<any>(`/api/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(userId || 'user_web')}`);
+      return (Array.isArray(res) ? res : res.messages) || [];
+    } catch {
+      return [];
+    }
+  },
   sendDecision: (sessionId: string, actionId: string, decision: 'APPROVE' | 'REJECT') =>
     request<{ success: boolean }>(`/api/sessions/${sessionId}/decision`, {
       method: 'POST',
@@ -70,12 +82,12 @@ export const api = {
 
   // Models
   getModelsConfig: () => request<ModelsConfig>('/api/models/config'),
-  saveModelsConfig: (data: ModelsConfig) =>
+  saveModelsConfig: (data: { activeProviderId?: string; provider?: Partial<ModelProvider> & { id: string } }) =>
     request<{ success: boolean }>('/api/models/config', { method: 'POST', body: JSON.stringify(data) }),
   testModel: (providerId: string, modelId?: string) =>
     request<{ success: boolean; latency?: number; message?: string }>('/api/models/test', {
       method: 'POST',
-      body: JSON.stringify({ providerId, modelId }),
+      body: JSON.stringify({ providerId, id: providerId, model: modelId }),
     }),
   probeCli: (cliName: string) =>
     request<{ available: boolean; version?: string; path?: string }>('/api/models/probe-cli', {

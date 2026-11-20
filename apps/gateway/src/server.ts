@@ -415,6 +415,7 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/runner/poll',
       '/runner/client.js'
     ].includes(url.pathname) ||
+    url.pathname.startsWith('/api/bots') ||
     url.pathname.startsWith('/api/sessions') ||
     url.pathname.startsWith('/api/routines') ||
     url.pathname.startsWith('/api/feed') ||
@@ -587,6 +588,24 @@ export function startGatewayServer(defaultPort = 8799) {
       const sessions = sessionStore.list(id, currentUser?.username);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(sessions));
+    }
+
+    if (req.method === 'POST' && (url.pathname.match(/^\/api\/bots\/[^/]+\/sessions$/) || url.pathname === '/api/sessions')) {
+      let botId = '';
+      if (url.pathname.startsWith('/api/bots/')) {
+        botId = url.pathname.replace('/api/bots/', '').replace('/sessions', '');
+      }
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed: any = {};
+      try { parsed = JSON.parse(body || '{}'); } catch {}
+      botId = botId || parsed.botId || parsed.bot_id || 'muse';
+      const title = parsed.title || '新任务对话';
+      const targetUserId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
+      const sessionId = parsed.id || `sess_${botId}_${Date.now()}`;
+      const session = sessionStore.create(sessionId, botId, title, targetUserId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(session));
     }
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) {
@@ -809,19 +828,19 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ success }));
     }
 
-    // C. 会话列表接口 (按当前登录员工隔离，默认过滤无消息的空会话)
+    // C. 会话列表接口 (按当前登录员工隔离，默认不过滤无消息的空会话以支持前端新建即时呈现)
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
-      const includeEmpty = url.searchParams.get('include_empty') === 'true';
+      const includeEmpty = url.searchParams.get('include_empty') !== 'false';
       const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
       const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map(s => ({
         id: s.id,
         title: s.title,
-        botId: s.bot_id,
-        bot_id: s.bot_id,
+        botId: s.bot_id || s.botId,
+        bot_id: s.bot_id || s.botId,
         userId: s.userId,
-        createdAt: s.created_at,
-        updatedAt: s.updated_at,
+        createdAt: s.created_at || s.createdAt,
+        updatedAt: s.updated_at || s.updatedAt,
         messageCount: s.messages ? s.messages.length : 0
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -829,7 +848,11 @@ export function startGatewayServer(defaultPort = 8799) {
     }
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/sessions/')) {
-      const id = url.pathname.replace('/api/sessions/', '');
+      let id = url.pathname.replace('/api/sessions/', '');
+      const isMessagesRequest = id.endsWith('/messages');
+      if (isMessagesRequest) {
+        id = id.replace(/\/messages$/, '');
+      }
       const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
       const s = sessionStore.get(id, targetUserId);
       if (!s) {
@@ -837,7 +860,7 @@ export function startGatewayServer(defaultPort = 8799) {
         return res.end(JSON.stringify({ error: 'Session not found' }));
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(s));
+      return res.end(JSON.stringify(isMessagesRequest ? (s.messages || []) : s));
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/sessions/')) {

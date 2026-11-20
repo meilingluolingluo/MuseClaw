@@ -68,8 +68,12 @@ export const ChatView: React.FC = () => {
         credentials: 'include',
         body: JSON.stringify({
           prompt: text,
+          text,
+          message: text,
           session_id: activeSessionId,
+          sessionId: activeSessionId,
           bot_id: activeBot?.id,
+          botId: activeBot?.id,
           attachments,
         }),
       });
@@ -108,6 +112,11 @@ export const ChatView: React.FC = () => {
             } else if (event.type === 'stream:reasoning-delta') {
               accumulatedReasoning += event.text;
               setStreamingReasoning(accumulatedReasoning);
+            } else if (event.type === 'agent:error') {
+              const errSnippet = event.text || `\n[执行出错: ${event.error || '未知异常'}]`;
+              accumulatedText += errSnippet;
+              setStreamingContent(accumulatedText);
+              showToast(`执行出错: ${event.error || '未知异常'}`, 'error');
             } else if (event.type === 'tool:call_start') {
               toolsAccumulator.push({
                 tool: event.toolName,
@@ -153,6 +162,14 @@ export const ChatView: React.FC = () => {
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
+      } else {
+        const fallbackMsg: Message = {
+          id: `asst_${Date.now()}`,
+          role: 'assistant',
+          content: '⚠️ Agent 未返回任何输出，请检查所选大模型或计算节点连通状态。',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, fallbackMsg]);
       }
     } catch (err: any) {
       showToast(`对话失败: ${err.message}`, 'error');
@@ -216,7 +233,7 @@ export const ChatView: React.FC = () => {
             message={{
               id: 'streaming_current',
               role: 'assistant',
-              content: streamingContent || '正在连接并调度 Agent 推理执行...',
+              content: streamingContent || (streamingReasoning ? '' : '正在连接并调度 Agent 推理执行...'),
               reasoning: streamingReasoning || undefined,
               toolCalls: streamingTools,
             }}

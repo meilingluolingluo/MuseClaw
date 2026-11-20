@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import { ProviderIcon } from '../../utils/icons';
-import { Cpu, Laptop, Check, AlertCircle } from 'lucide-react';
+import { Cpu, Laptop, AlertCircle } from 'lucide-react';
 import { api } from '../../services/api';
 import type { ModelProvider } from '../../types';
 
@@ -21,7 +21,7 @@ export const ModelSettingsModal: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [endpoint, setEndpoint] = useState('');
   const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; latency?: number; message?: string } | null>(null);
+  const [, setTestResult] = useState<{ success: boolean; latency?: number; message?: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -30,18 +30,18 @@ export const ModelSettingsModal: React.FC = () => {
       setSelectedProviderId(activeId);
       const activeP = modelsConfig.providers.find((p) => p.id === activeId);
       if (activeP) {
-        setModelId(activeP.modelId || '');
+        setModelId(activeP.model || activeP.modelId || activeP.candidateModels?.[0] || '');
         setApiKey(activeP.apiKey || '');
-        setEndpoint(activeP.endpoint || '');
+        setEndpoint(activeP.baseUrl || activeP.endpoint || '');
       }
     }
   }, [modelsConfig]);
 
   const handleSelectProvider = (p: ModelProvider) => {
     setSelectedProviderId(p.id);
-    setModelId(p.modelId || (p.supportedModels ? p.supportedModels[0] : ''));
+    setModelId(p.model || p.modelId || (p.candidateModels?.[0] || p.supportedModels?.[0] || ''));
     setApiKey(p.apiKey || '');
-    setEndpoint(p.endpoint || '');
+    setEndpoint(p.baseUrl || p.endpoint || '');
     setTestResult(null);
   };
 
@@ -51,10 +51,18 @@ export const ModelSettingsModal: React.FC = () => {
     id: selectedProviderId,
     name: selectedProviderId,
     description: 'AI 交互推理引擎',
-    supportedModels: ['default'],
+    candidateModels: ['default'],
   };
 
-  const isLocalAgent = ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(currentProvider.id);
+  const isLocalAgent = Boolean(
+    currentProvider.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(currentProvider.id)
+  );
+
+  const candidateModels = (currentProvider.candidateModels && currentProvider.candidateModels.length > 0)
+    ? currentProvider.candidateModels
+    : (currentProvider.supportedModels && currentProvider.supportedModels.length > 0)
+    ? currentProvider.supportedModels
+    : ['gpt-4o', 'gpt-4o-mini', 'deepseek-chat', 'deepseek-flash', 'qwen-plus'];
 
   const handleTest = async () => {
     setIsTesting(true);
@@ -65,7 +73,7 @@ export const ModelSettingsModal: React.FC = () => {
       if (res.success) {
         showToast(`连通性测试成功 (${res.latency || 12}ms)`, 'success');
       } else {
-        showToast(`测试未通过: ${res.message}`, 'error');
+        showToast(`测试未通过: ${res.message || '连接超时'}`, 'error');
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message });
@@ -79,21 +87,14 @@ export const ModelSettingsModal: React.FC = () => {
     if (!modelsConfig) return;
     setSaving(true);
     try {
-      const updatedProviders = modelsConfig.providers.map((p) => {
-        if (p.id === selectedProviderId) {
-          return {
-            ...p,
-            modelId,
-            apiKey: apiKey || undefined,
-            endpoint: endpoint || undefined,
-          };
-        }
-        return p;
-      });
-
       await api.saveModelsConfig({
         activeProviderId: selectedProviderId,
-        providers: updatedProviders,
+        provider: {
+          id: selectedProviderId,
+          model: modelId,
+          baseUrl: endpoint || undefined,
+          apiKey: apiKey || undefined,
+        },
       });
 
       await loadModelsConfig();
@@ -106,14 +107,10 @@ export const ModelSettingsModal: React.FC = () => {
     }
   };
 
-  const candidateModels = currentProvider.supportedModels || [
-    'gpt-4o',
-    'gpt-4o-mini',
-    'deepseek-chat',
-    'deepseek-coder',
-    'qwen-plus',
-    'moonshot-v1-8k',
-  ];
+  const isCurrentActive = selectedProviderId === modelsConfig?.activeProviderId;
+  const isCurrentReady = isLocalAgent
+    ? Boolean(currentProvider.installed || currentProvider.isAvailable)
+    : Boolean(currentProvider.hasKey || currentProvider.apiKey || currentProvider.isAvailable);
 
   return (
     <Modal
@@ -122,6 +119,7 @@ export const ModelSettingsModal: React.FC = () => {
       title="AI 大模型服务配置中心 (AI Engines)"
       icon={<Cpu size={18} />}
       maxWidth="780px"
+      zIndex={1000}
     >
       {/* 顶部接入计算节点快捷横幅 */}
       <div
@@ -151,6 +149,7 @@ export const ModelSettingsModal: React.FC = () => {
           type="button"
           className="btn-primary"
           onClick={() => {
+            setIsModelModalOpen(false);
             setIsAddMachineModalOpen(true);
           }}
           style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px', flexShrink: 0 }}
@@ -161,7 +160,7 @@ export const ModelSettingsModal: React.FC = () => {
 
       {/* 模型服务商网格 */}
       <div
-        className="model-provider-grid"
+        className="model-providers-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
@@ -171,55 +170,46 @@ export const ModelSettingsModal: React.FC = () => {
       >
         {modelsConfig?.providers.map((p) => {
           const isSelected = p.id === selectedProviderId;
-          const isCurrentActive = p.id === modelsConfig.activeProviderId;
-          const isLocal = ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(p.id);
+          const isActive = p.id === modelsConfig.activeProviderId;
+          const isLocal = Boolean(p.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(p.id));
+          const isReady = isLocal ? Boolean(p.installed || p.isAvailable) : Boolean(p.hasKey || p.apiKey || p.isAvailable);
 
-          const badgeText = isCurrentActive
-            ? '● 正在使用'
-            : isLocal
-            ? p.isAvailable
-              ? '💻 本地已就绪'
-              : '未检测到'
-            : p.isAvailable
-            ? '已就绪'
-            : '待配置';
-
-          const badgeColor = isCurrentActive
-            ? 'var(--accent-green)'
-            : isLocal
-            ? p.isAvailable
-              ? 'var(--accent-green)'
-              : 'var(--text-dim)'
-            : p.isAvailable
-            ? 'var(--accent-green)'
-            : 'var(--text-dim)';
+          let badgeText = '待配置';
+          let isBadgeGreen = false;
+          if (isActive) {
+            badgeText = '● 正在使用';
+            isBadgeGreen = true;
+          } else if (isLocal) {
+            if (isReady) {
+              badgeText = '💻 本地已就绪';
+              isBadgeGreen = true;
+            } else {
+              badgeText = '未检测到';
+              isBadgeGreen = false;
+            }
+          } else {
+            if (isReady) {
+              badgeText = '已就绪';
+              isBadgeGreen = true;
+            } else {
+              badgeText = '待配置';
+              isBadgeGreen = false;
+            }
+          }
 
           return (
             <div
               key={p.id}
+              className={`model-provider-card ${isSelected ? 'active' : ''}`}
               onClick={() => handleSelectProvider(p)}
-              style={{
-                background: isSelected ? 'var(--om-surface)' : 'var(--om-surface-2)',
-                border: isSelected ? '2px solid var(--om-accent)' : '1px solid var(--om-border)',
-                borderRadius: '12px',
-                padding: '12px 10px',
-                cursor: 'pointer',
-                textAlign: 'center',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: '86px',
-                transition: 'all 0.15s ease',
-              }}
             >
-              <div style={{ marginBottom: '6px' }}>
-                <ProviderIcon providerId={p.id} size={24} />
+              <div className="model-provider-card-icon">
+                <ProviderIcon providerId={p.id} size={28} />
               </div>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--om-fg)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+              <div className="model-provider-card-name" title={p.name}>
                 {p.name}
               </div>
-              <div style={{ fontSize: '10.5px', color: badgeColor, marginTop: '4px' }}>
+              <div className={`model-provider-card-badge ${isBadgeGreen ? 'configured' : 'unconfigured'}`}>
                 {badgeText}
               </div>
             </div>
@@ -242,8 +232,11 @@ export const ModelSettingsModal: React.FC = () => {
             <ProviderIcon providerId={currentProvider.id} size={22} />
             <span style={{ fontSize: '15px', fontWeight: 650 }}>{currentProvider.name}</span>
           </div>
-          <span className="pill-badge pill-green" style={{ fontSize: '11px' }}>
-            {currentProvider.isAvailable || isLocalAgent ? '✅ 环境就绪' : '待配置'}
+          <span
+            className={`pill-badge ${isCurrentReady ? 'pill-green' : 'pill-neutral'}`}
+            style={{ fontSize: '11px' }}
+          >
+            {isCurrentReady ? (isLocalAgent ? '✅ 本地环境就绪' : '✅ 环境就绪') : '待配置'}
           </span>
         </div>
 
@@ -255,7 +248,7 @@ export const ModelSettingsModal: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div>
               <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                程序检测状态 (CLI Path / Mesh Node)
+                程序检测状态 (CLI Path / Mesh Node):
               </label>
               <div
                 style={{
@@ -265,25 +258,32 @@ export const ModelSettingsModal: React.FC = () => {
                   border: '1px solid var(--om-border)',
                   borderRadius: '6px',
                   padding: '8px 12px',
-                  color: currentProvider.cliPath ? 'var(--om-fg)' : 'var(--accent-amber)',
+                  color: isCurrentReady ? 'var(--om-fg)' : 'var(--accent-amber)',
                 }}
               >
-                {currentProvider.cliPath || '本地就绪 /usr/local/bin/' + currentProvider.id}
+                {currentProvider.executablePath || currentProvider.cliPath || (isCurrentReady ? `/usr/local/bin/${currentProvider.id}` : '未在服务器或已连接节点中检测到')}
               </div>
             </div>
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                探针响应版本 (Probe Version)
+                探针响应版本 (Probe Version):
               </label>
-              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--accent-green)' }}>
-                {currentProvider.detectedVersion || `${currentProvider.id}-cli 1.0.0 (响应就绪)`}
+              <div
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  color: isCurrentReady ? 'var(--accent-green)' : 'var(--text-dim)',
+                  paddingLeft: '2px',
+                }}
+              >
+                {currentProvider.version || currentProvider.detectedVersion || (isCurrentReady ? `${currentProvider.id}-cli 1.0.0` : '探针未响应')}
               </div>
             </div>
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                指定模型 (Model ID)
+                指定模型 (Model ID):
               </label>
               <select
                 className="form-control"
@@ -297,54 +297,118 @@ export const ModelSettingsModal: React.FC = () => {
                   </option>
                 ))}
               </select>
+              <div className="model-candidate-tags" style={{ marginTop: '8px' }}>
+                {candidateModels.map((m) => (
+                  <span
+                    key={m}
+                    className="model-candidate-tag"
+                    onClick={() => setModelId(m)}
+                    style={
+                      m === modelId
+                        ? { borderColor: 'var(--om-accent)', color: 'var(--om-accent)', fontWeight: 600 }
+                        : undefined
+                    }
+                  >
+                    {m}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            <div
-              style={{
-                background: 'rgba(48, 209, 88, 0.08)',
-                border: '1px solid var(--accent-green)',
-                borderRadius: '8px',
-                padding: '10px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginTop: '6px',
-              }}
-            >
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-green)' }} />
-              <span style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 600 }}>
-                本地 Agent 响应就绪 (12ms)
-              </span>
-            </div>
+            {isCurrentReady ? (
+              <div
+                style={{
+                  background: 'rgba(48, 209, 88, 0.08)',
+                  border: '1px solid var(--accent-green)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginTop: '6px',
+                }}
+              >
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-green)', flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 600 }}>
+                    本地 Agent 响应就绪 (12ms)
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                    检测到版本: {currentProvider.version || `${currentProvider.id}-cli 1.0.0`}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: 'rgba(255, 149, 0, 0.08)',
+                  border: '1px solid var(--accent-amber)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginTop: '6px',
+                }}
+              >
+                <AlertCircle size={16} style={{ color: 'var(--accent-amber)', flexShrink: 0 }} />
+                <div style={{ fontSize: '12px', color: 'var(--accent-amber)', fontWeight: 600 }}>
+                  未检测到本地 {currentProvider.name} 程序。请在终端安装或连接个人电脑伴侣。
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setIsModelModalOpen(false);
+                    setIsAddMachineModalOpen(true);
+                  }}
+                  style={{ marginLeft: 'auto', fontSize: '11px', padding: '2px 8px', flexShrink: 0 }}
+                >
+                  💻 接入个人电脑
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div>
               <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                指定模型 (Model ID)
+                指定模型 (Model ID):
               </label>
-              <select
+              <input
+                type="text"
                 className="form-control"
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
-                style={{ width: '100%' }}
-              >
+                style={{ width: '100%', marginBottom: '6px' }}
+                placeholder="例如 deepseek-flash 或 gpt-4o"
+              />
+              <div className="model-candidate-tags">
                 {candidateModels.map((m) => (
-                  <option key={m} value={m}>
+                  <span
+                    key={m}
+                    className="model-candidate-tag"
+                    onClick={() => setModelId(m)}
+                    style={
+                      m === modelId
+                        ? { borderColor: 'var(--om-accent)', color: 'var(--om-accent)', fontWeight: 600 }
+                        : undefined
+                    }
+                  >
                     {m}
-                  </option>
+                  </span>
                 ))}
-              </select>
+              </div>
             </div>
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                API Key
+                API Key:
               </label>
               <input
                 type="password"
                 className="form-control"
-                placeholder="sk-..."
+                placeholder={currentProvider.hasKey ? (currentProvider.maskedKey || '已配置密钥 (留空保持不变)') : 'sk-...'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 style={{ width: '100%' }}
@@ -353,12 +417,12 @@ export const ModelSettingsModal: React.FC = () => {
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                Base URL / Endpoint (选填)
+                Base URL / Endpoint (选填):
               </label>
               <input
                 type="text"
                 className="form-control"
-                placeholder="https://api.openai.com/v1"
+                placeholder={currentProvider.baseUrl || 'https://api.openai.com/v1'}
                 value={endpoint}
                 onChange={(e) => setEndpoint(e.target.value)}
                 style={{ width: '100%' }}
@@ -392,7 +456,7 @@ export const ModelSettingsModal: React.FC = () => {
             onClick={handleSave}
             disabled={saving}
           >
-            {saving ? '保存中...' : '设为激活模型并保存'}
+            {saving ? '保存中...' : (isCurrentActive ? '保存配置' : '设为激活模型并保存')}
           </button>
         </div>
       </div>

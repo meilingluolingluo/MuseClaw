@@ -150,16 +150,24 @@ export interface Grant {
 export interface ModelProvider {
   id: string;
   name: string;
+  baseUrl?: string;
   endpoint?: string;
   apiKey?: string;
+  model?: string;
   modelId?: string;
-  probeStatus?: string;
-  detectedVersion?: string;
-  cliPath?: string;
-  isAvailable?: boolean;
-  description?: string;
-  custom?: boolean;
+  candidateModels?: string[];
   supportedModels?: string[];
+  description?: string;
+  isLocalAgent?: boolean;
+  installed?: boolean;
+  isAvailable?: boolean;
+  executablePath?: string;
+  cliPath?: string;
+  version?: string;
+  detectedVersion?: string;
+  hasKey?: boolean;
+  maskedKey?: string;
+  custom?: boolean;
 }
 
 export interface ModelsConfig {

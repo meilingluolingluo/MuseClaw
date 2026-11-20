@@ -157,18 +157,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadSessions = useCallback(async (botId: string) => {
     try {
-      const s = await api.getSessions(botId);
+      const s = await api.getSessions(botId, user?.username);
       const sessionList = Array.isArray(s) ? s : [];
-      setSessions(sessionList);
       if (sessionList.length > 0) {
+        setSessions(sessionList);
         setActiveSessionId(sessionList[0].id);
       } else {
-        setActiveSessionId(null);
+        const initId = `sess_${botId}_${Date.now()}`;
+        const initSess: Session = {
+          id: initId,
+          botId,
+          title: '新任务对话',
+          createdAt: Date.now(),
+          messageCount: 0,
+        };
+        setSessions([initSess]);
+        setActiveSessionId(initId);
       }
     } catch (err) {
       console.error('Failed to load sessions:', err);
     }
-  }, []);
+  }, [user?.username]);
 
   const selectBot = useCallback(
     (botId: string) => {
@@ -203,15 +212,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const createNewSession = useCallback(async () => {
     if (!activeBotId) return;
+    const fallbackId = `sess_${activeBotId}_${Date.now()}`;
+    const draftSession: Session = {
+      id: fallbackId,
+      botId: activeBotId,
+      title: '新任务对话',
+      createdAt: Date.now(),
+      messageCount: 0,
+    };
     try {
-      const newSession = await api.createSession(activeBotId, '新会话');
-      setSessions((prev) => [newSession, ...prev]);
-      setActiveSessionId(newSession.id);
-      showToast('新建会话成功', 'success');
-    } catch (err: any) {
-      showToast(`新建会话失败: ${err.message}`, 'error');
+      const newSession = await api.createSession(activeBotId, '新任务对话', user?.username);
+      const sess = newSession || draftSession;
+      setSessions((prev) => [sess, ...prev.filter((s) => s.id !== sess.id)]);
+      setActiveSessionId(sess.id);
+      showToast('已新建会话', 'success');
+    } catch {
+      setSessions((prev) => [draftSession, ...prev.filter((s) => s.id !== draftSession.id)]);
+      setActiveSessionId(draftSession.id);
+      showToast('已新建会话', 'success');
     }
-  }, [activeBotId, showToast]);
+  }, [activeBotId, user?.username, showToast]);
 
   const deleteSession = useCallback(
     async (sessionId: string) => {

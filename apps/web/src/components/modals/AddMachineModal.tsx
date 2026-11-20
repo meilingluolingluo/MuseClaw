@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { Copy, Laptop, CheckCircle2 } from 'lucide-react';
 
 export const AddMachineModal: React.FC = () => {
-  const { isAddMachineModalOpen, setIsAddMachineModalOpen, user, showToast } = useApp();
+  const { isAddMachineModalOpen, setIsAddMachineModalOpen, setIsModelModalOpen, user, showToast } = useApp();
   const [onlineNode, setOnlineNode] = useState<string | null>(null);
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8799';
@@ -44,19 +44,25 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
     }
   };
 
+  const handleClose = () => {
+    setIsAddMachineModalOpen(false);
+    setIsModelModalOpen(true);
+  };
+
   return (
     <Modal
       isOpen={isAddMachineModalOpen}
-      onClose={() => setIsAddMachineModalOpen(false)}
+      onClose={handleClose}
       title="添加计算节点 · 个人电脑本地 Agent 接入"
       icon={<Laptop size={18} />}
       maxWidth="640px"
+      zIndex={1100}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             type="button"
             className="btn-primary"
-            onClick={() => setIsAddMachineModalOpen(false)}
+            onClick={handleClose}
           >
             完成并返回
           </button>
