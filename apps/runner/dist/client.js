@@ -5,6 +5,7 @@ import os, { homedir, hostname } from 'node:os';
 import path, { delimiter, join } from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
+import readline from 'node:readline';
 
 function getAugmentedPath() {
   const home = homedir();
@@ -330,6 +331,41 @@ function detectLocalRuntimes() {
   return runtimes;
 }
 
+class StreamQueue {
+  constructor(client, taskId) {
+    this.client = client;
+    this.taskId = taskId;
+    this.queue = [];
+    this.isFlushing = false;
+  }
+
+  push(chunk) {
+    if (!chunk) return;
+    this.queue.push(chunk);
+    this.flush();
+  }
+
+  async flush() {
+    if (this.isFlushing) return;
+    this.isFlushing = true;
+    while (this.queue.length > 0) {
+      const chunk = this.queue.shift();
+      try {
+        await this.client.request(`/api/runner/tasks/${this.taskId}/stream`, 'POST', { chunk });
+      } catch (err) {
+        // 网络短暂抖动时保持容错，不阻断主流程
+      }
+    }
+    this.isFlushing = false;
+  }
+
+  async drain() {
+    while (this.queue.length > 0 || this.isFlushing) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+}
+
 class MuseClawRunnerClient {
   constructor(options) {
     this.serverUrl = options.serverUrl.replace(/\/+$/, '');
@@ -448,7 +484,11 @@ class MuseClawRunnerClient {
       return;
     }
 
+    const streamQueue = new StreamQueue(this, task.taskId);
+
     let args = [];
+    let feedViaStdin = true;
+
     if (task.agentId === 'ducc') {
       const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
                      process.env.USER === 'root' ||
@@ -461,14 +501,18 @@ class MuseClawRunnerClient {
         : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
       if (task.model) args.push('--model', task.model);
     } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
-      args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
+      args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
       if (task.model) args.push('--model', task.model);
       args.push('-');
     } else if (task.agentId === 'pi') {
       args = ['-p', '--no-session'];
       if (task.model) args.push('--model', task.model);
+    } else if (task.agentId === 'dsh') {
+      args = ['headless', task.prompt];
+      feedViaStdin = false;
     } else {
       args = [task.prompt];
+      feedViaStdin = false;
     }
 
     const env = Object.assign({}, process.env, {
@@ -480,70 +524,64 @@ class MuseClawRunnerClient {
 
     let stdout = '';
     let stderr = '';
-    let streamBuffer = '';
 
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      stdout += text;
+    const rl = readline.createInterface({
+      input: child.stdout,
+      crlfDelay: Infinity
+    });
+
+    rl.on('line', (line) => {
+      stdout += line + '\n';
+      const trimmed = line.trim();
+      if (!trimmed) return;
 
       if (task.agentId === 'ducx' || task.agentId === 'codex') {
-        streamBuffer += text;
-        const lines = streamBuffer.split('\n');
-        streamBuffer = lines.pop() || '';
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line.trim());
-            if (parsed.type === 'item.completed' && parsed.item) {
-              if (parsed.item.type === 'reasoning' && parsed.item.text) {
-                const reasoning = parsed.item.text.trim();
-                if (reasoning) {
-                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', {
-                    chunk: `> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`
-                  });
-                }
-              } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
-                const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
-                if (clean) {
-                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: clean });
-                }
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.type === 'item.completed' && parsed.item) {
+            if (parsed.item.type === 'reasoning' && parsed.item.text) {
+              const reasoning = parsed.item.text.trim();
+              if (reasoning) {
+                streamQueue.push(`> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`);
+              }
+            } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
+              const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
+              if (clean) {
+                streamQueue.push(clean);
               }
             }
-          } catch {}
+          }
+        } catch {
+          if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+            streamQueue.push(trimmed + '\n');
+          }
         }
       } else if (task.agentId === 'ducc') {
-        streamBuffer += text;
-        const lines = streamBuffer.split('\n');
-        streamBuffer = lines.pop() || '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const parsed = JSON.parse(trimmed);
-            if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
-              for (const c of parsed.message.content) {
-                if (c.type === 'thinking' && c.thinking) {
-                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', {
-                    chunk: `> 💭 **思考推理**：\n> ${c.thinking.trim().replace(/\n/g, '\n> ')}\n\n`
-                  });
-                } else if (c.type === 'text' && c.text) {
-                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: c.text });
-                }
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+            for (const c of parsed.message.content) {
+              if (c.type === 'thinking' && c.thinking) {
+                const th = c.thinking.trim();
+                if (th) streamQueue.push(`> 💭 **思考推理**：\n> ${th.replace(/\n/g, '\n> ')}\n\n`);
+              } else if (c.type === 'text' && c.text) {
+                streamQueue.push(c.text);
               }
             }
-          } catch {
-            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-              this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: trimmed + '\n' });
-            }
+          }
+        } catch {
+          if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+            streamQueue.push(trimmed + '\n');
           }
         }
       } else {
-        this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: text });
+        streamQueue.push(trimmed + '\n');
       }
     });
 
     child.stderr.on('data', (d) => { stderr += d.toString(); });
 
-    if (task.agentId === 'ducc' || task.agentId === 'ducx' || task.agentId === 'codex') {
+    if (feedViaStdin) {
       child.stdin.write(task.prompt);
       child.stdin.end();
     } else {
@@ -551,6 +589,7 @@ class MuseClawRunnerClient {
     }
 
     child.on('close', async (code) => {
+      await streamQueue.drain();
       const latencyMs = Date.now() - start;
       let extractedText = stdout.trim();
 
@@ -559,7 +598,7 @@ class MuseClawRunnerClient {
         const msgs = [];
         for (const line of lines) {
           try {
-            const parsed = JSON.parse(line);
+            const parsed = JSON.parse(line.trim());
             if (parsed.type === 'item.completed' && parsed.item && parsed.item.type === 'agent_message' && parsed.item.text) {
               msgs.push(parsed.item.text);
             }
@@ -590,24 +629,35 @@ class MuseClawRunnerClient {
         }
       }
 
+      if (!extractedText && code === 0) {
+        extractedText = stdout.trim() || '（Agent 执行完成，无文本输出）';
+      }
+
       const ok = code === 0 && Boolean(extractedText);
       console.log(`📤 任务完成 [${task.taskId}]: ${ok ? '成功' : '失败'} (${latencyMs}ms)`);
 
-      await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
-        ok,
-        text: extractedText,
-        latencyMs,
-        error: ok ? undefined : (stderr.trim() || stdout.trim() || `进程异常退出 (code ${code})`)
-      });
+      try {
+        await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
+          ok,
+          text: extractedText,
+          latencyMs,
+          error: ok ? undefined : (stderr.trim() || stdout.trim() || `进程异常退出 (code ${code})`)
+        });
+      } catch (err) {
+        console.error(`❌ 汇报任务完成失败 [${task.taskId}]:`, err.message);
+      }
     });
 
     child.on('error', async (err) => {
-      await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
-        ok: false,
-        text: '',
-        latencyMs: Date.now() - start,
-        error: err.message
-      });
+      await streamQueue.drain();
+      try {
+        await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
+          ok: false,
+          text: '',
+          latencyMs: Date.now() - start,
+          error: err.message
+        });
+      } catch {}
     });
   }
 

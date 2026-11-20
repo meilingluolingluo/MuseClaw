@@ -304,14 +304,22 @@ export function createLocalAgentCaller(
       apiKey,
       userId: callerOptions.userId,
       onChunk: (chunk) => {
-        if (!onChunk) return;
+        if (!onChunk || !chunk) return;
+        // 如果是已由远程 Runner 提取的格式化文本或纯文本增量，直接透传至前端
+        if (chunk.startsWith('> 💭') || (!chunk.includes('{"type":') && !chunk.startsWith('{'))) {
+          onChunk(chunk);
+          return;
+        }
+
         if (config.id === 'codex' || config.id === 'ducx') {
           streamBuffer += chunk;
           const lines = streamBuffer.split('\n');
           streamBuffer = lines.pop() || '';
           for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
             try {
-              const parsed = JSON.parse(line.trim());
+              const parsed = JSON.parse(trimmed);
               if (parsed.type === 'item.completed' && parsed.item) {
                 if (parsed.item.type === 'reasoning' && parsed.item.text) {
                   const reasoning = parsed.item.text.trim();
@@ -324,7 +332,9 @@ export function createLocalAgentCaller(
                 }
               }
             } catch {
-              // 容错处理非 JSON 行
+              if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+                onChunk(trimmed + '\n');
+              }
             }
           }
         } else if (config.id === 'ducc') {
@@ -339,7 +349,8 @@ export function createLocalAgentCaller(
               if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
                 for (const c of parsed.message.content) {
                   if (c.type === 'thinking' && c.thinking) {
-                    onChunk(`> 💭 **思考推理**：\n> ${c.thinking.trim().replace(/\n/g, '\n> ')}\n\n`);
+                    const th = c.thinking.trim();
+                    if (th) onChunk(`> 💭 **思考推理**：\n> ${th.replace(/\n/g, '\n> ')}\n\n`);
                   } else if (c.type === 'text' && c.text) {
                     onChunk(c.text);
                   }

@@ -59,6 +59,20 @@ export class RunnerMeshManager extends EventEmitter {
   constructor() {
     super();
     this.startHeartbeatSweep();
+    this.on('machine:offline', (machine: RunnerMachine) => {
+      for (const [taskId, pending] of this.pendingTasks.entries()) {
+        if (pending.machineId === machine.id) {
+          clearTimeout(pending.timer);
+          this.pendingTasks.delete(taskId);
+          pending.resolve({
+            ok: false,
+            text: '',
+            latencyMs: 0,
+            error: `远程计算节点 (${machine.hostname}) 意外离线断开连接`
+          });
+        }
+      }
+    });
   }
 
   /**
@@ -195,8 +209,14 @@ export class RunnerMeshManager extends EventEmitter {
 
     for (const machine of this.machines.values()) {
       if (machine.status === 'online' && now - machine.lastHeartbeat <= 45000) {
-        // 多租户隔离：若指定了用户，且机器已绑定不同用户，则跳过
-        if (userId && machine.userId && machine.userId !== userId) {
+        // 多租户隔离：若指定了用户，且机器已明确绑定其他具体用户，则跳过
+        if (
+          userId &&
+          machine.userId &&
+          machine.userId !== userId &&
+          machine.userId !== 'default-mesh-token' &&
+          machine.userId !== 'user_web'
+        ) {
           continue;
         }
         if (machine.runtimes.some((r) => r.id === agentId)) {
@@ -297,7 +317,7 @@ export class RunnerMeshManager extends EventEmitter {
   public listMachines(userId?: string): Array<Omit<RunnerMachine, 'token'>> {
     const now = Date.now();
     return Array.from(this.machines.values())
-      .filter((m) => !userId || !m.userId || m.userId === userId)
+      .filter((m) => !userId || !m.userId || m.userId === userId || m.userId === 'default-mesh-token' || m.userId === 'user_web')
       .map((m) => {
         const isAlive = now - m.lastHeartbeat <= 45000;
         return {
@@ -325,7 +345,13 @@ export class RunnerMeshManager extends EventEmitter {
 
     for (const machine of this.machines.values()) {
       if (machine.status === 'online' && now - machine.lastHeartbeat <= 45000) {
-        if (userId && machine.userId && machine.userId !== userId) {
+        if (
+          userId &&
+          machine.userId &&
+          machine.userId !== userId &&
+          machine.userId !== 'default-mesh-token' &&
+          machine.userId !== 'user_web'
+        ) {
           continue;
         }
         for (const r of machine.runtimes) {

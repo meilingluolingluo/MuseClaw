@@ -5,6 +5,7 @@ import os, { homedir, hostname } from 'node:os';
 import path, { delimiter, join } from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
+import readline from 'node:readline';
 
 interface RuntimeDef {
   id: string;
