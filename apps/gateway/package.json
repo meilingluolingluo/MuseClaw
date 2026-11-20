@@ -10,5 +10,8 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.76.0",
     "@museclaw/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
   }
 }
