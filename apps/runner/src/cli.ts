@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, copyFileSync } from 'node:fs';
 import os, { homedir, hostname } from 'node:os';
 import path, { delimiter, join } from 'node:path';
 import http from 'node:http';
@@ -387,6 +387,263 @@ function detectLocalRuntimes(): RuntimeDef[] {
   return runtimes;
 }
 
+function getServicePaths() {
+  const home = homedir();
+  const museclawDir = join(home, '.museclaw');
+  const configFile = join(museclawDir, 'runner.json');
+  const clientScript = join(museclawDir, 'client.js');
+  const logFile = join(museclawDir, 'runner.log');
+  const errLogFile = join(museclawDir, 'runner.err.log');
+  const isMac = os.platform() === 'darwin';
+  const launchdPlist = join(home, 'Library', 'LaunchAgents', 'com.museclaw.runner.plist');
+  const systemdService = join(home, '.config', 'systemd', 'user', 'museclaw-runner.service');
+
+  return {
+    home,
+    museclawDir,
+    configFile,
+    clientScript,
+    logFile,
+    errLogFile,
+    isMac,
+    launchdPlist,
+    systemdService
+  };
+}
+
+function loadPersistentConfig(): Record<string, string> {
+  const paths = getServicePaths();
+  if (existsSync(paths.configFile)) {
+    try {
+      return JSON.parse(readFileSync(paths.configFile, 'utf8'));
+    } catch {}
+  }
+  return {};
+}
+
+function savePersistentConfig(cfg: Record<string, any>): void {
+  const paths = getServicePaths();
+  if (!existsSync(paths.museclawDir)) {
+    mkdirSync(paths.museclawDir, { recursive: true });
+  }
+  try {
+    const existing = loadPersistentConfig();
+    const merged = { ...existing, ...cfg };
+    writeFileSync(paths.configFile, JSON.stringify(merged, null, 2), 'utf8');
+  } catch {}
+}
+
+function installService(config: { serverUrl: string; token: string; name: string }): void {
+  const paths = getServicePaths();
+  if (!existsSync(paths.museclawDir)) {
+    mkdirSync(paths.museclawDir, { recursive: true });
+  }
+
+  savePersistentConfig(config);
+
+  try {
+    const currentScript = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    if (currentScript && existsSync(currentScript) && currentScript !== path.resolve(paths.clientScript)) {
+      copyFileSync(currentScript, paths.clientScript);
+    }
+  } catch {}
+
+  const nodeBin = process.execPath;
+  const envPath = getAugmentedPath();
+
+  if (paths.isMac) {
+    const launchAgentsDir = join(paths.home, 'Library', 'LaunchAgents');
+    if (!existsSync(launchAgentsDir)) {
+      mkdirSync(launchAgentsDir, { recursive: true });
+    }
+
+    try {
+      execSync(`launchctl unload -w "${paths.launchdPlist}" 2>/dev/null`, { stdio: 'ignore' });
+    } catch {}
+
+    const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.museclaw.runner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodeBin}</string>
+    <string>${paths.clientScript}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>${paths.museclawDir}</string>
+  <key>StandardOutPath</key>
+  <string>${paths.logFile}</string>
+  <key>StandardErrorPath</key>
+  <string>${paths.errLogFile}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${envPath}</string>
+    <key>HOME</key>
+    <string>${paths.home}</string>
+  </dict>
+</dict>
+</plist>`;
+
+    writeFileSync(paths.launchdPlist, plistContent, 'utf8');
+    execSync(`launchctl load -w "${paths.launchdPlist}"`);
+    console.log('✅ macOS LaunchAgent 守护服务已安装并启动: com.museclaw.runner');
+  } else {
+    const systemdDir = join(paths.home, '.config', 'systemd', 'user');
+    if (!existsSync(systemdDir)) {
+      mkdirSync(systemdDir, { recursive: true });
+    }
+
+    try {
+      execSync('systemctl --user stop museclaw-runner.service 2>/dev/null', { stdio: 'ignore' });
+    } catch {}
+
+    const serviceContent = `[Unit]
+Description=MuseClaw Remote Mesh Runner Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${nodeBin} ${paths.clientScript}
+WorkingDirectory=${paths.museclawDir}
+Restart=always
+RestartSec=5
+StandardOutput=append:${paths.logFile}
+StandardError=append:${paths.errLogFile}
+Environment="PATH=${envPath}"
+Environment="HOME=${paths.home}"
+
+[Install]
+WantedBy=default.target
+`;
+
+    writeFileSync(paths.systemdService, serviceContent, 'utf8');
+    execSync('systemctl --user daemon-reload');
+    execSync('systemctl --user enable --now museclaw-runner.service');
+    console.log('✅ Linux systemd 用户常驻服务已安装并启动: museclaw-runner.service');
+  }
+
+  console.log('\n===========================================================');
+  console.log('🎉 MuseClaw 伴侣服务已成功配置为系统自启动后台常驻守护！');
+  console.log(`🌐 接入网关: ${config.serverUrl}`);
+  console.log(`🔑 认证令牌: ${config.token}`);
+  console.log(`📄 运行日志: tail -f ${paths.logFile}`);
+  console.log('💡 电脑开机、注销、睡眠唤醒后均会自动后台静默重连，无需保持终端打开。');
+  console.log('-----------------------------------------------------------');
+  console.log('🛠️ 常用管理命令:');
+  console.log(`   - 查看状态: node "${paths.clientScript}" --status`);
+  console.log(`   - 重启服务: node "${paths.clientScript}" --restart-service`);
+  console.log(`   - 卸载服务: node "${paths.clientScript}" --uninstall-service`);
+  console.log('===========================================================\n');
+}
+
+function uninstallService(): void {
+  const paths = getServicePaths();
+  if (paths.isMac) {
+    try {
+      execSync(`launchctl unload -w "${paths.launchdPlist}" 2>/dev/null`, { stdio: 'ignore' });
+    } catch {}
+    if (existsSync(paths.launchdPlist)) {
+      unlinkSync(paths.launchdPlist);
+    }
+    console.log('🛑 macOS LaunchAgent 守护服务已停止并卸载: com.museclaw.runner');
+  } else {
+    try {
+      execSync('systemctl --user stop museclaw-runner.service 2>/dev/null', { stdio: 'ignore' });
+      execSync('systemctl --user disable museclaw-runner.service 2>/dev/null', { stdio: 'ignore' });
+    } catch {}
+    if (existsSync(paths.systemdService)) {
+      unlinkSync(paths.systemdService);
+      execSync('systemctl --user daemon-reload 2>/dev/null || true');
+    }
+    console.log('🛑 Linux systemd 用户常驻服务已停止并卸载: museclaw-runner.service');
+  }
+}
+
+function getServiceStatus(): void {
+  const paths = getServicePaths();
+  console.log('\n===========================================================');
+  console.log('📊 MuseClaw Remote Mesh Runner 守护服务状态');
+  console.log('-----------------------------------------------------------');
+
+  let statusText = '未安装系统自启服务';
+
+  if (paths.isMac) {
+    const isInstalled = existsSync(paths.launchdPlist);
+    if (isInstalled) {
+      try {
+        const out = execSync('launchctl list | grep com.museclaw.runner || true', { encoding: 'utf8' }).trim();
+        if (out) {
+          const parts = out.split(/\s+/);
+          const pid = parts[0];
+          statusText = pid !== '-' ? `正在运行 (PID: ${pid})` : `已加载等待中 (退出状态: ${parts[1]})`;
+        } else {
+          statusText = '已配置但未运行';
+        }
+      } catch {
+        statusText = '已安装';
+      }
+    }
+  } else {
+    const isInstalled = existsSync(paths.systemdService);
+    if (isInstalled) {
+      try {
+        const out = execSync('systemctl --user is-active museclaw-runner.service || true', { encoding: 'utf8' }).trim();
+        statusText = out === 'active' ? '正在运行 (Active)' : `状态: ${out}`;
+      } catch {
+        statusText = '已安装';
+      }
+    }
+  }
+
+  console.log(`系统服务:   ${statusText}`);
+  if (existsSync(paths.configFile)) {
+    try {
+      const cfg = JSON.parse(readFileSync(paths.configFile, 'utf8'));
+      console.log(`接入网关:   ${cfg.serverUrl || '默认'}`);
+      console.log(`用户令牌:   ${cfg.token || '默认'}`);
+      console.log(`机器名称:   ${cfg.name || hostname()}`);
+    } catch {}
+  }
+
+  if (existsSync(paths.logFile)) {
+    console.log(`\n📄 最新运行日志 (${paths.logFile}):`);
+    console.log('-----------------------------------------------------------');
+    try {
+      const lines = readFileSync(paths.logFile, 'utf8').trim().split('\n');
+      console.log(lines.slice(-10).join('\n'));
+    } catch {}
+  }
+  console.log('===========================================================\n');
+}
+
+function restartService(): void {
+  const paths = getServicePaths();
+  if (paths.isMac) {
+    try {
+      execSync(`launchctl unload -w "${paths.launchdPlist}" 2>/dev/null`, { stdio: 'ignore' });
+      execSync(`launchctl load -w "${paths.launchdPlist}"`);
+      console.log('🔄 macOS 守护服务已重新加载启动！');
+    } catch (e: any) {
+      console.error('重启服务失败:', e.message);
+    }
+  } else {
+    try {
+      execSync('systemctl --user restart museclaw-runner.service');
+      console.log('🔄 Linux 守护服务已重新启动！');
+    } catch (e: any) {
+      console.error('重启服务失败:', e.message);
+    }
+  }
+}
+
 class MuseClawRunnerClient {
   private serverUrl: string;
   private token: string;
@@ -394,6 +651,7 @@ class MuseClawRunnerClient {
   private machineName: string;
   private runtimes: RuntimeDef[] = [];
   private isRunning = true;
+  private lastRegisterTime = 0;
 
   constructor(options: { serverUrl: string; token?: string; name?: string }) {
     this.serverUrl = options.serverUrl.replace(/\/+$/, '');
@@ -446,6 +704,26 @@ class MuseClawRunnerClient {
     });
   }
 
+  public async register(): Promise<boolean> {
+    this.runtimes = detectLocalRuntimes();
+    try {
+      const reg = await this.request('/api/runner/register', 'POST', {
+        machineId: this.machineId,
+        hostname: this.machineName,
+        platform: os.platform(),
+        arch: os.arch(),
+        token: this.token,
+        runtimes: this.runtimes
+      });
+      this.lastRegisterTime = Date.now();
+      console.log(`🟢 节点在线就绪 (注册 ID: ${reg?.machineId || this.machineId})`);
+      return true;
+    } catch (err: any) {
+      console.error(`⚠️ 节点注册失败 (${err.message})`);
+      return false;
+    }
+  }
+
   public async start(): Promise<void> {
     console.log('\n===========================================================');
     console.log('🐾 MuseClaw Remote Mesh Runner 伴侣守护进程已启动');
@@ -456,19 +734,9 @@ class MuseClawRunnerClient {
     this.runtimes = detectLocalRuntimes();
     console.log(`⚡ 发现运行时: ${this.runtimes.map((r) => `${r.id} (${r.defaultModel})`).join(', ') || '未检测到可用 Agent'}`);
 
-    // 向 Gateway 注册本计算节点
-    try {
-      const reg = await this.request('/api/runner/register', 'POST', {
-        machineId: this.machineId,
-        hostname: this.machineName,
-        platform: os.platform(),
-        arch: os.arch(),
-        token: this.token,
-        runtimes: this.runtimes
-      });
-      console.log(`🟢 节点在线就绪 (注册 ID: ${reg?.machineId || this.machineId})`);
-    } catch (err: any) {
-      console.error(`⚠️ 首次注册失败 (${err.message})，进入重试循环...`);
+    const ok = await this.register();
+    if (!ok) {
+      console.log('⚠️ 首次注册未成功，进入重试与监听循环...');
     }
 
     console.log('📡 正在监听云端任务调度 (Long-Polling Active)...');
@@ -480,10 +748,21 @@ class MuseClawRunnerClient {
   private async pollLoop(): Promise<void> {
     while (this.isRunning) {
       try {
+        // 定期重新同步注册信息（每 3 分钟自动刷新一次，防止网关重载或长时间网络抖动后失联）
+        if (Date.now() - this.lastRegisterTime > 180000) {
+          await this.register();
+        }
+
         const res = await this.request('/api/runner/poll', 'POST', {
           machineId: this.machineId,
           token: this.token
         });
+
+        if (res && res.needRegister) {
+          console.log('🔄 检测到云端网关重启或节点未就绪，正在重新同步注册...');
+          await this.register();
+          continue;
+        }
 
         if (res && res.taskId) {
           console.log(`\n📥 收到云端任务: [${res.taskId}] 调度目标: ${res.agentId} (模型: ${res.model || '默认'})`);
@@ -703,25 +982,50 @@ class MuseClawRunnerClient {
   }
 }
 
-// 命令行启动逻辑
+// 命令行启动与服务管理逻辑
 function parseArgs() {
   const args = process.argv.slice(2);
-  let serverUrl = process.env.MUSECLAW_SERVER_URL || 'http://localhost:8799';
-  let token = process.env.MUSECLAW_TOKEN;
-  let name = hostname();
+  const fileConfig = loadPersistentConfig();
+
+  let serverUrl = process.env.MUSECLAW_SERVER_URL || fileConfig.serverUrl || 'http://localhost:8799';
+  let token = process.env.MUSECLAW_TOKEN || fileConfig.token || 'default-mesh-token';
+  let name = fileConfig.name || hostname();
+  let action = 'run';
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--server' && args[i + 1]) serverUrl = args[++i];
-    if (args[i] === '--token' && args[i + 1]) token = args[++i];
-    if (args[i] === '--name' && args[i + 1]) name = args[++i];
+    const arg = args[i];
+    if ((arg === '--server' || arg === '-s') && args[i + 1]) serverUrl = args[++i];
+    else if ((arg === '--token' || arg === '-t') && args[i + 1]) token = args[++i];
+    else if ((arg === '--name' || arg === '-n') && args[i + 1]) name = args[++i];
+    else if (arg === '--install-service' || arg === '--daemon' || arg === 'service:install') action = 'install-service';
+    else if (arg === '--uninstall-service' || arg === 'service:uninstall') action = 'uninstall-service';
+    else if (arg === '--restart-service' || arg === 'service:restart') action = 'restart-service';
+    else if (arg === '--status' || arg === '-v' || arg === 'service:status') action = 'status';
   }
 
-  return { serverUrl, token, name };
+  return { serverUrl, token, name, action };
 }
 
 const config = parseArgs();
+
+if (config.action === 'install-service') {
+  installService({ serverUrl: config.serverUrl, token: config.token, name: config.name });
+  process.exit(0);
+} else if (config.action === 'uninstall-service') {
+  uninstallService();
+  process.exit(0);
+} else if (config.action === 'restart-service') {
+  restartService();
+  process.exit(0);
+} else if (config.action === 'status') {
+  getServiceStatus();
+  process.exit(0);
+}
+
+// 正常启动并持久化更新最近成功配置
+savePersistentConfig({ serverUrl: config.serverUrl, token: config.token, name: config.name });
 const client = new MuseClawRunnerClient(config);
-client.start().catch((err) => {
+client.start().catch((err: any) => {
   console.error('Fatal runner error:', err);
   process.exit(1);
 });

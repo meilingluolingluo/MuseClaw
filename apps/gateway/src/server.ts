@@ -968,6 +968,11 @@ export function startGatewayServer(defaultPort = 8799) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Missing machineId' }));
       }
+      const existing = globalRunnerMesh.getMachine(machineId);
+      if (!existing) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ needRegister: true }));
+      }
       const task = await globalRunnerMesh.pollTask(machineId, 25000);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(task || { hasTask: false }));
@@ -1002,18 +1007,22 @@ set -e
 # MuseClaw Remote Mesh Runner 一键接入守护脚本
 SERVER_URL="\${MUSECLAW_SERVER_URL:-${proto}://${host}}"
 TOKEN="\${MUSECLAW_TOKEN:-${defaultToken}}"
+INSTALL_DAEMON=1
 
 while [[ \$# -gt 0 ]]; do
   case \$1 in
     --server) SERVER_URL="\$2"; shift 2 ;;
     --token) TOKEN="\$2"; shift 2 ;;
+    --foreground) INSTALL_DAEMON=0; shift ;;
+    --daemon) INSTALL_DAEMON=1; shift ;;
     *) shift ;;
   esac
 done
 
 echo "==========================================================="
-echo "🐾 正在启动 MuseClaw 远程计算节点 (Mesh Runner)..."
+echo "🐾 正在配置 MuseClaw 远程计算节点 (Mesh Runner)..."
 echo "🌐 接入网关: \$SERVER_URL"
+echo "🔑 认证令牌: \$TOKEN"
 echo "==========================================================="
 
 if ! command -v node >/dev/null 2>&1; then
@@ -1021,10 +1030,23 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+MUSECLAW_DIR="\$HOME/.museclaw"
+mkdir -p "\$MUSECLAW_DIR"
+CLIENT_JS="\$MUSECLAW_DIR/client.js"
+
+echo "📥 正在同步最新的 Runner 伴侣核心脚本..."
+curl -fsSL "\$SERVER_URL/runner/client.js" -o "\$CLIENT_JS"
+
 export MUSECLAW_SERVER_URL="\$SERVER_URL"
 if [ -n "\$TOKEN" ]; then export MUSECLAW_TOKEN="\$TOKEN"; fi
 
-curl -fsSL "\$SERVER_URL/runner/client.js" | node -
+if [ "\$INSTALL_DAEMON" -eq 1 ]; then
+  echo "⚙️  正在安装为系统开机自启常驻后台服务..."
+  node "\$CLIENT_JS" --install-service --server "\$SERVER_URL" --token "\$TOKEN"
+else
+  echo "🚀 正在以前台交互模式启动 Runner (按 Ctrl+C 可停止)..."
+  node "\$CLIENT_JS" --server "\$SERVER_URL" --token "\$TOKEN"
+fi
 `;
       res.writeHead(200, {
         'Content-Type': 'application/x-sh; charset=utf-8',

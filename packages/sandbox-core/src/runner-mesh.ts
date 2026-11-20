@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { LocalAgentInfo } from './local-agent-prober.ts';
 import type { LocalAgentRunResult } from './local-agent-runner.ts';
 
@@ -55,9 +57,12 @@ export class RunnerMeshManager extends EventEmitter {
   private pollWaiters = new Map<string, (task: RunnerTask | null) => void>();
   private pendingTasks = new Map<string, PendingTaskDispatcher>();
   private taskQueues = new Map<string, RunnerTask[]>();
+  private persistPath: string;
 
-  constructor() {
+  constructor(customPersistPath?: string) {
     super();
+    this.persistPath = customPersistPath || path.resolve(process.cwd(), 'data', 'runner-mesh.json');
+    this.loadPersistentState();
     this.startHeartbeatSweep();
     this.on('machine:offline', (machine: RunnerMachine) => {
       for (const [taskId, pending] of this.pendingTasks.entries()) {
@@ -73,6 +78,44 @@ export class RunnerMeshManager extends EventEmitter {
         }
       }
     });
+  }
+
+  private savePersistentState(): void {
+    try {
+      const dir = path.dirname(this.persistPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const data = Array.from(this.machines.values());
+      fs.writeFileSync(this.persistPath, JSON.stringify(data, null, 2), 'utf8');
+    } catch {}
+  }
+
+  private loadPersistentState(): void {
+    try {
+      if (fs.existsSync(this.persistPath)) {
+        const raw = fs.readFileSync(this.persistPath, 'utf8');
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          for (const m of list) {
+            if (m && m.id) {
+              this.machines.set(m.id, {
+                ...m,
+                status: 'offline',
+                activeTaskCount: 0
+              });
+              if (!this.taskQueues.has(m.id)) {
+                this.taskQueues.set(m.id, []);
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  public getMachine(machineId: string): RunnerMachine | undefined {
+    return this.machines.get(machineId);
   }
 
   /**
@@ -114,6 +157,7 @@ export class RunnerMeshManager extends EventEmitter {
       this.taskQueues.set(id, []);
     }
 
+    this.savePersistentState();
     this.emit('machine:registered', machine);
     return { success: true, machineId: id, heartbeatIntervalMs: 15000 };
   }

@@ -4679,25 +4679,29 @@ async function openAddMachineModal() {
 export no_proxy=".bcebos.com,.duckdns.org,.ai-chat.host,.baidu-int.com,10.0.0.0/8,localhost,127.0.0.1\${no_proxy:+,\$no_proxy}"
 export NO_PROXY="$no_proxy"
 
-# 2. 一键启动 MuseClaw 本地计算节点伴侣 (自动识别本机 ducc、ducx)
+# 2. 一键安装 MuseClaw 伴侣为开机自启常驻服务 (自动识别 pi、ducc、ducx、codex 等本地 Agent)
 curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(currentUserId)}" | bash`;
 
   const bodyHtml = `
     <div style="font-size: 13px; color: var(--om-muted); margin-bottom: 14px; line-height: 1.5;">
-      在要连接的个人电脑（Mac 或 Linux）终端中，复制并运行以下整组命令。伴侣进程启动后，系统将自动识别并就绪你电脑上的 <code>ducc</code> 与 <code>ducx</code> 等本地 Agent。
+      在要连接的个人电脑（Mac 或 Linux）终端中，复制并运行以下整组命令。命令执行后将<strong>自动注册为系统后台常驻服务</strong>，自动识别本机 <code>pi</code>、<code>ducc</code>、<code>ducx</code>、<code>codex</code> 等本地 Agent。
     </div>
 
     <div style="margin-bottom: 16px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
         <div style="font-size: 12.5px; font-weight: 650; color: var(--om-fg); display: flex; align-items: center; gap: 6px;">
           <span>💻 个人电脑终端接入命令</span>
-          <span style="font-size: 11px; color: var(--om-muted); font-weight: 400;">(免安装依赖 · Node.js 即时运行)</span>
+          <span style="font-size: 11px; color: var(--om-muted); font-weight: 400;">(免安装依赖 · 系统级开机自启)</span>
         </div>
         <button type="button" class="btn-secondary" id="btn-copy-install-cmd" style="padding: 2px 8px; font-size: 11px; cursor: pointer;">
           📋 一键复制整组命令
         </button>
       </div>
       <div style="position: relative; background: var(--om-surface-3); border: 1px solid var(--om-border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; word-break: break-all; color: var(--om-fg); white-space: pre-wrap; user-select: all; -webkit-user-select: all; cursor: text;" id="install-cmd-code"><code>${escapeHtml(installCmd)}</code></div>
+      <div style="font-size: 12px; color: var(--om-muted); margin-top: 8px; line-height: 1.6; background: var(--om-surface-2); border-radius: 6px; padding: 8px 10px;">
+        💡 <strong>永久免值守特性</strong>：安装后<strong>可随时关闭终端</strong>。电脑开机、重启、锁屏或唤醒后均会自动在后台静默运行与重连。<br>
+        <span style="font-size: 11px; color: var(--om-muted);">🛠️ 本机管理命令：查看状态 <code>node ~/.museclaw/client.js --status</code> ｜ 卸载服务 <code>node ~/.museclaw/client.js --uninstall-service</code></span>
+      </div>
     </div>
 
     <div id="add-machine-status-box" style="background: var(--om-surface-2); border: 1px solid var(--om-border); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 10px; margin-top: 16px;">
