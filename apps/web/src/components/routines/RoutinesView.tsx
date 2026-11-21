@@ -361,21 +361,10 @@ export const RoutinesView: React.FC = () => {
   }, [formCron]);
 
   return (
-    <section className="view-stage routines-view">
+    <section className="view-stage routines-view" aria-label="例行任务与自动化巡检">
       {/* 顶部统计与新建入口 */}
-      <div
-        style={{
-          padding: '12px 24px',
-          borderBottom: '1px solid var(--om-border)',
-          background: 'var(--om-surface)',
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '16px',
-        }}
-      >
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+      <div className="routines-top-bar">
+        <div className="routines-stat-group">
           <div className="rt-stat">
             <span className="rt-stat-label">例行任务</span>
             <span className="rt-stat-value">
@@ -413,83 +402,41 @@ export const RoutinesView: React.FC = () => {
       </div>
 
       {/* 主工作区 */}
-      <div className="routines-workspace" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="routines-workspace">
         {/* 左侧任务列表面板 */}
         <aside className="routines-sidebar">
           {/* 搜索与筛选 */}
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--om-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ position: 'relative' }}>
-              <Search size={14} style={{ position: 'absolute', left: '10px', top: '9px', color: 'var(--om-muted)' }} />
+          <div className="routines-filter-box">
+            <div className="routines-search-container">
+              <Search size={14} className="routines-search-icon" aria-hidden="true" />
               <input
                 type="text"
                 placeholder="搜索任务、Cron 或指令..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  paddingLeft: '32px',
-                  height: '32px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--om-border)',
-                  background: 'var(--om-surface-2)',
-                  fontSize: '12px',
-                  color: 'var(--om-fg)',
-                }}
+                className="routines-search-input"
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '4px', background: 'var(--om-surface-2)', padding: '2px', borderRadius: '6px' }}>
+            <div className="routines-tabs-row">
               <button
                 type="button"
                 onClick={() => setFilterTab('all')}
-                style={{
-                  flex: 1,
-                  padding: '4px 0',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  fontWeight: filterTab === 'all' ? 600 : 400,
-                  background: filterTab === 'all' ? 'var(--om-surface)' : 'transparent',
-                  color: filterTab === 'all' ? 'var(--om-fg)' : 'var(--om-muted)',
-                  boxShadow: filterTab === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                }}
+                className={`routines-tab-btn ${filterTab === 'all' ? 'active' : ''}`}
               >
                 全部 ({routines.length})
               </button>
               <button
                 type="button"
                 onClick={() => setFilterTab('active')}
-                style={{
-                  flex: 1,
-                  padding: '4px 0',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  fontWeight: filterTab === 'active' ? 600 : 400,
-                  background: filterTab === 'active' ? 'var(--om-surface)' : 'transparent',
-                  color: filterTab === 'active' ? 'var(--accent-green)' : 'var(--om-muted)',
-                  boxShadow: filterTab === 'active' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                }}
+                className={`routines-tab-btn ${filterTab === 'active' ? 'active active-green' : ''}`}
               >
                 运行中 ({routines.filter((r) => r.enabled).length})
               </button>
               <button
                 type="button"
                 onClick={() => setFilterTab('paused')}
-                style={{
-                  flex: 1,
-                  padding: '4px 0',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  fontWeight: filterTab === 'paused' ? 600 : 400,
-                  background: filterTab === 'paused' ? 'var(--om-surface)' : 'transparent',
-                  color: filterTab === 'paused' ? 'var(--accent-amber)' : 'var(--om-muted)',
-                  boxShadow: filterTab === 'paused' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                }}
+                className={`routines-tab-btn ${filterTab === 'paused' ? 'active active-amber' : ''}`}
               >
                 已暂停 ({routines.filter((r) => !r.enabled).length})
               </button>
@@ -497,24 +444,15 @@ export const RoutinesView: React.FC = () => {
           </div>
 
           {/* 任务项滚动列表 */}
-          <div className="routines-list-scroll" style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
+          <div className="routines-list-scroll">
             {loadingList && routines.length === 0 ? (
-              <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }} aria-label="加载中">
+              <div className="routine-skeleton-list" aria-label="加载中">
                 {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    style={{
-                      height: '64px',
-                      borderRadius: '10px',
-                      background: 'linear-gradient(100deg, var(--om-surface-2) 40%, var(--om-border) 50%, var(--om-surface-2) 60%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'skShimmer 1.3s ease infinite',
-                    }}
-                  />
+                  <div key={i} className="routine-nav-skeleton" />
                 ))}
               </div>
             ) : filteredRoutines.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--om-muted)', fontSize: '12px' }}>
+              <div className="routine-nav-empty">
                 没有匹配的例行任务
               </div>
             ) : (
@@ -527,44 +465,24 @@ export const RoutinesView: React.FC = () => {
                   <div
                     key={r.id}
                     onClick={() => setActiveRoutineId(r.id)}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '10px',
-                      marginBottom: '8px',
-                      cursor: 'pointer',
-                      background: isActive ? 'var(--om-surface-2)' : 'transparent',
-                      border: isActive ? '1px solid var(--om-accent)' : '1px solid var(--om-border)',
-                      transition: 'all 0.15s ease',
-                      position: 'relative',
-                    }}
+                    className={`routine-nav-item ${isActive ? 'is-active' : ''}`}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--om-fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
+                    <div className="routine-nav-top-row">
+                      <span className="routine-nav-name">
                         {r.name}
                       </span>
-                      <span
-                        style={{
-                          fontSize: '10px',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          fontWeight: 500,
-                          background: r.enabled ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-                          color: r.enabled ? 'var(--accent-green)' : 'var(--accent-amber)',
-                        }}
-                      >
+                      <span className={`routine-nav-status-badge ${r.enabled ? 'is-running' : 'is-paused'}`}>
                         {r.enabled ? '运行中' : '已暂停'}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '11.5px', color: 'var(--om-muted)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Calendar size={12} style={{ flexShrink: 0 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {humanZh}
-                      </span>
+                    <div className="routine-nav-schedule-line">
+                      <Calendar size={12} className="flex-shrink-0" />
+                      <span>{humanZh}</span>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'var(--om-muted)' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div className="routine-nav-meta-line">
+                      <span className="routine-nav-bot-tag">
                         <BotIcon size={12} /> {botObj?.name || r.agentId || '数字员工'}
                       </span>
                       {r.lastRunAt && (
@@ -581,12 +499,12 @@ export const RoutinesView: React.FC = () => {
         {/* 右侧核心详情面板 */}
         <main className="routines-main-content">
           {!activeRoutine ? (
-            <div className="routines-empty-state" style={{ textAlign: 'center', padding: '100px 16px', color: 'var(--om-muted)' }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏰</div>
-              <div style={{ fontSize: '17px', fontWeight: 700, color: 'var(--om-fg)', marginBottom: '8px' }}>
+            <div className="routines-empty-state">
+              <div className="routine-empty-icon">⏰</div>
+              <div className="routine-empty-title">
                 选择或创建自动化例行任务
               </div>
-              <div style={{ fontSize: '13px', maxWidth: '480px', margin: '0 auto 20px auto', lineHeight: 1.6 }}>
+              <div className="routine-empty-desc">
                 数字员工将按照设定的周期在沙箱内自主巡检、收集日志、排查风险并在需要时通报结论。
               </div>
               <button type="button" className="btn-primary" onClick={handleOpenCreate}>
@@ -594,43 +512,25 @@ export const RoutinesView: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div>
+            <div className="routine-detail-wrapper">
               {/* 顶部标题与快捷操作栏 */}
-              <div
-                style={{
-                  background: 'var(--om-surface)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '14px',
-                  padding: '20px 24px',
-                  marginBottom: '20px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
-                  <div style={{ flex: 1, minWidth: '260px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                      <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: 'var(--om-fg)' }}>
+              <div className="routine-detail-header-card">
+                <div className="routine-detail-top-row">
+                  <div className="routine-detail-heading-group">
+                    <div className="routine-detail-title-line">
+                      <h2 className="routine-detail-name">
                         {activeRoutine.name}
                       </h2>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          padding: '3px 8px',
-                          borderRadius: '6px',
-                          fontWeight: 600,
-                          background: activeRoutine.enabled ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-                          color: activeRoutine.enabled ? 'var(--accent-green)' : 'var(--accent-amber)',
-                        }}
-                      >
+                      <span className={`routine-detail-status-pill ${activeRoutine.enabled ? 'is-running' : 'is-paused'}`}>
                         {activeRoutine.enabled ? '● 调度运行中' : '⏸ 调度已暂停'}
                       </span>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--om-muted)', flexWrap: 'wrap' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div className="routine-detail-meta-list">
+                      <span className="routine-detail-meta-item">
                         <BotIcon size={14} /> 责任员工: <strong>{assignedBot?.name || activeRoutine.agentId}</strong>
                       </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <span className="routine-detail-meta-item">
                         <Calendar size={14} /> 下次触发:{' '}
                         <strong>
                           {!activeRoutine.enabled
@@ -641,45 +541,41 @@ export const RoutinesView: React.FC = () => {
                         </strong>
                       </span>
                       {activeRoutine.lastRunAt && (
-                        <span>上次运行: {formatTime(activeRoutine.lastRunAt)}</span>
+                        <span className="routine-detail-meta-item">上次运行: {formatTime(activeRoutine.lastRunAt)}</span>
                       )}
                     </div>
                   </div>
 
                   {/* 动作按钮组 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div className="routine-detail-actions">
                     <button
                       type="button"
-                      className="btn-primary"
+                      className="btn-primary routine-action-btn"
                       onClick={handleRunNow}
                       disabled={isRunningNow}
-                      style={{ padding: '7px 14px', fontSize: '12.5px', borderRadius: '7px', display: 'flex', alignItems: 'center', gap: '6px' }}
                     >
                       {isRunningNow ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-                      {isRunningNow ? '下发中...' : '立即运行'}
+                      <span>{isRunningNow ? '下发中...' : '立即运行'}</span>
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="btn-secondary routine-action-btn"
                       onClick={() => handleToggleEnable(activeRoutine)}
-                      style={{ padding: '7px 14px', fontSize: '12.5px', borderRadius: '7px', display: 'flex', alignItems: 'center', gap: '6px' }}
                     >
-                      <Power size={14} /> {activeRoutine.enabled ? '暂停调度' : '恢复调度'}
+                      <Power size={14} /> <span>{activeRoutine.enabled ? '暂停调度' : '恢复调度'}</span>
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="btn-secondary routine-action-btn"
                       onClick={() => handleOpenEdit(activeRoutine)}
-                      style={{ padding: '7px 12px', fontSize: '12.5px', borderRadius: '7px', display: 'flex', alignItems: 'center', gap: '6px' }}
                     >
-                      <Edit3 size={14} /> 编辑
+                      <Edit3 size={14} /> <span>编辑</span>
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="btn-secondary routine-action-btn is-danger"
                       onClick={() => handleDelete(activeRoutine.id)}
                       title="删除任务"
-                      style={{ padding: '7px 10px', fontSize: '12.5px', borderRadius: '7px', color: 'var(--accent-red)' }}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -688,69 +584,44 @@ export const RoutinesView: React.FC = () => {
               </div>
 
               {/* 调度详情与高级规则网格 */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+              <div className="routine-grid-2col">
                 {/* 1. 调度周期与执行预测 */}
-                <div
-                  style={{
-                    background: 'var(--om-surface)',
-                    border: '1px solid var(--om-border)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '13px', marginBottom: '10px' }}>
-                    <Calendar size={15} style={{ color: 'var(--om-accent)' }} /> 调度规划与下步执行
+                <div className="routine-card">
+                  <div className="routine-card-title">
+                    <Calendar size={15} className="routine-icon-accent" /> <span>调度规划与下步执行</span>
                   </div>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--om-fg)', marginBottom: '4px' }}>
+                  <div className="routine-cron-display">
                     {activeRoutine.scheduleHumanZh || formatCronZh(activeRoutine.cronExpr)}
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--om-muted)', marginBottom: '12px' }}>
+                  <div className="routine-cron-expr-line">
                     表达式: <code>{activeRoutine.cronExpr}</code> ({activeRoutine.timezone || 'Asia/Shanghai'})
                   </div>
 
-                  <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--om-muted)', marginBottom: '6px' }}>
+                  <div className="routine-preview-label">
                     未来预估触发时间:
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div className="routine-preview-list">
                     {(activeRoutine.nextRunTimes && activeRoutine.nextRunTimes.length > 0
                       ? activeRoutine.nextRunTimes.map((t) => formatTime(t))
                       : previewNextRuns(activeRoutine.cronExpr, 3)
                     ).map((timeStr, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          fontSize: '11.5px',
-                          padding: '4px 8px',
-                          background: 'var(--om-surface-2)',
-                          borderRadius: '6px',
-                          color: 'var(--om-fg)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                        }}
-                      >
-                        <span style={{ color: 'var(--om-muted)' }}>#{idx + 1}</span> {timeStr}
+                      <div key={idx} className="routine-preview-item">
+                        <span className="routine-preview-idx">#{idx + 1}</span>
+                        <span>{timeStr}</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
                 {/* 2. 交付策略与静默配置 */}
-                <div
-                  style={{
-                    background: 'var(--om-surface)',
-                    border: '1px solid var(--om-border)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '13px', marginBottom: '10px' }}>
-                    <Shield size={15} style={{ color: 'var(--accent-green)' }} /> 交付与防扰策略
+                <div className="routine-card">
+                  <div className="routine-card-title">
+                    <Shield size={15} className="routine-icon-green" /> <span>交付与防扰策略</span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--om-border)' }}>
-                      <span style={{ color: 'var(--om-muted)' }}>结果交付目标</span>
-                      <span style={{ fontWeight: 500 }}>
+                  <div className="routine-policy-list">
+                    <div className="routine-policy-row">
+                      <span className="routine-policy-label">结果交付目标</span>
+                      <span className="routine-policy-val">
                         {activeRoutine.deliverTo === 'silent'
                           ? '静默归档 (仅记日志)'
                           : activeRoutine.deliverTo === 'im_webhook'
@@ -758,58 +629,36 @@ export const RoutinesView: React.FC = () => {
                           : '团队动态流 (Feed)'}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--om-border)' }}>
-                      <span style={{ color: 'var(--om-muted)' }}>并发防重叠策略</span>
-                      <span style={{ fontWeight: 500 }}>
+                    <div className="routine-policy-row">
+                      <span className="routine-policy-label">并发防重叠策略</span>
+                      <span className="routine-policy-val">
                         {activeRoutine.overlap === 'queue' ? '排队顺序执行' : '跳过本次执行 (Skip)'}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--om-border)' }}>
-                      <span style={{ color: 'var(--om-muted)' }}>静默抑制 (Quiet Green)</span>
-                      <span style={{ fontWeight: 500 }}>
+                    <div className="routine-policy-row">
+                      <span className="routine-policy-label">静默抑制 (Quiet Green)</span>
+                      <span className="routine-policy-val">
                         {activeRoutine.deliverTo === 'silent' ? '已开启 · 仅记日志' : '按目标渠道正常送达'}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                      <span style={{ color: 'var(--om-muted)' }}>超时时间限制</span>
-                      <span>{activeRoutine.timeoutSeconds || 300} 秒</span>
+                    <div className="routine-policy-row">
+                      <span className="routine-policy-label">超时时间限制</span>
+                      <span className="routine-policy-val">{activeRoutine.timeoutSeconds || 300} 秒</span>
                     </div>
                   </div>
                 </div>
 
                 {/* 3. 外部 Webhook 触发直连 */}
-                <div
-                  style={{
-                    background: 'var(--om-surface)',
-                    border: '1px solid var(--om-border)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                    gridColumn: '1 / -1',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '13px' }}>
-                      <Terminal size={15} style={{ color: 'var(--om-accent)' }} /> 外部系统 Webhook 触发接口
+                <div className="routine-card routine-card-full">
+                  <div className="routine-webhook-header">
+                    <div className="routine-card-title">
+                      <Terminal size={15} className="routine-icon-accent" /> <span>外部系统 Webhook 触发接口</span>
                     </div>
-                    <span style={{ fontSize: '11px', color: 'var(--om-muted)' }}>支持外部 CI/CD、Prometheus、或运维脚本随时回调</span>
+                    <span className="routine-webhook-hint">支持外部 CI/CD、Prometheus、或运维脚本随时回调</span>
                   </div>
 
-                  <div
-                    style={{
-                      background: 'var(--om-surface-2)',
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      fontFamily: 'monospace',
-                      fontSize: '11.5px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      color: 'var(--om-fg)',
-                      overflowX: 'auto',
-                    }}
-                  >
-                    <span>
+                  <div className="routine-webhook-bar">
+                    <span className="routine-webhook-url">
                       POST {window.location.origin}/api/routines/{activeRoutine.id}/trigger
                     </span>
                     <button
@@ -820,118 +669,59 @@ export const RoutinesView: React.FC = () => {
                           'curl_cmd'
                         )
                       }
-                      style={{
-                        padding: '4px 8px',
-                        fontSize: '11px',
-                        borderRadius: '5px',
-                        border: '1px solid var(--om-border)',
-                        background: 'var(--om-surface)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        flexShrink: 0,
-                      }}
+                      className="routine-webhook-copy-btn"
                     >
                       {copiedId === 'curl_cmd' ? <Check size={12} color="var(--accent-green)" /> : <Copy size={12} />}
-                      {copiedId === 'curl_cmd' ? '已复制' : '复制 Curl 指令'}
+                      <span>{copiedId === 'curl_cmd' ? '已复制' : '复制 Curl 指令'}</span>
                     </button>
                   </div>
                 </div>
               </div>
 
               {/* 执行指令提示词 Prompt 卡片 */}
-              <div
-                style={{
-                  background: 'var(--om-surface)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '12px',
-                  padding: '16px',
-                  marginBottom: '24px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 600 }}>执行指令提示词 (Prompt 指引)</div>
+              <div className="routine-instructions-card">
+                <div className="routine-instructions-header">
+                  <div className="routine-instructions-title">执行指令提示词 (Prompt 指引)</div>
                   <button
                     type="button"
                     onClick={() => copyToClipboard(activeRoutine.instructions || '', 'prompt_copy')}
-                    style={{
-                      fontSize: '11px',
-                      border: 'none',
-                      background: 'transparent',
-                      color: 'var(--om-accent)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}
+                    className="routine-instructions-copy-btn"
                   >
-                    {copiedId === 'prompt_copy' ? <Check size={12} /> : <Copy size={12} />} 复制指令
+                    {copiedId === 'prompt_copy' ? <Check size={12} /> : <Copy size={12} />}
+                    <span>复制指令</span>
                   </button>
                 </div>
-                <pre
-                  style={{
-                    margin: 0,
-                    fontSize: '12.5px',
-                    color: 'var(--om-fg)',
-                    whiteSpace: 'pre-wrap',
-                    lineHeight: 1.6,
-                    background: 'var(--om-surface-2)',
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--om-border)',
-                  }}
-                >
+                <pre className="routine-instructions-body">
                   {activeRoutine.instructions || '（未设置指令）'}
                 </pre>
               </div>
 
               {/* 历史执行流水与工具调用链 (Runs & Execution Traces) */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--om-fg)' }}>
+              <div className="routine-runs-section">
+                <div className="routine-runs-header">
+                  <div className="routine-runs-title-group">
+                    <h3 className="routine-runs-heading">
                       执行流水与工具轨迹 (Execution Runs)
                     </h3>
-                    <span style={{ fontSize: '11px', color: 'var(--om-muted)' }}>({runs.length} 次记录)</span>
+                    <span className="routine-runs-count-badge">({runs.length} 次记录)</span>
                   </div>
 
                   <button
                     type="button"
                     onClick={() => loadRuns(activeRoutine.id)}
                     disabled={isRefreshingRuns}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '11.5px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--om-border)',
-                      background: 'var(--om-surface)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                    }}
+                    className="routine-runs-refresh-btn"
                   >
                     <RefreshCw size={12} className={isRefreshingRuns ? 'spin' : ''} /> 刷新流水
                   </button>
                 </div>
 
                 {runs.length === 0 ? (
-                  <div
-                    style={{
-                      textAlign: 'center',
-                      padding: '40px 16px',
-                      background: 'var(--om-surface)',
-                      borderRadius: '10px',
-                      border: '1px solid var(--om-border)',
-                      color: 'var(--om-muted)',
-                      fontSize: '12.5px',
-                    }}
-                  >
+                  <div className="routine-runs-empty">
                     暂无执行流水记录，可点击上方「立即运行」或等待定时调度触发。
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="routine-runs-list">
                     {runs.map((run) => {
                       const isExpanded = expandedRunIds.has(run.id);
                       const hasToolCalls = run.toolCalls && run.toolCalls.length > 0;
@@ -939,75 +729,36 @@ export const RoutinesView: React.FC = () => {
                       return (
                         <div
                           key={run.id}
-                          style={{
-                            background: 'var(--om-surface)',
-                            border: '1px solid var(--om-border)',
-                            borderRadius: '12px',
-                            padding: '16px',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-                          }}
+                          className="routine-run-card"
                         >
                           <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              flexWrap: 'wrap',
-                              gap: '12px',
-                              marginBottom: isExpanded ? '12px' : 0,
-                            }}
+                            className={`routine-run-summary-row ${isExpanded ? 'is-expanded' : ''}`}
                           >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div className="routine-run-main-info">
                               {run.status === 'success' ? (
-                                <CheckCircle size={17} style={{ color: 'var(--accent-green)', flexShrink: 0 }} />
+                                <CheckCircle size={17} className="routine-run-status-icon is-success" />
                               ) : run.status === 'running' ? (
-                                <Loader2 size={17} className="spin" style={{ color: 'var(--om-accent)', flexShrink: 0 }} />
+                                <Loader2 size={17} className="spin routine-run-status-icon is-running" />
                               ) : (
-                                <XCircle size={17} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
+                                <XCircle size={17} className="routine-run-status-icon is-failed" />
                               )}
 
                               <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+                                <div className="routine-run-summary-line">
                                   <span
                                     title={run.summary || run.error || ''}
-                                    style={{
-                                      fontSize: '13px',
-                                      fontWeight: 600,
-                                      color: 'var(--om-fg)',
-                                      display: '-webkit-box',
-                                      WebkitLineClamp: 2,
-                                      WebkitBoxOrient: 'vertical',
-                                      overflow: 'hidden',
-                                    }}
+                                    className="routine-run-title"
                                   >
                                     {run.status === 'running'
                                       ? '正在沙箱中执行巡检...'
                                       : run.summary || (run.status === 'success' ? '巡检完成' : run.error || '执行异常')}
                                   </span>
                                   {run.quiet && (
-                                    <span
-                                      style={{
-                                        fontSize: '10px',
-                                        padding: '1px 6px',
-                                        borderRadius: '4px',
-                                        background: 'rgba(16, 185, 129, 0.1)',
-                                        color: 'var(--accent-green)',
-                                      }}
-                                    >
+                                    <span className="routine-run-quiet-badge">
                                       静默无异常
                                     </span>
                                   )}
-                                  <span
-                                    style={{
-                                      fontSize: '10px',
-                                      padding: '1px 6px',
-                                      borderRadius: '4px',
-                                      background: 'var(--om-surface-2)',
-                                      color: 'var(--om-muted)',
-                                      flexShrink: 0,
-                                      whiteSpace: 'nowrap',
-                                    }}
-                                  >
+                                  <span className="routine-run-source-badge">
                                     {run.triggerSource === 'schedule'
                                       ? '⏰ 定时调度'
                                       : run.triggerSource === 'webhook'
@@ -1015,42 +766,32 @@ export const RoutinesView: React.FC = () => {
                                       : '👤 手动触发'}
                                   </span>
                                 </div>
-                                <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
-                                  {formatTime(run.startedAt)}
-                                  {run.durationMs && ` · 耗时 ${(run.durationMs / 1000).toFixed(1)} 秒`}
-                                  {hasToolCalls && ` · 调用了 ${run.toolCalls?.length} 个工具`}
+                                <div className="routine-run-meta-line">
+                                  <span>{formatTime(run.startedAt)}</span>
+                                  {run.durationMs && <span> · 耗时 {(run.durationMs / 1000).toFixed(1)} 秒</span>}
+                                  {hasToolCalls && <span> · 调用了 {run.toolCalls?.length} 个工具</span>}
                                 </div>
                               </div>
                             </div>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div className="routine-run-actions">
                               <button
                                 type="button"
                                 onClick={() => toggleRunExpand(run.id)}
-                                style={{
-                                  padding: '4px 8px',
-                                  fontSize: '11px',
-                                  borderRadius: '5px',
-                                  border: '1px solid var(--om-border)',
-                                  background: 'var(--om-surface-2)',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                }}
+                                className="routine-run-expand-btn"
                               >
                                 {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                                {isExpanded ? '收起详情' : '展开输出'}
+                                <span>{isExpanded ? '收起详情' : '展开输出'}</span>
                               </button>
                             </div>
                           </div>
 
                           {/* 展开的详情输出与工具调用链 */}
                           {isExpanded && (
-                            <div style={{ marginTop: '12px', borderTop: '1px solid var(--om-border)', paddingTop: '12px' }}>
+                            <div className="routine-run-details">
                               {/* 工具调用链 */}
                               {hasToolCalls && (
-                                <div style={{ marginBottom: '12px' }}>
+                                <div className="routine-run-trace-wrap">
                                   <ToolTrace
                                     tools={(run.toolCalls || []).map((tc: any) => ({
                                       tool: tc.tool,
@@ -1063,26 +804,12 @@ export const RoutinesView: React.FC = () => {
                               )}
 
                               {/* 最终结论输出 */}
-                              <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--om-muted)', marginBottom: '6px' }}>
+                              <div className="routine-run-output-title">
                                 产出报告与执行结论:
                               </div>
-                              <pre
-                                style={{
-                                  margin: 0,
-                                  background: 'var(--om-surface-2)',
-                                  border: '1px solid var(--om-border)',
-                                  borderRadius: '8px',
-                                  padding: '12px',
-                                  fontSize: '12px',
-                                  lineHeight: 1.6,
-                                  color: 'var(--om-fg)',
-                                  whiteSpace: 'pre-wrap',
-                                  maxHeight: '300px',
-                                  overflowY: 'auto',
-                                }}
-                              >
+                              <pre className="routine-run-output-pre">
                                 {run.status === 'running' ? (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--om-accent)', padding: '6px 0' }}>
+                                  <div className="routine-run-running-msg">
                                     <Loader2 size={14} className="spin" />
                                     <span>数字员工正在受控沙箱中执行命令与生成报告，请稍候...</span>
                                   </div>
@@ -1110,7 +837,7 @@ export const RoutinesView: React.FC = () => {
         title={editingRoutineId ? '编辑例行自动化任务' : '新建例行自动化任务'}
         icon={<Clock size={18} />}
         footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <div className="modal-actions-bar">
             <button type="button" className="btn-secondary" onClick={() => setIsModalOpen(false)}>
               取消
             </button>
@@ -1120,54 +847,27 @@ export const RoutinesView: React.FC = () => {
           </div>
         }
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="routine-modal-container">
           {/* Tab 导航切换 */}
-          <div style={{ display: 'flex', gap: '6px', borderBottom: '1px solid var(--om-border)', paddingBottom: '8px' }}>
+          <div className="routine-modal-tabs">
             <button
               type="button"
               onClick={() => setModalTab('basic')}
-              style={{
-                padding: '6px 12px',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '12px',
-                cursor: 'pointer',
-                fontWeight: modalTab === 'basic' ? 600 : 400,
-                background: modalTab === 'basic' ? 'var(--om-surface-2)' : 'transparent',
-                color: modalTab === 'basic' ? 'var(--om-accent)' : 'var(--om-muted)',
-              }}
+              className={`routine-modal-tab-btn ${modalTab === 'basic' ? 'is-active' : ''}`}
             >
               1. 核心与责任员工
             </button>
             <button
               type="button"
               onClick={() => setModalTab('schedule')}
-              style={{
-                padding: '6px 12px',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '12px',
-                cursor: 'pointer',
-                fontWeight: modalTab === 'schedule' ? 600 : 400,
-                background: modalTab === 'schedule' ? 'var(--om-surface-2)' : 'transparent',
-                color: modalTab === 'schedule' ? 'var(--om-accent)' : 'var(--om-muted)',
-              }}
+              className={`routine-modal-tab-btn ${modalTab === 'schedule' ? 'is-active' : ''}`}
             >
               2. 调度周期与预设
             </button>
             <button
               type="button"
               onClick={() => setModalTab('policies')}
-              style={{
-                padding: '6px 12px',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '12px',
-                cursor: 'pointer',
-                fontWeight: modalTab === 'policies' ? 600 : 400,
-                background: modalTab === 'policies' ? 'var(--om-surface-2)' : 'transparent',
-                color: modalTab === 'policies' ? 'var(--om-accent)' : 'var(--om-muted)',
-              }}
+              className={`routine-modal-tab-btn ${modalTab === 'policies' ? 'is-active' : ''}`}
             >
               3. 交付与防扰策略
             </button>
@@ -1175,9 +875,9 @@ export const RoutinesView: React.FC = () => {
 
           {/* Tab 1: 核心与责任员工 */}
           {modalTab === 'basic' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+            <div className="routine-modal-form-group">
+              <div className="form-group">
+                <label className="form-label">
                   任务名称 *
                 </label>
                 <input
@@ -1186,19 +886,17 @@ export const RoutinesView: React.FC = () => {
                   placeholder="例如：工作站资源与磁盘空间健康巡检"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  style={{ width: '100%' }}
                 />
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="form-group">
+                <label className="form-label">
                   指派执行数字员工 *
                 </label>
                 <select
                   className="form-control"
                   value={formAgentId}
                   onChange={(e) => setFormAgentId(e.target.value)}
-                  style={{ width: '100%' }}
                 >
                   {bots.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -1208,8 +906,8 @@ export const RoutinesView: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="form-group">
+                <label className="form-label">
                   任务执行指引提示词 (Prompt 指令) *
                 </label>
                 <textarea
@@ -1218,7 +916,6 @@ export const RoutinesView: React.FC = () => {
                   placeholder="请详细描述数字员工在沙箱内需调用的工具、巡检步骤、判断依据以及汇报格式..."
                   value={formPrompt}
                   onChange={(e) => setFormPrompt(e.target.value)}
-                  style={{ width: '100%', fontSize: '12.5px', lineHeight: 1.5 }}
                 />
               </div>
             </div>
@@ -1226,12 +923,12 @@ export const RoutinesView: React.FC = () => {
 
           {/* Tab 2: 调度周期与预设 */}
           {modalTab === 'schedule' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+            <div className="routine-modal-form-group">
+              <div className="form-group">
+                <label className="form-label">
                   常用业务预设 (一键填入)
                 </label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <div className="routine-preset-grid">
                   {SCHEDULE_PRESETS.map((p) => (
                     <button
                       key={p.id}
@@ -1240,63 +937,43 @@ export const RoutinesView: React.FC = () => {
                         setFormCron(p.cronExpr);
                         setFormScheduleKind(p.kind);
                       }}
-                      style={{
-                        padding: '5px 10px',
-                        borderRadius: '6px',
-                        border: formCron === p.cronExpr ? '1px solid var(--om-accent)' : '1px solid var(--om-border)',
-                        background: formCron === p.cronExpr ? 'rgba(0, 100, 212, 0.08)' : 'var(--om-surface-2)',
-                        color: formCron === p.cronExpr ? 'var(--om-accent)' : 'var(--om-fg)',
-                        fontSize: '11.5px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        gap: '2px',
-                      }}
+                      className={`routine-preset-btn ${formCron === p.cronExpr ? 'is-active' : ''}`}
                     >
-                      <span style={{ fontWeight: 600 }}>{p.label}</span>
-                      <span style={{ fontSize: '10px', color: 'var(--om-muted)' }}>{p.cronExpr}</span>
+                      <span className="routine-preset-label">{p.label}</span>
+                      <span className="routine-preset-cron">{p.cronExpr}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="form-group">
+                <label className="form-label">
                   调度表达式 (标准 5 段式 Cron / @every 间隔 / @at 单次)
                 </label>
                 <input
                   type="text"
-                  className="form-control"
+                  className="form-control font-mono"
                   placeholder="如: 0 9 * * 1-5 或 */15 * * * * 或 @every 15m"
                   value={formCron}
                   onChange={(e) => setFormCron(e.target.value)}
-                  style={{ width: '100%', fontFamily: 'monospace' }}
                 />
               </div>
 
               {/* 实时自然语言解析提示 */}
-              <div
-                style={{
-                  background: 'var(--om-surface-2)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '8px',
-                  padding: '10px 14px',
-                }}
-              >
-                <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--om-muted)', marginBottom: '4px' }}>
+              <div className="routine-cron-feedback-box">
+                <div className="routine-cron-feedback-title">
                   智能中文识别:
                 </div>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--om-accent)' }}>
+                <div className="routine-cron-feedback-zh">
                   📅 {formatCronZh(formCron)}
                 </div>
 
                 {previewRuns.length > 0 && (
-                  <div style={{ marginTop: '8px', borderTop: '1px solid var(--om-border)', paddingTop: '6px' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginBottom: '4px' }}>接下来 3 次运行预估:</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <div className="routine-cron-preview-runs">
+                    <div className="routine-cron-preview-heading">接下来 3 次运行预估:</div>
+                    <div className="routine-cron-preview-items">
                       {previewRuns.map((r, i) => (
-                        <div key={i} style={{ fontSize: '11px', color: 'var(--om-fg)' }}>
+                        <div key={i} className="routine-cron-preview-item">
                           • {r}
                         </div>
                       ))}
@@ -1309,16 +986,15 @@ export const RoutinesView: React.FC = () => {
 
           {/* Tab 3: 交付与防扰策略 */}
           {modalTab === 'policies' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+            <div className="routine-modal-form-group">
+              <div className="form-group">
+                <label className="form-label">
                   结果通报与交付渠道
                 </label>
                 <select
                   className="form-control"
                   value={formDeliverTo}
                   onChange={(e) => setFormDeliverTo(e.target.value as DeliverTarget)}
-                  style={{ width: '100%' }}
                 >
                   <option value="feed">团队动态流 (Feed) - 推荐，便于全员协同了解进展</option>
                   <option value="silent">完全静默 (Silent) - 仅写日志与审计，不打扰动态流</option>
@@ -1327,43 +1003,41 @@ export const RoutinesView: React.FC = () => {
                 </select>
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="form-group">
+                <label className="form-label">
                   并发防重叠控制
                 </label>
                 <select
                   className="form-control"
                   value={formOverlap}
                   onChange={(e) => setFormOverlap(e.target.value as OverlapPolicy)}
-                  style={{ width: '100%' }}
                 >
                   <option value="skip">跳过本次 (Skip) - 若上次任务尚未完成，丢弃本次调度触发</option>
                   <option value="queue">排队等待 (Queue) - 排入队列顺序等待执行</option>
                 </select>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="form-group-checkbox">
                 <input
                   type="checkbox"
                   id="deleteAfterRun"
                   checked={formDeleteAfterRun}
                   onChange={(e) => setFormDeleteAfterRun(e.target.checked)}
                 />
-                <label htmlFor="deleteAfterRun" style={{ fontSize: '12px', cursor: 'pointer' }}>
+                <label htmlFor="deleteAfterRun" className="checkbox-label">
                   单次定时完成后自动归档暂停 (适用于 @at 单次任务)
                 </label>
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="form-group">
+                <label className="form-label">
                   超时保护限制 (秒)
                 </label>
                 <input
                   type="number"
-                  className="form-control"
+                  className="form-control w-32"
                   value={formTimeoutSeconds}
                   onChange={(e) => setFormTimeoutSeconds(Number(e.target.value))}
-                  style={{ width: '120px' }}
                 />
               </div>
             </div>

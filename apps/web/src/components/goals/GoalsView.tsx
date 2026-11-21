@@ -522,24 +522,23 @@ export const GoalsView: React.FC = () => {
   };
 
   return (
-    <section className="view-stage">
+    <section className="view-stage goals-stage" aria-label="长周期目标推进">
       {/* 顶部主标题栏 */}
-      <div className="view-header" style={{ marginBottom: '16px' }}>
+      <div className="view-header goal-header-wrap">
         <div>
-          <div className="view-heading" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Target size={22} style={{ color: 'var(--om-accent, #3b82f6)' }} />
-            长周期目标 (Goals)
+          <div className="view-heading goal-heading">
+            <Target size={22} className="goal-heading-icon" />
+            <span>长周期目标</span>
           </div>
           <div className="view-sub">
-            跨会话持久化目标管理体系：支持多领域生活与工作规划、多阶段里程碑拆解、定时 Check-in 自主推演与计划自适应修订。
+            跨会话持久化目标管理体系：支持多领域规划、阶段里程碑拆解、定时 Check-in 自主推演与自适应修订。
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div className="view-header-actions">
           <button
             type="button"
             className="btn-primary"
             onClick={() => handleOpenCreateModal()}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
             <Plus size={16} /> 规划新目标
           </button>
@@ -556,52 +555,40 @@ export const GoalsView: React.FC = () => {
 
       {/* 待审批修订提案横幅 (AI Proposals) */}
       {pendingProposals.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+        <div className="goal-proposals-container">
           {pendingProposals.map((goal) => {
             const p = goal.proposal!;
             const pSteps = p.proposedSteps || [];
             return (
-              <div
-                key={goal.id}
-                style={{
-                  background: 'rgba(59, 130, 246, 0.08)',
-                  border: '1px solid rgba(59, 130, 246, 0.35)',
-                  borderRadius: '14px',
-                  padding: '16px 20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--om-accent, #3b82f6)' }}>
+              <div key={goal.id} className="goal-proposal-banner">
+                <div className="goal-proposal-title-row">
+                  <div className="goal-proposal-title">
                     <Sparkles size={16} />
                     <span>{botName} 建议调整目标【{goal.title}】的推进计划</span>
                   </div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+                  <span className="goal-proposal-status-badge">
                     等待人类确认决策
                   </span>
                 </div>
-                <div style={{ fontSize: '13.5px', color: 'var(--text-main)', lineHeight: 1.6 }}>
+                <div className="goal-proposal-reason">
                   <strong>调整原因：</strong>{p.reason}
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                <div className="goal-proposal-steps">
                   <strong>修订后的后续步骤：</strong>
-                  <ol style={{ margin: '6px 0 0 20px', padding: 0 }}>
+                  <ol className="goal-proposal-step-list">
                     {pSteps.map((st, i) => (
-                      <li key={i} style={{ marginBottom: '3px' }}>
+                      <li key={i}>
                         {typeof st === 'string' ? st : st.title}
                       </li>
                     ))}
                   </ol>
                 </div>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                <div className="goal-proposal-actions">
                   <button
                     type="button"
                     className="btn-primary"
                     onClick={() => handleResolveProposal(goal.id, true)}
                     disabled={Boolean(resolvingProposalId)}
-                    style={{ fontSize: '13px', padding: '6px 16px' }}
                   >
                     采纳修订方案并更新步骤
                   </button>
@@ -610,7 +597,6 @@ export const GoalsView: React.FC = () => {
                     className="btn-secondary"
                     onClick={() => handleResolveProposal(goal.id, false)}
                     disabled={Boolean(resolvingProposalId)}
-                    style={{ fontSize: '13px', padding: '6px 16px' }}
                   >
                     保留原计划 (驳回)
                   </button>
@@ -622,23 +608,9 @@ export const GoalsView: React.FC = () => {
       )}
 
       {/* 搜索与状态过滤器栏 */}
-      <div
-        className="goal-filter-bar"
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          background: 'var(--om-surface)',
-          padding: '12px 16px',
-          borderRadius: '12px',
-          border: '1px solid var(--om-border)',
-          marginBottom: '16px'
-        }}
-      >
+      <div className="goal-filter-toolbar">
         {/* 状态分段选择器 */}
-        <div className="goal-status-tabs" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div className="goal-status-tabs">
           {[
             { id: 'all', label: '全部' },
             { id: 'active', label: '推进中' },
@@ -650,11 +622,10 @@ export const GoalsView: React.FC = () => {
               type="button"
               onClick={() => setSelectedStatus(tab.id as any)}
               aria-pressed={selectedStatus === tab.id}
-              className={selectedStatus === tab.id ? 'btn-primary' : 'btn-secondary'}
-              style={{ fontSize: '13px', padding: '5px 14px', borderRadius: '8px' }}
+              className={`goal-status-tab-btn ${selectedStatus === tab.id ? 'btn-primary' : 'btn-secondary'}`}
             >
               {tab.label}
-              <span style={{ marginLeft: '6px', opacity: 0.75, fontSize: '12px' }}>
+              <span className="goal-status-tab-count">
                 {tab.id === 'all'
                   ? goals.length
                   : goals.filter((g) => g.status === tab.id).length}
@@ -671,24 +642,15 @@ export const GoalsView: React.FC = () => {
         )}
 
         {/* 搜索框 */}
-        <div className="goal-search" style={{ position: 'relative', flex: 1, minWidth: 'min(220px, 100%)', maxWidth: '320px' }}>
-          <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+        <div className="goal-search-wrapper">
+          <Search size={14} className="goal-search-icon" aria-hidden="true" />
           <input
             type="text"
             aria-label="搜索目标或步骤"
             placeholder="搜索目标或步骤..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '6px 10px 6px 30px',
-              fontSize: '13px',
-              borderRadius: '8px',
-              border: '1px solid var(--om-border)',
-              background: 'var(--om-bg)',
-              color: 'var(--text-main)',
-              outline: 'none'
-            }}
+            className="goal-search-input"
           />
           {searchQuery && (
             <button
@@ -704,34 +666,11 @@ export const GoalsView: React.FC = () => {
       </div>
 
       {/* 领域分类胶囊滚动栏 (Category Chips) */}
-      <div
-        className="goal-cat-row"
-        style={{
-          display: 'flex',
-          gap: '8px',
-          overflowX: 'auto',
-          paddingBottom: '8px',
-          marginBottom: '16px'
-        }}
-      >
+      <div className="goal-cat-row">
         <button
           type="button"
           onClick={() => setSelectedCategory('')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 14px',
-            borderRadius: '20px',
-            fontSize: '12.5px',
-            fontWeight: 500,
-            whiteSpace: 'nowrap',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            border: selectedCategory === '' ? '1px solid var(--om-accent)' : '1px solid var(--om-border)',
-            background: selectedCategory === '' ? 'rgba(59, 130, 246, 0.12)' : 'var(--om-surface)',
-            color: selectedCategory === '' ? 'var(--om-accent)' : 'var(--text-muted)'
-          }}
+          className={`goal-cat-chip ${selectedCategory === '' ? 'active' : ''}`}
         >
           全部领域 ({goals.length})
         </button>
@@ -743,65 +682,31 @@ export const GoalsView: React.FC = () => {
               key={c.id}
               type="button"
               onClick={() => setSelectedCategory(isActive ? '' : c.id)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                borderRadius: '20px',
-                fontSize: '12.5px',
-                fontWeight: 500,
-                whiteSpace: 'nowrap',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                border: isActive ? '1px solid var(--om-accent)' : '1px solid var(--om-border)',
-                background: isActive ? 'rgba(59, 130, 246, 0.12)' : 'var(--om-surface)',
-                color: isActive ? 'var(--om-accent)' : 'var(--text-muted)'
-              }}
+              className={`goal-cat-chip ${isActive ? 'active' : ''}`}
             >
               {c.icon({ size: 14 })}
               <span>{c.label}</span>
-              {count > 0 && (
-                <span
-                  style={{
-                    fontSize: '11px',
-                    padding: '1px 6px',
-                    borderRadius: '10px',
-                    background: 'var(--om-bg)',
-                    opacity: 0.8
-                  }}
-                >
-                  {count}
-                </span>
-              )}
+              {count > 0 && <span className="goal-cat-chip-count">{count}</span>}
             </button>
           );
         })}
       </div>
 
       {/* 目标卡片列表 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="goals-list-container">
         {!loaded && goals.length === 0 ? (
           <div className="goals-loading" aria-label="加载中">
             {[0, 1, 2].map((i) => <div key={i} className="goal-skeleton" />)}
           </div>
         ) : filteredGoals.length === 0 ? (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '60px 20px',
-              background: 'var(--om-surface)',
-              borderRadius: '14px',
-              border: '1px solid var(--om-border)'
-            }}
-          >
-            <div style={{ fontSize: '42px', marginBottom: '12px' }}>🎯</div>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-main)' }}>
+          <div className="goal-empty-panel">
+            <div className="goal-empty-icon">🎯</div>
+            <div className="goal-empty-title">
               {searchQuery || selectedCategory || selectedStatus !== 'all'
                 ? '未找到符合条件的目标'
                 : '暂无跨周期规划目标'}
             </div>
-            <div style={{ fontSize: '13.5px', marginTop: '6px', color: 'var(--text-muted)', maxWidth: '520px', margin: '8px auto 0' }}>
+            <div className="goal-empty-desc">
               {hasActiveFilter
                 ? '换个筛选条件，或清空后查看所有目标。'
                 : `点击下方快捷领域模板或上方“规划新目标”，让 ${botName} 协助你将长期目标分解为清晰的阶段。`}
@@ -820,39 +725,23 @@ export const GoalsView: React.FC = () => {
 
             {/* 快速起步推荐网格 */}
             {!hasActiveFilter && (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                gap: '12px',
-                marginTop: '24px',
-                textAlign: 'left'
-              }}
-            >
-              {CATEGORIES.slice(0, 6).map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => handleOpenCreateModal(c.id)}
-                  style={{
-                    padding: '14px',
-                    background: 'var(--om-bg)',
-                    borderRadius: '10px',
-                    border: '1px solid var(--om-border)',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                  className="hover-card"
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
-                    {c.icon({ size: 16 })}
-                    {c.label}
+              <div className="goal-presets-grid">
+                {CATEGORIES.slice(0, 6).map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => handleOpenCreateModal(c.id)}
+                    className="goal-preset-card hover-card"
+                  >
+                    <div className="goal-preset-title">
+                      {c.icon({ size: 16 })}
+                      <span>{c.label}</span>
+                    </div>
+                    <div className="goal-preset-desc">
+                      {c.description}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                    {c.description}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
             )}
           </div>
         ) : (
@@ -870,34 +759,16 @@ export const GoalsView: React.FC = () => {
             return (
               <div
                 key={goal.id}
-                className="goal-card"
-                style={{
-                  background: 'var(--om-surface)',
-                  borderRadius: '14px',
-                  border: isDone ? '1px solid var(--om-border)' : '1px solid var(--om-border)',
-                  padding: '18px 20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  opacity: isDone ? 0.85 : 1
-                }}
+                className={`goal-card ${isDone ? 'is-done' : ''}`}
               >
                 {/* 卡片头部：快速勾选完成、分类标签、截止日期、提醒周期、快捷操作 */}
-                <div className="goal-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                  <div className="goal-card-badges" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div className="goal-card-head">
+                  <div className="goal-card-badges">
                     {/* 一键勾选达成状态 */}
                     <button
                       type="button"
                       onClick={() => handleToggleGoalDone(goal)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        padding: 0,
-                        color: isDone ? '#10b981' : 'var(--text-dim)',
-                        display: 'flex',
-                        alignItems: 'center'
-                      }}
+                      className={`goal-check-btn ${isDone ? 'is-checked' : ''}`}
                       title={isDone ? '标记为未完成' : '标记为已达成'}
                       aria-label={isDone ? '重新开启目标' : '标记目标已达成'}
                       disabled={Boolean(statusGoalId)}
@@ -906,60 +777,23 @@ export const GoalsView: React.FC = () => {
                     </button>
 
                     {/* 领域分类徽章 */}
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        padding: '3px 10px',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                        border: '1px solid var(--om-border)',
-                        background: 'var(--om-bg)'
-                      }}
-                    >
+                    <span className="goal-badge-item">
                       {catDef.icon({ size: 12 })}
-                      {catDef.label}
+                      <span>{catDef.label}</span>
                     </span>
 
                     {/* 截止日期徽章 */}
                     {goal.due && (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          padding: '3px 10px',
-                          borderRadius: '12px',
-                          fontSize: '12px',
-                          fontWeight: dueInfo.isOverdue ? 600 : 400,
-                          background: dueInfo.isOverdue ? 'rgba(239, 68, 68, 0.12)' : 'var(--om-bg)',
-                          color: dueInfo.isOverdue ? '#ef4444' : 'var(--text-dim)',
-                          border: dueInfo.isOverdue ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid var(--om-border)'
-                        }}
-                      >
+                      <span className={`goal-badge-item goal-due-badge ${dueInfo.isOverdue ? 'is-overdue' : ''}`}>
                         <CalendarDays size={12} />
-                        {dueInfo.label}
+                        <span>{dueInfo.label}</span>
                       </span>
                     )}
 
                     {/* 巡检周期徽章 */}
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        padding: '3px 10px',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        background: 'var(--om-bg)',
-                        color: 'var(--text-dim)',
-                        border: '1px solid var(--om-border)'
-                      }}
-                    >
+                    <span className="goal-badge-item">
                       <Bell size={12} />
-                      {goal.cadence ? describeCadence(goal.cadence) : '单次手动'}
+                      <span>{goal.cadence ? describeCadence(goal.cadence) : '单次手动'}</span>
                     </span>
 
                     {/* 状态徽章 */}
@@ -971,18 +805,17 @@ export const GoalsView: React.FC = () => {
                   </div>
 
                   {/* 右侧操作按钮组 */}
-                  <div className="goal-card-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className="goal-card-actions">
                     {/* 立即推演 Check-in */}
                     {!isDone && (
                       <button
                         type="button"
-                        className="btn-primary"
+                        className="btn-primary goal-advance-btn"
                         disabled={isAdvancing}
                         onClick={() => handleAdvance(goal.id)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', padding: '5px 12px' }}
                       >
                         {isAdvancing ? <Loader2 size={13} className="spin-icon" /> : <Play size={13} />}
-                        {isAdvancing ? '推演中...' : '立即推进'}
+                        <span>{isAdvancing ? '推演中...' : '立即推进'}</span>
                       </button>
                     )}
 
@@ -990,11 +823,10 @@ export const GoalsView: React.FC = () => {
                     {!isDone && (
                       <button
                         type="button"
-                        className="btn-secondary"
+                        className="btn-secondary goal-action-icon-btn"
                         onClick={() => handleTogglePause(goal)}
                         disabled={Boolean(statusGoalId)}
                         aria-label={isPaused ? '恢复目标' : '暂停目标'}
-                        style={{ padding: '5px 8px' }}
                         title={isPaused ? '恢复巡检' : '暂停巡检'}
                       >
                         {isPaused ? <Play size={14} /> : <Pause size={14} />}
@@ -1004,10 +836,9 @@ export const GoalsView: React.FC = () => {
                     {/* 在对话中商讨 */}
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="btn-secondary goal-action-icon-btn"
                       onClick={() => handleDiscussInChat(goal)}
                       aria-label="在对话中商讨此目标"
-                      style={{ padding: '5px 8px' }}
                       title="在对话中与数字员工商讨此目标"
                     >
                       <MessageCircle size={14} />
@@ -1016,10 +847,9 @@ export const GoalsView: React.FC = () => {
                     {/* 编辑 */}
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="btn-secondary goal-action-icon-btn"
                       onClick={() => handleOpenEditModal(goal)}
                       aria-label="编辑目标信息"
-                      style={{ padding: '5px 8px' }}
                       title="编辑目标信息"
                     >
                       <Edit3 size={14} />
@@ -1028,10 +858,9 @@ export const GoalsView: React.FC = () => {
                     {/* 删除 */}
                     <button
                       type="button"
-                      className="btn-secondary"
+                      className="btn-secondary goal-action-icon-btn is-danger"
                       onClick={() => handleDeleteGoal(goal)}
                       aria-label="删除目标"
-                      style={{ padding: '5px 8px', color: '#ef4444' }}
                       title="删除目标"
                     >
                       <Trash2 size={14} />
@@ -1040,48 +869,36 @@ export const GoalsView: React.FC = () => {
                 </div>
 
                 {/* 目标标题与背景说明 */}
-                <div>
-                  <div
-                    style={{
-                      fontSize: '16px',
-                      fontWeight: 600,
-                      color: isDone ? 'var(--text-muted)' : 'var(--text-main)',
-                      textDecoration: isDone ? 'line-through' : 'none'
-                    }}
-                  >
+                <div className="goal-info-section">
+                  <div className={`goal-card-title ${isDone ? 'is-done' : ''}`}>
                     {goal.title}
                   </div>
                   {goal.description && (
-                    <div style={{ fontSize: '13px', color: 'var(--text-dim)', marginTop: '4px', lineHeight: 1.5 }}>
+                    <div className="goal-card-desc">
                       {goal.description}
                     </div>
                   )}
                   {activeStep && !isDone && (
-                    <div style={{ fontSize: '13px', color: 'var(--om-accent)', marginTop: '6px', fontWeight: 500 }}>
+                    <div className="goal-active-step">
                       👉 当前阶段: [{activeStep.idx || 1}] {activeStep.title}
                     </div>
                   )}
                 </div>
 
                 {/* 进度条 */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '5px' }}>
+                <div className="goal-progress-section">
+                  <div className="goal-progress-meta">
                     <span>
                       里程碑进度: {steps.filter((s) => s.status === 'done' || s.status === 'skipped').length} / {steps.length} 步骤
                     </span>
-                    <span style={{ fontWeight: 600, color: progress === 100 ? '#10b981' : 'var(--text-main)' }}>
+                    <span className={`goal-progress-percent ${progress === 100 ? 'is-complete' : ''}`}>
                       {progress}%
                     </span>
                   </div>
-                  <div style={{ width: '100%', height: '6px', background: 'var(--om-bg)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div className="goal-progress-track">
                     <div
-                      style={{
-                        width: `${progress}%`,
-                        height: '100%',
-                        background: progress === 100 ? '#10b981' : 'var(--om-accent)',
-                        borderRadius: '3px',
-                        transition: 'width 0.3s ease'
-                      }}
+                      className={`goal-progress-bar ${progress === 100 ? 'is-complete' : ''}`}
+                      style={{ width: `${progress}%` }}
                     />
                   </div>
                 </div>
@@ -1102,17 +919,9 @@ export const GoalsView: React.FC = () => {
                 )}
 
                 {/* 步骤清单折叠切换 */}
-                <div style={{ borderTop: '1px solid var(--om-border)', paddingTop: '10px' }}>
+                <div className="goal-steps-section">
                   <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontWeight: 500,
-                      color: 'var(--text-muted)'
-                    }}
+                    className="goal-steps-toggle-btn"
                     onClick={() => toggleExpand(goal.id)}
                     role="button"
                     tabIndex={0}
@@ -1124,7 +933,7 @@ export const GoalsView: React.FC = () => {
                       }
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div className="goal-steps-toggle-label">
                       <ListTodo size={15} />
                       <span>执行步骤清单 ({steps.length})</span>
                     </div>
@@ -1133,7 +942,7 @@ export const GoalsView: React.FC = () => {
 
                   {/* 展开的步骤列表 */}
                   {isExpanded && (
-                    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="goal-steps-list">
                       {steps.map((step) => {
                         const isStepDone = step.status === 'done';
                         const isStepBlocked = step.status === 'blocked';
@@ -1142,15 +951,7 @@ export const GoalsView: React.FC = () => {
                         return (
                           <div
                             key={step.id}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '10px',
-                              padding: '8px 12px',
-                              background: 'var(--om-bg)',
-                              borderRadius: '8px',
-                              border: isStepBlocked ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--om-border)'
-                            }}
+                            className={`goal-step-item ${isStepBlocked ? 'is-blocked' : ''}`}
                           >
                             {/* 步骤完成勾选按钮 */}
                             <button
@@ -1158,14 +959,7 @@ export const GoalsView: React.FC = () => {
                               onClick={() => handleToggleStepStatus(goal, step)}
                               disabled={Boolean(updatingStepId)}
                               aria-label={isStepDone ? `将步骤 ${step.title} 设为待办` : `将步骤 ${step.title} 标记完成`}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                padding: 0,
-                                marginTop: '2px',
-                                color: isStepDone ? '#10b981' : isStepBlocked ? '#f59e0b' : 'var(--text-dim)'
-                              }}
+                              className={`goal-step-checkbox ${isStepDone ? 'is-done' : isStepBlocked ? 'is-blocked' : ''}`}
                               title="点击标记完成/待办"
                             >
                               {isStepDone ? (
@@ -1180,34 +974,27 @@ export const GoalsView: React.FC = () => {
                             </button>
 
                             {/* 步骤文本 */}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: '13.5px',
-                                  fontWeight: 500,
-                                  color: isStepDone ? 'var(--text-dim)' : 'var(--text-main)',
-                                  textDecoration: isStepDone ? 'line-through' : 'none'
-                                }}
-                              >
+                            <div className="goal-step-content">
+                              <div className={`goal-step-title ${isStepDone ? 'is-done' : ''}`}>
                                 {step.idx || 1}. {step.title}
                               </div>
                               {step.description && step.description !== step.title && (
-                                <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                                <div className="goal-step-desc">
                                   {step.description}
                                 </div>
                               )}
                               {step.note && (
-                                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', background: 'var(--om-surface)', padding: '4px 8px', borderRadius: '4px' }}>
+                                <div className="goal-step-note">
                                   📝 {step.note}
                                 </div>
                               )}
                               {isStepBlocked && step.blockedReason && (
-                                <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '4px', fontWeight: 500 }}>
-                                  ⚠️ 阻碍卡点: {step.blockedReason}
-                                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                                <div className="goal-step-blocked-box">
+                                  <span>⚠️ 阻碍卡点: {step.blockedReason}</span>
+                                  <div className="goal-step-blocked-actions">
                                     <button
                                       type="button"
-                                      className="btn-secondary"
+                                      className="btn-secondary goal-btn-xs"
                                       onClick={() =>
                                         setGuidanceModal({
                                           isOpen: true,
@@ -1217,13 +1004,12 @@ export const GoalsView: React.FC = () => {
                                           guidance: ''
                                         })
                                       }
-                                      style={{ fontSize: '11px', padding: '3px 8px' }}
                                     >
                                       补充指导重试
                                     </button>
                                     <button
                                       type="button"
-                                      className="btn-secondary"
+                                      className="btn-secondary goal-btn-xs"
                                       onClick={() =>
                                         setRollbackModal({
                                           isOpen: true,
@@ -1232,7 +1018,6 @@ export const GoalsView: React.FC = () => {
                                           steps: goal.steps || []
                                         })
                                       }
-                                      style={{ fontSize: '11px', padding: '3px 8px' }}
                                     >
                                       退回此步骤返工
                                     </button>
@@ -1245,7 +1030,7 @@ export const GoalsView: React.FC = () => {
                       })}
 
                       {/* 行内追加新步骤 */}
-                      <div className="goal-step-add" style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                      <div className="goal-step-add">
                         <input
                           type="text"
                           placeholder="输入后续步骤，回车快速添加..."
@@ -1258,24 +1043,14 @@ export const GoalsView: React.FC = () => {
                               handleAddInlineStep(goal.id);
                             }
                           }}
-                          style={{
-                            flex: 1,
-                            padding: '6px 12px',
-                            fontSize: '13px',
-                            borderRadius: '8px',
-                            border: '1px solid var(--om-border)',
-                            background: 'var(--om-bg)',
-                            color: 'var(--text-main)',
-                            outline: 'none'
-                          }}
+                          className="goal-step-add-input"
                         />
                         <button
                           type="button"
-                          className="btn-secondary"
+                          className="btn-secondary goal-step-add-btn"
                           onClick={() => handleAddInlineStep(goal.id)}
                           disabled={addingStepGoalId === goal.id || !(inlineStepInputs[goal.id] || '').trim()}
                           aria-label="添加执行步骤"
-                          style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
                         >
                           <Plus size={14} /> {addingStepGoalId === goal.id ? '添加中…' : '添加'}
                         </button>
@@ -1286,25 +1061,11 @@ export const GoalsView: React.FC = () => {
 
                 {/* 进展备忘与历史巡检笔记 (Notes) */}
                 {goal.notes && (
-                  <div style={{ borderTop: '1px solid var(--om-border)', paddingTop: '8px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-dim)', marginBottom: '4px' }}>
+                  <div className="goal-notes-section">
+                    <div className="goal-notes-title">
                       📋 {botName} 进展备忘与巡检记录：
                     </div>
-                    <pre
-                      style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        fontFamily: 'inherit',
-                        color: 'var(--text-muted)',
-                        background: 'var(--om-bg)',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        whiteSpace: 'pre-wrap',
-                        lineHeight: 1.5,
-                        maxHeight: '120px',
-                        overflowY: 'auto'
-                      }}
-                    >
+                    <pre className="goal-notes-pre">
                       {goal.notes}
                     </pre>
                   </div>
@@ -1321,10 +1082,10 @@ export const GoalsView: React.FC = () => {
         onClose={() => setIsCreateModalOpen(false)}
         title="规划新长周期目标"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
-              你想要达成什么目标？ <span style={{ color: '#ef4444' }}>*</span>
+        <div className="goal-modal-body">
+          <div className="goal-form-field">
+            <label className="goal-form-label">
+              你想要达成什么目标？ <span className="goal-form-required">*</span>
             </label>
             <input
               type="text"
@@ -1339,25 +1100,16 @@ export const GoalsView: React.FC = () => {
               }}
               aria-label="目标名称"
               maxLength={80}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: '14px',
-                borderRadius: '8px',
-                border: '1px solid var(--om-border)',
-                background: 'var(--om-bg)',
-                color: 'var(--text-main)',
-                outline: 'none'
-              }}
+              className="goal-form-input"
             />
           </div>
 
           {/* 领域分类选择 */}
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-field">
+            <label className="goal-form-label">
               所属领域分类
             </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            <div className="goal-cat-picker">
               {CATEGORIES.map((c) => {
                 const isSelected = newCategory === c.id;
                 return (
@@ -1373,21 +1125,10 @@ export const GoalsView: React.FC = () => {
                         setNewStepsText(p.steps.join('\n'));
                       }
                     }}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      padding: '5px 12px',
-                      borderRadius: '16px',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      border: isSelected ? '1px solid var(--om-accent)' : '1px solid var(--om-border)',
-                      background: isSelected ? 'rgba(59, 130, 246, 0.15)' : 'var(--om-bg)',
-                      color: isSelected ? 'var(--om-accent)' : 'var(--text-muted)'
-                    }}
+                    className={`goal-cat-btn ${isSelected ? 'is-active' : ''}`}
                   >
                     {c.icon({ size: 12 })}
-                    {c.label}
+                    <span>{c.label}</span>
                   </button>
                 );
               })}
@@ -1395,44 +1136,26 @@ export const GoalsView: React.FC = () => {
           </div>
 
           {/* 期望截止日期与巡检提醒周期 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-row-2col">
+            <div className="goal-form-field">
+              <label className="goal-form-label">
                 期望截止日期 (选填)
               </label>
               <input
                 type="date"
                 value={newDue}
                 onChange={(e) => setNewDue(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--om-border)',
-                  background: 'var(--om-bg)',
-                  color: 'var(--text-main)',
-                  outline: 'none'
-                }}
+                className="goal-form-input"
               />
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+            <div className="goal-form-field">
+              <label className="goal-form-label">
                 提醒与巡检周期
               </label>
               <select
                 value={newCadence}
                 onChange={(e) => setNewCadence(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--om-border)',
-                  background: 'var(--om-bg)',
-                  color: 'var(--text-main)',
-                  outline: 'none'
-                }}
+                className="goal-form-select"
               >
                 <option value="daily 09:00">每天 09:00</option>
                 <option value="weekdays 09:30">每个工作日 09:30</option>
@@ -1444,8 +1167,8 @@ export const GoalsView: React.FC = () => {
           </div>
 
           {/* 目标背景说明与约束 */}
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-field">
+            <label className="goal-form-label">
               背景要求与重要性说明 (选填)
             </label>
             <textarea
@@ -1453,24 +1176,14 @@ export const GoalsView: React.FC = () => {
               placeholder="说明为什么这个目标重要、客观资源约束或核心成功标准..."
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: '13px',
-                borderRadius: '8px',
-                border: '1px solid var(--om-border)',
-                background: 'var(--om-bg)',
-                color: 'var(--text-main)',
-                outline: 'none',
-                resize: 'none'
-              }}
+              className="goal-form-textarea"
             />
           </div>
 
           {/* 执行步骤拆解 */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <label style={{ fontSize: '13px', fontWeight: 600 }}>
+          <div className="goal-form-field">
+            <div className="goal-form-header-inline">
+              <label className="goal-form-label">
                 执行步骤 (每行一个步骤，留空将由数字员工协助拆解)
               </label>
               {CATEGORY_PRESETS[newCategory] && (
@@ -1480,7 +1193,7 @@ export const GoalsView: React.FC = () => {
                     const p = CATEGORY_PRESETS[newCategory];
                     setNewStepsText(p.steps.join('\n'));
                   }}
-                  style={{ fontSize: '12px', color: 'var(--om-accent)', background: 'none', border: 'none', cursor: 'pointer' }}
+                  className="goal-btn-preset-link"
                 >
                   ⚡ 填入{categoryOf(newCategory).label}推荐步骤
                 </button>
@@ -1491,30 +1204,19 @@ export const GoalsView: React.FC = () => {
               placeholder="步骤 1: 需求梳理与环境准备&#10;步骤 2: 方案落地与代码实现&#10;步骤 3: 自动化测试回归&#10;步骤 4: 交付复盘与沉淀"
               value={newStepsText}
               onChange={(e) => setNewStepsText(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: '13px',
-                borderRadius: '8px',
-                border: '1px solid var(--om-border)',
-                background: 'var(--om-bg)',
-                color: 'var(--text-main)',
-                outline: 'none',
-                resize: 'none'
-              }}
+              className="goal-form-textarea"
             />
           </div>
 
           {createError && <div className="goal-form-error" role="alert">{createError}</div>}
 
           {/* 底部按钮组 */}
-          <div className="goal-modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
+          <div className="goal-modal-actions">
             <button
               type="button"
-              className="btn-secondary"
+              className="btn-secondary goal-plan-agent-btn"
               onClick={handleAskAgentPlan}
               disabled={!newTitle.trim()}
-              style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
             >
               <Sparkles size={14} /> 让 {botName} 在对话中细化
             </button>
@@ -1536,9 +1238,9 @@ export const GoalsView: React.FC = () => {
         onClose={closeEditModal}
         title="编辑目标详情"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+        <div className="goal-modal-body">
+          <div className="goal-form-field">
+            <label className="goal-form-label">
               目标名称
             </label>
             <input
@@ -1553,87 +1255,49 @@ export const GoalsView: React.FC = () => {
               }}
               aria-label="目标名称"
               maxLength={80}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: '14px',
-                borderRadius: '8px',
-                border: '1px solid var(--om-border)',
-                background: 'var(--om-bg)',
-                color: 'var(--text-main)',
-                outline: 'none'
-              }}
+              className="goal-form-input"
             />
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-field">
+            <label className="goal-form-label">
               领域分类
             </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            <div className="goal-cat-picker">
               {CATEGORIES.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   onClick={() => setEditCategory(c.id)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    padding: '5px 12px',
-                    borderRadius: '16px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    border: editCategory === c.id ? '1px solid var(--om-accent)' : '1px solid var(--om-border)',
-                    background: editCategory === c.id ? 'rgba(59, 130, 246, 0.15)' : 'var(--om-bg)',
-                    color: editCategory === c.id ? 'var(--om-accent)' : 'var(--text-muted)'
-                  }}
+                  className={`goal-cat-btn ${editCategory === c.id ? 'is-active' : ''}`}
                 >
                   {c.icon({ size: 12 })}
-                  {c.label}
+                  <span>{c.label}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-row-2col">
+            <div className="goal-form-field">
+              <label className="goal-form-label">
                 期望截止日期
               </label>
               <input
                 type="date"
                 value={editDue}
                 onChange={(e) => setEditDue(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--om-border)',
-                  background: 'var(--om-bg)',
-                  color: 'var(--text-main)',
-                  outline: 'none'
-                }}
+                className="goal-form-input"
               />
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+            <div className="goal-form-field">
+              <label className="goal-form-label">
                 提醒与巡检周期
               </label>
               <select
                 value={editCadence}
                 onChange={(e) => setEditCadence(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--om-border)',
-                  background: 'var(--om-bg)',
-                  color: 'var(--text-main)',
-                  outline: 'none'
-                }}
+                className="goal-form-select"
               >
                 <option value="daily 09:00">每天 09:00</option>
                 <option value="weekdays 09:30">每个工作日 09:30</option>
@@ -1644,31 +1308,21 @@ export const GoalsView: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-field">
+            <label className="goal-form-label">
               背景描述
             </label>
             <textarea
               rows={3}
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: '13px',
-                borderRadius: '8px',
-                border: '1px solid var(--om-border)',
-                background: 'var(--om-bg)',
-                color: 'var(--text-main)',
-                outline: 'none',
-                resize: 'none'
-              }}
+              className="goal-form-textarea"
             />
           </div>
 
           {editError && <div className="goal-form-error" role="alert">{editError}</div>}
 
-          <div className="goal-modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+          <div className="goal-modal-actions">
             <button type="button" className="btn-secondary" onClick={closeEditModal} disabled={savingEdit}>
               取消
             </button>
@@ -1685,12 +1339,12 @@ export const GoalsView: React.FC = () => {
         onClose={() => setGuidanceModal((prev) => ({ ...prev, isOpen: false }))}
         title="补充指引重试推进"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>
+        <div className="goal-modal-body">
+          <div className="goal-guidance-step-header">
             当前卡点步骤: <strong>{guidanceModal.stepTitle}</strong>
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+          <div className="goal-form-field">
+            <label className="goal-form-label">
               向数字员工补充排障指令或业务输入:
             </label>
             <textarea
@@ -1698,20 +1352,10 @@ export const GoalsView: React.FC = () => {
               placeholder="例如：请尝试使用 mock 数据绕过外部网络依赖，或者补充指定配置路径..."
               value={guidanceModal.guidance}
               onChange={(e) => setGuidanceModal((prev) => ({ ...prev, guidance: e.target.value }))}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                fontSize: '13px',
-                borderRadius: '8px',
-                border: '1px solid var(--om-border)',
-                background: 'var(--om-bg)',
-                color: 'var(--text-main)',
-                outline: 'none',
-                resize: 'none'
-              }}
+              className="goal-form-textarea"
             />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <div className="goal-modal-actions">
             <button
               type="button"
               className="btn-secondary"
@@ -1732,31 +1376,24 @@ export const GoalsView: React.FC = () => {
         onClose={() => setRollbackModal((prev) => ({ ...prev, isOpen: false }))}
         title="退回到指定步骤返工"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+        <div className="goal-modal-body">
+          <div className="goal-rollback-notice">
             选择要退回的目标步骤，该步骤及其后续的所有步骤都将重置为待办 (Pending) 状态：
           </div>
-          <select
-            value={rollbackModal.targetStepId}
-            onChange={(e) => setRollbackModal((prev) => ({ ...prev, targetStepId: e.target.value }))}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: '13px',
-              borderRadius: '8px',
-              border: '1px solid var(--om-border)',
-              background: 'var(--om-bg)',
-              color: 'var(--text-main)',
-              outline: 'none'
-            }}
-          >
-            {rollbackModal.steps.map((st) => (
-              <option key={st.id} value={st.id}>
-                步骤 {st.idx || 1}: {st.title} [{st.status}]
-              </option>
-            ))}
-          </select>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+          <div className="goal-form-field">
+            <select
+              value={rollbackModal.targetStepId}
+              onChange={(e) => setRollbackModal((prev) => ({ ...prev, targetStepId: e.target.value }))}
+              className="goal-form-select"
+            >
+              {rollbackModal.steps.map((st) => (
+                <option key={st.id} value={st.id}>
+                  步骤 {st.idx || 1}: {st.title} [{st.status}]
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="goal-modal-actions">
             <button
               type="button"
               className="btn-secondary"
