@@ -34,6 +34,7 @@ tmp/
 apps/web/uploads/*
 !apps/web/uploads/.gitkeep
 apps/gateway/data/*
+apps/gateway/apps/
 
 # Graphify knowledge graph outputs (generated, not source)
 graphify-out/

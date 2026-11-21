@@ -5,6 +5,7 @@ import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
 import { ClawLogo } from '../../utils/icons';
+import { ArrowDown, Clock } from 'lucide-react';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
@@ -30,11 +31,65 @@ export const ChatView: React.FC = () => {
   const [streamingReasoning, setStreamingReasoning] = useState('');
   const [streamingTools, setStreamingTools] = useState<any[]>([]);
 
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const isInitialSwitchRef = useRef(false);
+  const isAtBottomRef = useRef(true);
+  const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
+  const [hasNewUnseen, setHasNewUnseen] = useState(false);
 
-  const scrollToBottom = () => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // 历史消息渐进式分页：初始展示最近 35 条，避免长会话一次性全量挂载引发卡顿
+  const PAGE_SIZE = 35;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const pendingScrollAdjustRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
+
+  const scrollToBottom = (behavior: 'auto' | 'smooth' = 'smooth') => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    if (behavior === 'auto') {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
   };
+
+  const handleScroll = () => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const atBottom = distanceToBottom <= 100;
+    isAtBottomRef.current = atBottom;
+    if (atBottom) {
+      setShowScrollBottomBtn(false);
+      setHasNewUnseen(false);
+    } else {
+      setShowScrollBottomBtn(true);
+    }
+  };
+
+  const handleLoadMoreHistory = () => {
+    const container = chatContainerRef.current;
+    if (container) {
+      pendingScrollAdjustRef.current = {
+        prevScrollHeight: container.scrollHeight,
+        prevScrollTop: container.scrollTop,
+      };
+    }
+    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, messages.length));
+  };
+
+  // 展开更早历史消息时校准滚动高度，确保视觉位置不产生抖动或跳跃
+  useEffect(() => {
+    if (pendingScrollAdjustRef.current && chatContainerRef.current) {
+      const { prevScrollHeight, prevScrollTop } = pendingScrollAdjustRef.current;
+      const currentScrollHeight = chatContainerRef.current.scrollHeight;
+      chatContainerRef.current.scrollTop = currentScrollHeight - prevScrollHeight + prevScrollTop;
+      pendingScrollAdjustRef.current = null;
+    }
+  }, [visibleCount]);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -54,23 +109,45 @@ export const ChatView: React.FC = () => {
 
     if (!activeSessionId) {
       setMessages([]);
+      setVisibleCount(PAGE_SIZE);
       setLoadingSession(false);
       return;
     }
     let cancelled = false;
+    isInitialSwitchRef.current = true;
     setMessages([]);
+    setVisibleCount(PAGE_SIZE);
     setLoadingSession(true);
+    setShowScrollBottomBtn(false);
+    setHasNewUnseen(false);
+
     api
       .getMessages(activeSessionId)
       .then((res) => {
         if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
-        setMessages(Array.isArray(res) ? res : []);
-        setTimeout(scrollToBottom, 50);
+        const msgList = Array.isArray(res) ? res : [];
+        setMessages(msgList);
+        setVisibleCount(PAGE_SIZE);
+
+        // 切换会话核心优化：采用 instant / auto 定位到底部最新内容，消除从顶部第1条一路 smooth 滚到底部的视觉眩晕
+        requestAnimationFrame(() => {
+          if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
+          scrollToBottom('auto');
+          setTimeout(() => {
+            if (!cancelled && activeSessionIdRef.current === activeSessionId) {
+              scrollToBottom('auto');
+              isInitialSwitchRef.current = false;
+              isAtBottomRef.current = true;
+              setShowScrollBottomBtn(false);
+            }
+          }, 50);
+        });
       })
       .catch((err) => {
         if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
         console.error('Failed to load messages:', err);
         showToast(`会话记录载入失败：${err.message}`, 'error');
+        isInitialSwitchRef.current = false;
       })
       .finally(() => {
         if (!cancelled && activeSessionIdRef.current === activeSessionId) {
@@ -82,9 +159,31 @@ export const ChatView: React.FC = () => {
     };
   }, [activeSessionId, showToast]);
 
+  // 智能吸底：仅当用户处于底部附近时才跟随自动吸底，若用户正在上方阅读历史则不打扰用户
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, streamingContent, streamingReasoning]);
+    if (isInitialSwitchRef.current) return;
+
+    if (isAtBottomRef.current) {
+      if (isStreaming) {
+        // 流式高频输出时使用 auto 定位，避免高频 smooth 动画导致卡顿与抖动
+        scrollToBottom('auto');
+      } else {
+        scrollToBottom('smooth');
+      }
+    } else {
+      setShowScrollBottomBtn(true);
+      if (isStreaming) {
+        setHasNewUnseen(true);
+      }
+    }
+  }, [messages, streamingContent, streamingReasoning, isStreaming]);
+
+  const handleScrollToBottomClick = () => {
+    scrollToBottom('smooth');
+    isAtBottomRef.current = true;
+    setShowScrollBottomBtn(false);
+    setHasNewUnseen(false);
+  };
 
   const handleSendMessage = async (text: string, attachments: MessageAttachment[] = []) => {
     // 第一条消息不该先让用户「去新建会话」：没有会话就静默开一个
@@ -115,6 +214,10 @@ export const ChatView: React.FC = () => {
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingTools([]);
+    isAtBottomRef.current = true;
+    setShowScrollBottomBtn(false);
+    setHasNewUnseen(false);
+    setTimeout(() => scrollToBottom('smooth'), 20);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -322,6 +425,9 @@ export const ChatView: React.FC = () => {
     abortRef.current?.abort();
   };
 
+  const displayedMessages =
+    messages.length > visibleCount ? messages.slice(messages.length - visibleCount) : messages;
+
   return (
     <div className="chat-stage-wrapper">
       <section className="chat-container">
@@ -337,7 +443,7 @@ export const ChatView: React.FC = () => {
           />
         </div>
 
-        <div className="chat-history">
+        <div className="chat-history" ref={chatContainerRef} onScroll={handleScroll}>
           {loadingSession ? (
             <div className="chat-loading" role="status" aria-live="polite">
               <span className="chat-loading-dot" />
@@ -383,14 +489,24 @@ export const ChatView: React.FC = () => {
               </div>
             </div>
           ) : (
-            messages.map((msg, idx) => (
-              <MessageBubble
-                key={msg.id || `${msg.role}-${idx}`}
-                message={msg}
-                bot={activeBot}
-                sessionId={activeSessionId || undefined}
-              />
-            ))
+            <>
+              {messages.length > visibleCount && (
+                <div className="chat-history-load-more">
+                  <button type="button" onClick={handleLoadMoreHistory}>
+                    <Clock size={12} />
+                    查看更早的历史记录（还有 {messages.length - visibleCount} 条）
+                  </button>
+                </div>
+              )}
+              {displayedMessages.map((msg, idx) => (
+                <MessageBubble
+                  key={msg.id || `${msg.role}-${idx}`}
+                  message={msg}
+                  bot={activeBot}
+                  sessionId={activeSessionId || undefined}
+                />
+              ))}
+            </>
           )}
 
           {/* Real-time Streaming Placeholder */}
@@ -410,6 +526,19 @@ export const ChatView: React.FC = () => {
 
           <div ref={chatBottomRef} />
         </div>
+
+        {showScrollBottomBtn && (
+          <button
+            type="button"
+            className="scroll-to-bottom-btn"
+            onClick={handleScrollToBottomClick}
+            title="回到底部最新消息"
+          >
+            <ArrowDown size={14} />
+            <span>{hasNewUnseen ? '有新消息' : '回到底部'}</span>
+            {hasNewUnseen && <span className="scroll-new-badge" />}
+          </button>
+        )}
 
         <ChatComposer
           onSendMessage={handleSendMessage}
