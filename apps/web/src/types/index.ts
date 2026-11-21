@@ -49,6 +49,8 @@ export interface Message {
     params?: any;
     result?: any;
     status?: string;
+    durationMs?: number;
+    ok?: boolean;
   }>;
   attachments?: MessageAttachment[];
   timestamp?: number;
@@ -132,14 +134,18 @@ export interface Artifact {
 }
 
 export interface AuditLog {
-  id: string;
-  timestamp: number;
-  eventType: string;
+  id?: string;
+  ts?: string;
+  timestamp?: number;
+  event?: string;
+  eventType?: string;
   botId?: string;
   sessionId?: string;
+  tool?: string;
   target?: string;
   decision?: string;
-  details?: string;
+  operator?: string;
+  details?: any;
 }
 
 export interface Grant {
@@ -180,32 +186,100 @@ export interface ModelsConfig {
 
 export interface FeedPost {
   id: string;
-  date: string;
   title: string;
-  content: string;
+  body?: string;
+  content?: string;
   area?: string;
+  prompt?: string;
+  ts?: string;
+  date?: string;
   tags?: string[];
+  sessionId?: string;
+  routineId?: string;
+  routineName?: string;
   reactions?: Record<string, number>;
 }
 
 export interface FeedActivity {
   id: string;
-  timestamp: number;
-  type: string;
-  botName: string;
-  summary: string;
+  ts?: string;
+  timestamp?: number;
+  kind?: 'pass' | 'goal' | 'artifact' | 'approval' | 'routine' | 'chat' | string;
+  type?: string;
+  title?: string;
+  text?: string;
+  summary?: string;
+  botName?: string;
   sessionId?: string;
+  sessionTitle?: string;
+  path?: string;
+  quiet?: boolean;
 }
 
 export interface SandboxStatus {
   available: boolean;
   engine: string;
+  version?: string;
+  blocksNetwork?: boolean;
+  workspaceDir?: string;
+  reason?: string;
   details?: string;
 }
 
 export interface McpServer {
-  id: string;
   name: string;
-  status: string;
-  toolsCount?: number;
+  toolCount?: number;
+  tools?: string[];
+}
+
+export type SkillCategory = 'devops' | 'productivity' | 'research' | 'integration' | 'utility' | 'custom';
+export type SkillSource = 'builtin' | 'custom' | 'imported' | 'learned';
+export type SkillChannel = 'api' | 'cli' | 'web' | 'browser' | 'gui' | 'mixed';
+
+export interface SkillRequirements {
+  bins?: string[];
+  env?: string[];
+  os?: string[];
+}
+
+export interface SkillReadiness {
+  ready: boolean;
+  missingBins?: string[];
+  missingEnv?: string[];
+  details?: string;
+}
+
+export interface SkillFileEntry {
+  path: string;
+  size: number;
+  executable?: boolean;
+  isText: boolean;
+  updatedAt?: number;
+}
+
+export interface Skill {
+  name: string;
+  description: string;
+  category: SkillCategory;
+  channel?: SkillChannel;
+  tags?: string[];
+  source: SkillSource;
+  enabled: boolean;
+  everyBot?: boolean;
+  assignedBots: string[];
+  content: string;
+  body: string;
+  dirPath?: string;
+  files?: SkillFileEntry[];
+  filesCount?: number;
+  scriptsCount?: number;
+  requires?: SkillRequirements;
+  readiness?: SkillReadiness;
+  metadata?: Record<string, unknown>;
+  allowedTools?: string[];
+  license?: string;
+  compatibility?: string;
+  warnings: string[];
+  updatedAt?: number;
+  createdAt?: number;
 }

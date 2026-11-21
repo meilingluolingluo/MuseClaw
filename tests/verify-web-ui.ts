@@ -49,7 +49,7 @@ async function runWebUiTests() {
     assert.ok(cssText.includes('--bg-primary: var(--om-bg)'));
     assert.ok(cssText.includes('.approval-card-hazard'));
     assert.ok(cssText.includes('.ladder-rung-card'));
-    console.log('  -> [PASS] styles.css 成功返回 nanoMuse 经典设计系统与双主题/审批卡片样式');
+    console.log('  -> [PASS] styles.css 成功返回完整设计系统与双主题/审批卡片样式');
 
     // =========================================================================
     // 3. 前端 ES Modules 脚本与图标库 (GET /app.js & /icons.js)

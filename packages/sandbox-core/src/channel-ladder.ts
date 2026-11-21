@@ -1,6 +1,6 @@
 /**
  * @museclaw/sandbox-core - Channel Ladder (技能成本阶梯)
- * 借鉴 nanoMuse 的 Channel Ladder 规范：
+ * 执行通道阶梯分级规范：
  * API (最低成本/快) -> CLI (本地脚本) -> Web (轻量页面) -> Browser (无头浏览器) -> GUI (屏幕投屏/视觉点击)
  * 优先使用耗资最少、最稳定的接口；严禁无理由越级直接拉起昂贵的 Chromium 浏览器或视觉投屏大模型。
  */

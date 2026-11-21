@@ -16,6 +16,8 @@ import type {
   FeedActivity,
   SandboxStatus,
   McpServer,
+  Skill,
+  SkillFileEntry,
   User
 } from '../types';
 
@@ -146,11 +148,12 @@ export const api = {
   // Feed
   getFeed: () => request<{ posts: FeedPost[]; settings?: any }>('/api/feed'),
   triggerFeedWrite: (instructions?: string) =>
-    request<FeedPost>('/api/feed', { method: 'POST', body: JSON.stringify({ instructions }) }),
+    request<any>('/api/feed', { method: 'POST', body: JSON.stringify({ instructions }) }),
   getFeedSettings: () => request<{ daily: boolean; time: string; instructions: string }>('/api/feed/settings'),
   saveFeedSettings: (data: { daily: boolean; time: string; instructions: string }) =>
     request<{ success: boolean }>('/api/feed/settings', { method: 'POST', body: JSON.stringify(data) }),
   getFeedActivities: () => request<FeedActivity[]>('/api/feed/activity'),
+  deleteFeedPost: (id: string) => request<{ ok: boolean }>(`/api/feed/posts/${id}`, { method: 'DELETE' }),
 
   // Sandbox & MCP
   getSandboxStatus: async (): Promise<SandboxStatus> => {
@@ -167,18 +170,86 @@ export const api = {
       ladder: res?.channelLadder || res?.channel_ladder,
     } as SandboxStatus;
   },
-  getMcpServers: async (): Promise<McpServer[]> => {
+  getMcpServers: async (): Promise<{ servers: McpServer[]; totalTools: number }> => {
     const res = await request<any>('/api/mcp/servers');
     // 服务端返回 { servers, totalTools }
-    return Array.isArray(res) ? res : Array.isArray(res?.servers) ? res.servers : [];
+    const servers = Array.isArray(res) ? res : Array.isArray(res?.servers) ? res.servers : [];
+    return { servers, totalTools: typeof res?.totalTools === 'number' ? res.totalTools : 0 };
   },
+
+  // Skills Ecosystem (Agent Skills 规程与技能管理)
+  getSkills: (params?: { botId?: string; q?: string; category?: string; source?: string; readiness?: string; channel?: string; tag?: string; enabled?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (params?.botId) sp.set('botId', params.botId);
+    if (params?.q) sp.set('q', params.q);
+    if (params?.category && params.category !== 'all') sp.set('category', params.category);
+    if (params?.source && params.source !== 'all') sp.set('source', params.source);
+    if (params?.readiness && params.readiness !== 'all') sp.set('readiness', params.readiness);
+    if (params?.channel && params.channel !== 'all') sp.set('channel', params.channel);
+    if (params?.tag && params.tag !== 'all') sp.set('tag', params.tag);
+    if (params?.enabled !== undefined) sp.set('enabled', String(params.enabled));
+    const queryStr = sp.toString();
+    return request<{ skills: Skill[]; total: number }>(`/api/skills${queryStr ? `?${queryStr}` : ''}`);
+  },
+  getSkill: (name: string) => request<{ skill: Skill }>(`/api/skills/${encodeURIComponent(name)}`),
+  createSkill: (data: Partial<Skill>) =>
+    request<{ success: boolean; skill: Skill }>('/api/skills', { method: 'POST', body: JSON.stringify(data) }),
+  importSkill: (text: string) =>
+    request<{ success: boolean; skill: Skill }>('/api/skills/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  updateSkill: (name: string, data: Partial<Skill>) =>
+    request<{ success: boolean; skill: Skill }>(`/api/skills/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSkill: (name: string) =>
+    request<{ success: boolean; name: string }>(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  patchSkill: (name: string, patch: { enabled?: boolean; everyBot?: boolean; assignedBots?: string[] }) =>
+    request<{ success: boolean; skill: Skill }>(`/api/skills/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  testSkill: (name: string, input?: string, botId?: string) =>
+    request<{ success: boolean; skill: string; input: string; output: string; toolCalls?: any[] }>(`/api/skills/${encodeURIComponent(name)}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ input, botId }),
+    }),
+  exportSkillUrl: (name: string) => `/api/skills/${encodeURIComponent(name)}/export`,
+  exportSkillZipUrl: (name: string) => `/api/skills/${encodeURIComponent(name)}/export-zip`,
+  uploadSkillZip: async (file: File) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+    return request<{ success: boolean; skill: Skill }>('/api/skills/upload-zip', {
+      method: 'POST',
+      body: JSON.stringify({ base64 }),
+    });
+  },
+  getSkillFiles: (name: string) => request<{ files: SkillFileEntry[] }>(`/api/skills/${encodeURIComponent(name)}/files`),
+  getSkillFileContent: (name: string, filePath: string) =>
+    request<{ success: boolean; content?: string; isText?: boolean; size?: number; error?: string }>(
+      `/api/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(filePath)}`
+    ),
+  saveSkillFile: (name: string, filePath: string, content: string) =>
+    request<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file`, {
+      method: 'POST',
+      body: JSON.stringify({ path: filePath, content }),
+    }),
+  deleteSkillFile: (name: string, filePath: string) =>
+    request<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(filePath)}`, {
+      method: 'DELETE',
+    }),
 
   // Security & Audit
   getPolicy: () => request<any>('/api/policy'),
   savePolicy: (data: any) => request<{ success: boolean }>('/api/policy', { method: 'POST', body: JSON.stringify(data) }),
   getGrants: () => request<Grant[]>('/api/grants'),
   revokeGrant: (id: string) => request<{ success: boolean }>(`/api/grants/${id}`, { method: 'DELETE' }),
-  getAuditLogs: () => request<AuditLog[]>('/api/audit'),
+  getAuditLogs: (sessionId?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (sessionId) params.set('sessionId', sessionId);
+    if (limit) params.set('limit', String(limit));
+    const qs = params.toString();
+    return request<AuditLog[]>(`/api/audit${qs ? `?${qs}` : ''}`);
+  },
 
   // Artifacts
   getArtifacts: () => request<Artifact[]>('/api/artifacts'),

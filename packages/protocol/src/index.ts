@@ -3,8 +3,70 @@
  * Core event and data contracts for MuseClaw.
  */
 
-// 0. Channel Ladder (技能执行通道阶梯)
+// 0. Channel Ladder (兼容性保留)
 export type ExecutionChannel = 'api' | 'cli' | 'web' | 'browser' | 'gui' | 'mixed';
+
+// 0.1 Skill Ecosystem Models (Agent Skills 标准化规程与技能包体系)
+export type SkillCategory = 'devops' | 'productivity' | 'research' | 'integration' | 'utility' | 'custom';
+export type SkillSource = 'builtin' | 'custom' | 'imported' | 'learned';
+
+export interface SkillRequirements {
+  bins?: string[];
+  env?: string[];
+  os?: string[];
+}
+
+export interface SkillReadiness {
+  ready: boolean;
+  missingBins?: string[];
+  missingEnv?: string[];
+  details?: string;
+}
+
+export interface SkillMetadata {
+  author?: string;
+  version?: string;
+  category?: SkillCategory;
+  tags?: string[];
+  license?: string;
+  homepage?: string;
+  [key: string]: unknown;
+}
+
+export interface SkillFileEntry {
+  path: string;
+  size: number;
+  executable?: boolean;
+  isText: boolean;
+  updatedAt?: number;
+}
+
+export interface SkillDefinition {
+  name: string;
+  description: string;
+  category: SkillCategory;
+  channel?: ExecutionChannel;
+  tags?: string[];
+  source: SkillSource;
+  enabled: boolean;
+  everyBot?: boolean;
+  assignedBots: string[];
+  content: string;
+  body: string;
+  dirPath?: string;
+  files?: SkillFileEntry[];
+  filesCount?: number;
+  scriptsCount?: number;
+  requires?: SkillRequirements;
+  readiness?: SkillReadiness;
+  metadata?: SkillMetadata;
+  allowedTools?: string[];
+  license?: string;
+  compatibility?: string;
+  warnings: string[];
+  updatedAt?: number;
+  createdAt?: number;
+}
 
 export interface ChannelLadderStep {
   toolName: string;
@@ -57,6 +119,17 @@ export interface Session {
     tool_call_id?: string;
     /** 用户上传的附件，历史回放时用于还原图片与文件 */
     attachments?: Array<{ name?: string; type?: string; url: string; size?: number }>;
+    /** 工具执行轨迹：刷新/回放时仍能看到调用过程 */
+    toolCalls?: Array<{
+      tool: string;
+      params?: unknown;
+      result?: unknown;
+      status?: string;
+      durationMs?: number;
+      ok?: boolean;
+    }>;
+    /** 模型思考过程（若开启 reasoning） */
+    reasoning?: string;
   }>;
 }
 

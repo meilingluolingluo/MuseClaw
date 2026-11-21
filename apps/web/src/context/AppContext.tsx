@@ -36,6 +36,8 @@ interface AppContextType {
   setIsAuthModalOpen: (open: boolean) => void;
   isBotModalOpen: boolean;
   setIsBotModalOpen: (open: boolean) => void;
+  isAuditDrawerOpen: boolean;
+  setIsAuditDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   toasts: ToastMessage[];
   showToast: (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
   dismissToast: (id: string) => void;
@@ -67,10 +69,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const onPopState = () => {
       const path = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
+      if (path === 'audit') {
+        setIsAuditDrawerOpen(true);
+        setTabState('chat');
+        return;
+      }
+      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
       setTabState((valid.includes(path as TabType) ? path : 'chat') as TabType);
     };
     window.addEventListener('popstate', onPopState);
+
+    // 如果初始从 /audit 进入，自动展开对话并拉起审计抽屉
+    const initialPath = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
+    if (initialPath === 'audit') {
+      setIsAuditDrawerOpen(true);
+      setTabState('chat');
+    }
+
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
@@ -130,11 +145,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
-  // Modals
+  // Modals & Panels
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
   const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isBotModalOpen, setIsBotModalOpen] = useState(false);
+  const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
 
   // Taint & Security
   const [isTainted, setIsTainted] = useState(false);
@@ -343,6 +359,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsAuthModalOpen,
         isBotModalOpen,
         setIsBotModalOpen,
+        isAuditDrawerOpen,
+        setIsAuditDrawerOpen,
         toasts,
         showToast,
         dismissToast,

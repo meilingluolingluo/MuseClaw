@@ -34,6 +34,9 @@ export const TopBar: React.FC = () => {
     setIsBotModalOpen,
     cycleApprovalMode,
     tab,
+    setTab,
+    isAuditDrawerOpen,
+    setIsAuditDrawerOpen,
   } = useApp();
 
   const [isMobile, setIsMobile] = useState(false);
@@ -55,7 +58,7 @@ export const TopBar: React.FC = () => {
     goals: { title: '长周期目标 (Goals)', icon: <Target size={16} style={{ color: 'var(--om-accent)' }} /> },
     routines: { title: '定时任务 (Routines)', icon: <Clock size={16} style={{ color: 'var(--om-accent)' }} /> },
     memory: { title: '受控长期记忆 (Memory)', icon: <Brain size={16} style={{ color: 'var(--om-accent)' }} /> },
-    skills: { title: '微沙箱与 MCP (Skills)', icon: <Boxes size={16} style={{ color: 'var(--om-accent)' }} /> },
+    skills: { title: '技能规程库 (Skills)', icon: <Boxes size={16} style={{ color: 'var(--om-accent)' }} /> },
     audit: { title: '安全策略与合规审计', icon: <ShieldCheck size={16} style={{ color: 'var(--om-accent)' }} /> },
     artifacts: { title: '交付工件 (Artifacts)', icon: <Package size={16} style={{ color: 'var(--om-accent)' }} /> },
   };
@@ -169,6 +172,21 @@ export const TopBar: React.FC = () => {
           <span>{(activeBot?.approvalMode || 'ASK').toUpperCase()} 门禁</span>
           <ChevronDown size={13} />
         </div>
+
+        {/* 审计模式切换胶囊 */}
+        <button
+          className={`audit-toggle-capsule ${isAuditDrawerOpen ? 'active' : ''}`}
+          type="button"
+          onClick={() => {
+            if (tab !== 'chat') setTab('chat');
+            setIsAuditDrawerOpen((prev) => !prev);
+          }}
+          title={isAuditDrawerOpen ? '收起安全策略与审计抽屉' : '展开安全策略与审计抽屉'}
+        >
+          <ShieldCheck size={14} className="audit-capsule-icon" />
+          <span className="audit-capsule-text">审计模式</span>
+          {isTainted && <span className="audit-alert-dot" title="当前会话存在敏感数据或操作标记" />}
+        </button>
       </div>
     </header>
   );

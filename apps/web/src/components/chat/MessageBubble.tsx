@@ -2,14 +2,18 @@ import React, { useState } from 'react';
 import type { Message, Bot } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { renderMarkdown } from '../../utils/markdown';
-import { ChevronDown, ChevronRight, ShieldAlert, Check, X, Terminal, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, ShieldAlert, Check, X, FileText } from 'lucide-react';
+import { ToolTrace } from './ToolTrace';
 import { api } from '../../services/api';
+import { useApp } from '../../context/AppContext';
 
 interface MessageBubbleProps {
   message: Message;
   bot: Bot | null;
   sessionId?: string;
   onApprovalResolved?: (approvalId: string, approved: boolean) => void;
+  /** 流式占位气泡：工具调用默认展开 */
+  live?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -17,7 +21,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   bot,
   sessionId,
   onApprovalResolved,
+  live,
 }) => {
+  const { setIsAuditDrawerOpen } = useApp();
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string | null>(null);
 
@@ -86,46 +92,36 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
 
-        {/* Tool Calls Display */}
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <div className="tool-calls-container" style={{ marginBottom: '10px' }}>
-            {message.toolCalls.map((tc, idx) => (
-              <div
-                key={idx}
-                className="activity-card"
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  background: 'var(--om-surface)',
-                  border: '1px solid var(--om-border)',
-                  marginBottom: '6px',
-                  fontSize: '12px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
-                    <Terminal size={14} /> 工具调用: {tc.tool}
-                  </span>
-                  <span className="pill-badge pill-blue" style={{ fontSize: '10px' }}>
-                    {tc.status || '执行完成'}
-                  </span>
-                </div>
-                {tc.params && (
-                  <pre style={{ margin: '4px 0', fontSize: '11px', color: 'var(--text-dim)', overflowX: 'auto' }}>
-                    {JSON.stringify(tc.params, null, 2)}
-                  </pre>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 工具执行过程（实时与历史共用，对标 nanoMuse ToolChip / OpenMausBot ToolActivity） */}
+        {(() => {
+          const tools = message.toolCalls || (message as any).tools;
+          if (!tools || tools.length === 0) return null;
+          return <ToolTrace tools={tools} live={live} />;
+        })()}
 
         {/* Human Gate Sentinel Approval Prompt */}
         {message.approvalRequest && (
           <div className="approval-card-hazard" style={{ marginBottom: '12px' }}>
-            <div className="approval-card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <ShieldAlert size={16} />
-              <span>⚠️ Sentinel 门禁动作审批拦截</span>
+            <div className="approval-card-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <ShieldAlert size={16} />
+                <span>⚠️ Sentinel 门禁动作审批拦截</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAuditDrawerOpen(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '11px',
+                  color: 'var(--om-accent)',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                }}
+                title="打开右侧审计抽屉查看完整策略判定"
+              >
+                查看审计详情 →
+              </button>
             </div>
             <div className="approval-card-desc" style={{ margin: '6px 0', fontSize: '12px' }}>
               {message.approvalRequest.description}
@@ -192,7 +188,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         ) : (
           <div
-            className="assistant-text"
+            className="assistant-text markdown-body"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
           />
         )}

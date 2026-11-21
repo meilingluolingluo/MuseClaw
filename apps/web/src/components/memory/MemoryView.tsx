@@ -114,7 +114,7 @@ export const MemoryView: React.FC = () => {
           </div>
           {content ? (
             <div
-              className="memory-markdown-body"
+              className="memory-markdown-body markdown-body"
               style={{ fontSize: '13px', lineHeight: 1.6 }}
               dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
             />

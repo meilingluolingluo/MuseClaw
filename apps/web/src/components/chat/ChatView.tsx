@@ -2,12 +2,22 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MessageBubble } from './MessageBubble';
 import { ChatComposer } from './ChatComposer';
+import { AuditDrawer } from '../audit/AuditDrawer';
 import { ClawLogo } from '../../utils/icons';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
 export const ChatView: React.FC = () => {
-  const { activeSessionId, activeBot, showToast, setTainted, createNewSession, loadSessions } = useApp();
+  const {
+    activeSessionId,
+    activeBot,
+    showToast,
+    setTainted,
+    createNewSession,
+    loadSessions,
+    isAuditDrawerOpen,
+    setIsAuditDrawerOpen,
+  } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -146,12 +156,28 @@ export const ChatView: React.FC = () => {
               toolsAccumulator.push({
                 tool: event.toolName,
                 params: event.input,
-                status: '调用中...',
+                status: 'running',
               });
               setStreamingTools([...toolsAccumulator]);
             } else if (event.type === 'tool:call_end') {
-              const last = toolsAccumulator.find((t) => t.tool === event.toolName);
-              if (last) last.status = `完成 (${event.durationMs || 0}ms)`;
+              // 同名工具可能连续调用，更新最后一条仍在运行的记录
+              const running = [...toolsAccumulator]
+                .reverse()
+                .find((t) => t.tool === event.toolName && t.status === 'running');
+              if (running) {
+                const rejected = String(event.output || '').includes('拒绝');
+                let isError = rejected;
+                if (typeof event.output === 'object' && event.output !== null) {
+                  const outObj = event.output as any;
+                  if (outObj.error || (outObj.exitCode !== undefined && outObj.exitCode !== 0)) {
+                    isError = true;
+                  }
+                }
+                running.status = isError ? (rejected ? 'rejected' : 'failed') : 'done';
+                running.ok = !isError;
+                running.durationMs = event.durationMs || 0;
+                running.result = event.output;
+              }
               setStreamingTools([...toolsAccumulator]);
             } else if (event.type === 'sentinel:taint_updated') {
               setTainted(event.isTainted, event.reason);
@@ -236,69 +262,79 @@ export const ChatView: React.FC = () => {
   };
 
   return (
-    <section className="chat-container">
-      <div className="chat-history">
-        {loadingSession ? (
-          <div className="chat-loading" role="status" aria-live="polite">
-            <span className="chat-loading-dot" />
-            正在载入会话记录…
-          </div>
-        ) : messages.length === 0 && !isStreaming ? (
-          <div style={{ textAlign: 'center', color: 'var(--text-dim)', margin: 'auto', padding: '40px' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '56px',
-                height: '56px',
-                borderRadius: '18px',
-                background: 'var(--om-surface)',
-                border: '1px solid var(--om-border)',
-                boxShadow: '0 4px 14px color-mix(in srgb, var(--om-accent) 12%, transparent)',
-                marginBottom: '16px',
-              }}
-            >
-              <ClawLogo size={28} color="var(--om-accent)" />
+    <div className="chat-stage-wrapper">
+      <section className="chat-container">
+        <div className="chat-history">
+          {loadingSession ? (
+            <div className="chat-loading" role="status" aria-live="polite">
+              <span className="chat-loading-dot" />
+              正在载入会话记录…
             </div>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-muted)' }}>随时为您服务</div>
-            <div style={{ fontSize: '13px', marginTop: '6px' }}>
-              输入指令即可调遣数字员工执行任务、自动分析或沉淀工件
+          ) : messages.length === 0 && !isStreaming ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-dim)', margin: 'auto', padding: '40px' }}>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '18px',
+                  background: 'var(--om-surface)',
+                  border: '1px solid var(--om-border)',
+                  boxShadow: '0 4px 14px color-mix(in srgb, var(--om-accent) 12%, transparent)',
+                  marginBottom: '16px',
+                }}
+              >
+                <ClawLogo size={28} color="var(--om-accent)" />
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-muted)' }}>随时为您服务</div>
+              <div style={{ fontSize: '13px', marginTop: '6px' }}>
+                输入指令即可调遣数字员工执行任务、自动分析或沉淀工件
+              </div>
             </div>
-          </div>
-        ) : (
-          messages.map((msg) => (
+          ) : (
+            messages.map((msg, idx) => (
+              <MessageBubble
+                key={msg.id || `${msg.role}-${idx}`}
+                message={msg}
+                bot={activeBot}
+                sessionId={activeSessionId || undefined}
+              />
+            ))
+          )}
+
+          {/* Real-time Streaming Placeholder */}
+          {isStreaming && (
             <MessageBubble
-              key={msg.id}
-              message={msg}
+              message={{
+                id: 'streaming_current',
+                role: 'assistant',
+                content: streamingContent || (streamingReasoning ? '' : (streamingTools.length > 0 ? '' : '正在连接并调度 Agent 推理执行...')),
+                reasoning: streamingReasoning || undefined,
+                toolCalls: streamingTools,
+              }}
               bot={activeBot}
-              sessionId={activeSessionId || undefined}
+              live
             />
-          ))
-        )}
+          )}
 
-        {/* Real-time Streaming Placeholder */}
-        {isStreaming && (
-          <MessageBubble
-            message={{
-              id: 'streaming_current',
-              role: 'assistant',
-              content: streamingContent || (streamingReasoning ? '' : '正在连接并调度 Agent 推理执行...'),
-              reasoning: streamingReasoning || undefined,
-              toolCalls: streamingTools,
-            }}
-            bot={activeBot}
-          />
-        )}
+          <div ref={chatBottomRef} />
+        </div>
 
-        <div ref={chatBottomRef} />
-      </div>
+        <ChatComposer
+          onSendMessage={handleSendMessage}
+          isStreaming={isStreaming}
+          onStop={handleStop}
+        />
+      </section>
 
-      <ChatComposer
-        onSendMessage={handleSendMessage}
-        isStreaming={isStreaming}
-        onStop={handleStop}
+      {/* 右侧伴随式审计检查抽屉 */}
+      <AuditDrawer
+        isOpen={isAuditDrawerOpen}
+        onClose={() => setIsAuditDrawerOpen(false)}
+        activeSessionId={activeSessionId}
       />
-    </section>
+    </div>
   );
 };

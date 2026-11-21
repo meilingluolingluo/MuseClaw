@@ -14,6 +14,7 @@ import { ProactiveManager } from '../proactive/index.ts';
 import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager, FeedStore } from '../bots/index.ts';
 import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
+import { globalSkillStore } from '../skills/index.ts';
 import { authService, parseCookies, type AuthUser } from '../auth/auth-service.ts';
 import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
@@ -67,13 +68,35 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const sentinel = new SentinelPolicyManager();
-const baseTools = createDefaultTools();
+const baseTools = createDefaultTools({ skillsProvider: globalSkillStore });
 const mcpManager = new McpClientManager();
 let tools = [...baseTools];
 
 function refreshTools() {
   tools = [...baseTools, ...mcpManager.getToolDefinitions()];
   return tools;
+}
+
+function resolveSkillPrompt(userText: string): string {
+  const slashMatch = userText.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i);
+  if (slashMatch) {
+    const targetSkill = globalSkillStore.get(slashMatch[1]);
+    if (targetSkill && targetSkill.enabled) {
+      const userQuery = slashMatch[2]?.trim() || '请根据此技能规程执行任务。';
+      const instructions = globalSkillStore.getSkillInstructions(targetSkill.name) || targetSkill.body || targetSkill.content;
+      return `[已激活技能规程: ${targetSkill.name} (${targetSkill.category || 'utility'})]\n${instructions}\n\n[用户具体诉求]:\n${userQuery}`;
+    }
+  }
+  return userText;
+}
+
+function getBotSkills(botId?: string) {
+  return globalSkillStore.list({ botId, enabledOnly: true }).map((s) => ({
+    name: s.name,
+    description: s.description,
+    category: s.category || 'utility',
+    channel: s.channel
+  }));
 }
 
 const callLLM: LLMCaller = async (messages, tools, onChunk) => {
@@ -132,11 +155,11 @@ const infoflowChannel = createInfoflowChannel(
 
     const loop = runAgentLoop(
       bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
-      prompt,
+      resolveSkillPrompt(prompt),
       refreshTools(),
       sentinel,
       callLLM,
-      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
     );
 
     let output = '';
@@ -184,11 +207,11 @@ const feishuChannel = createFeishuChannel(
 
     const loop = runAgentLoop(
       bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
-      prompt,
+      resolveSkillPrompt(prompt),
       refreshTools(),
       sentinel,
       callLLM,
-      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
     );
 
     let output = '';
@@ -306,6 +329,14 @@ const goalEngine = new GoalEngine({
 function resolveWebDist(): string | null {
   const dir = path.resolve(__dirname, '../../web/dist');
   return fs.existsSync(path.join(dir, 'index.html')) ? dir : null;
+}
+
+/** 工具输出可能很长，落库前截断，避免会话文件膨胀 */
+function clipToolOutput(value: unknown, max = 2000): unknown {
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  if (!text) return value;
+  if (text.length <= max) return value;
+  return `${text.slice(0, max)}\n…（输出过长，已截断，共 ${text.length} 字符）`;
 }
 
 const WEB_NOT_BUILT_PAGE = `<!doctype html>
@@ -779,20 +810,48 @@ export function startGatewayServer(defaultPort = 8799) {
 
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
-        message,
+        resolveSkillPrompt(message),
         refreshTools(),
         sentinel,
         callLLM,
-        { sessionId: session.id, userId: apiUserId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+        { sessionId: session.id, userId: apiUserId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
       );
 
       let output = '';
       let needsApproval = false;
       let pendingApprovalReq: ApprovalRequest | null = null;
+      const toolCalls: Array<Record<string, unknown>> = [];
 
       for await (const event of loop) {
         if (event.type === 'stream:text-delta') {
           output += event.text;
+        }
+        if (event.type === 'tool:call_start') {
+          toolCalls.push({
+            tool: event.toolName,
+            params: event.input,
+            status: 'running',
+            startedAt: Date.now()
+          });
+        }
+        if (event.type === 'tool:call_end') {
+          const running = [...toolCalls]
+            .reverse()
+            .find((t) => t.tool === event.toolName && t.status === 'running');
+          if (running) {
+            const rejected = String(event.output || '').includes('拒绝');
+            let isError = rejected;
+            if (typeof event.output === 'object' && event.output !== null) {
+              const outObj = event.output as any;
+              if (outObj.error || (outObj.exitCode !== undefined && outObj.exitCode !== 0)) {
+                isError = true;
+              }
+            }
+            running.status = isError ? (rejected ? 'rejected' : 'failed') : 'done';
+            running.ok = !isError;
+            running.durationMs = event.durationMs || 0;
+            running.result = clipToolOutput(event.output);
+          }
         }
         if (event.type === 'sentinel:approval_needed') {
           needsApproval = true;
@@ -806,7 +865,19 @@ export function startGatewayServer(defaultPort = 8799) {
 
       if (session.messages) {
         session.messages.push({ role: 'user', content: message });
-        if (output) session.messages.push({ role: 'assistant', content: output });
+        if (output || toolCalls.length > 0) {
+          for (const tc of toolCalls) {
+            if (tc.status === 'running') {
+              tc.status = 'done';
+              tc.durationMs = tc.durationMs || (Date.now() - (Number(tc.startedAt) || Date.now()));
+            }
+          }
+          session.messages.push({
+            role: 'assistant',
+            content: output,
+            ...(toolCalls.length ? { toolCalls } : {})
+          });
+        }
         sessionStore.save(session, apiUserId);
       }
 
@@ -912,6 +983,273 @@ export function startGatewayServer(defaultPort = 8799) {
       refreshTools();
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success }));
+    }
+
+    // ==========================================
+    // B6. Agent Skills 技能生态与规程库接口 (Skills Ecosystem)
+    // ==========================================
+    if (req.method === 'GET' && url.pathname === '/api/skills') {
+      const botId = url.searchParams.get('botId') || url.searchParams.get('bot_id') || undefined;
+      const query = url.searchParams.get('q') || url.searchParams.get('query') || undefined;
+      const category = url.searchParams.get('category') || undefined;
+      const channel = url.searchParams.get('channel') || undefined;
+      const tag = url.searchParams.get('tag') || undefined;
+      const source = url.searchParams.get('source') || undefined;
+      const readiness = url.searchParams.get('readiness') || undefined;
+      const enabledOnly = url.searchParams.get('enabled') === 'true';
+
+      const skills = globalSkillStore.list({ botId, query, category, channel, tag, source, readiness, enabledOnly });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ skills, total: skills.length }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/import') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { text } = JSON.parse(body || '{}');
+      if (!text || typeof text !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '字段 text 不能为空 (必须包含标准的 SKILL.md 格式文本)' }));
+      }
+      const result = globalSkillStore.importFromText(text, { source: 'imported' });
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error }));
+      }
+      refreshTools();
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: result.skill }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/upload-zip') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      let rawBuffer = Buffer.concat(chunks);
+
+      const contentType = req.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        try {
+          const json = JSON.parse(rawBuffer.toString('utf-8'));
+          if (json.base64) {
+            rawBuffer = Buffer.from(json.base64.replace(/^data:.*?;base64,/, ''), 'base64');
+          }
+        } catch {}
+      }
+
+      if (!rawBuffer || rawBuffer.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '上传的 ZIP 压缩包数据为空' }));
+      }
+
+      const result = await globalSkillStore.importFromZip(rawBuffer, { source: 'imported' });
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error }));
+      }
+      refreshTools();
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: result.skill }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      if (!data.name || !data.description) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '技能名称 (name) 与描述 (description) 为必填项' }));
+      }
+      const result = globalSkillStore.save(data);
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error }));
+      }
+      refreshTools();
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: result.skill }));
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/api/skills/')) {
+      const subPath = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+
+      // 导出下载 ZIP 完整压缩包 (包含 SKILL.md, scripts/, references/, assets/ 等)
+      if (subPath.endsWith('/export-zip')) {
+        const name = subPath.replace(/\/export-zip$/, '');
+        const zipBuffer = await globalSkillStore.exportAsZip(name);
+        if (!zipBuffer) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: `未找到技能 "${name}"` }));
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${name}.zip"`
+        });
+        return res.end(zipBuffer);
+      }
+
+      // 导出下载单个 SKILL.md
+      if (subPath.endsWith('/export')) {
+        const name = subPath.replace(/\/export$/, '');
+        const content = globalSkillStore.exportSkill(name);
+        if (!content) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: `未找到技能 "${name}"` }));
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${name}.skill.md"`
+        });
+        return res.end(content);
+      }
+
+      // 获取技能包内全部文件清单
+      if (subPath.endsWith('/files')) {
+        const name = subPath.replace(/\/files$/, '');
+        const skill = globalSkillStore.get(name);
+        if (!skill) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: `未找到技能 "${name}"` }));
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ files: skill.files || [] }));
+      }
+
+      // 获取技能包内具体文件的内容
+      if (subPath.endsWith('/file')) {
+        const name = subPath.replace(/\/file$/, '');
+        const filePath = url.searchParams.get('path');
+        if (!filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '缺少 path 参数' }));
+        }
+        const resData = globalSkillStore.getFileContent(name, filePath);
+        res.writeHead(resData.success ? 200 : 404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(resData));
+      }
+
+      const name = subPath;
+      const skill = globalSkillStore.get(name);
+      if (!skill) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `未找到技能 "${name}"` }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ skill }));
+    }
+
+    // 技能包内部文件写与删接口
+
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/skills\/[^/]+\/file$/)) {
+      const name = decodeURIComponent(url.pathname.split('/')[3]);
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { path: filePath, content } = JSON.parse(body || '{}');
+      if (!filePath || content === undefined) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '参数 path 与 content 不能为空' }));
+      }
+      const resData = globalSkillStore.saveFile(name, filePath, content);
+      refreshTools();
+      res.writeHead(resData.success ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(resData));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/skills\/[^/]+\/file$/)) {
+      const name = decodeURIComponent(url.pathname.split('/')[3]);
+      const filePath = url.searchParams.get('path');
+      if (!filePath) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '缺少 path 参数' }));
+      }
+      const resData = globalSkillStore.deleteFile(name, filePath);
+      refreshTools();
+      res.writeHead(resData.success ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(resData));
+    }
+
+    if (req.method === 'PUT' && url.pathname.startsWith('/api/skills/')) {
+      const name = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const result = globalSkillStore.save({ ...data, name });
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error }));
+      }
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: result.skill }));
+    }
+
+    if (req.method === 'PATCH' && url.pathname.startsWith('/api/skills/')) {
+      const name = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+
+      const existing = globalSkillStore.get(name);
+      if (!existing) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `未找到技能 "${name}"` }));
+      }
+
+      if (data.enabled !== undefined) {
+        globalSkillStore.toggle(name, Boolean(data.enabled));
+      }
+      if (data.everyBot !== undefined) {
+        globalSkillStore.setEveryBot(name, Boolean(data.everyBot));
+      }
+      if (Array.isArray(data.assignedBots)) {
+        globalSkillStore.assignBots(name, data.assignedBots);
+      }
+
+      const updated = globalSkillStore.get(name);
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: updated }));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/skills/')) {
+      const name = decodeURIComponent(url.pathname.replace('/api/skills/', ''));
+      const result = globalSkillStore.remove(name);
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error }));
+      }
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, name }));
+    }
+
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/skills\/[^/]+\/test$/)) {
+      const name = decodeURIComponent(url.pathname.split('/')[3]);
+      const skill = globalSkillStore.get(name);
+      if (!skill) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `未找到技能 "${name}"` }));
+      }
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { input, botId } = JSON.parse(body || '{}');
+      const testInput = input || '请简要执行此技能的核心功能并展示输出结构。';
+
+      try {
+        const caller = globalModelStore.getActiveCaller();
+        const testPrompt = `你正在试运行 Agent 技能 [${skill.name}]。\n\n[技能说明]\n${skill.description}\n\n[规程步骤 (SKILL.md)]:\n${skill.body || skill.content}\n\n[测试输入指令]:\n${testInput}\n\n请按照技能规程规划并模拟执行，清晰列出执行步骤与模拟交付物。`;
+        const testRes = await caller([{ role: 'system', content: '你是一个严格遵循技能规程的专业 Agent 评测器。' }, { role: 'user', content: testPrompt }], refreshTools());
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          success: true,
+          skill: skill.name,
+          input: testInput,
+          output: testRes.content,
+          toolCalls: testRes.toolCalls || []
+        }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `技能试运行失败: ${err.message}` }));
+      }
     }
 
     // C. 会话列表接口 (按当前登录员工隔离，默认不过滤无消息的空会话以支持前端新建即时呈现)
@@ -1676,14 +2014,16 @@ fi
 
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
-        promptWithImages,
+        resolveSkillPrompt(promptWithImages),
         refreshTools(),
         sentinel,
         userScopedCaller,
-        { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8 }
+        { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
       );
 
       let fullAssistantText = '';
+      let reasoningText = '';
+      const toolCalls: Array<Record<string, unknown>> = [];
       let clientGone = false;
       let finished = false;
 
@@ -1700,6 +2040,37 @@ fi
           if (event.type === 'stream:text-delta') {
             fullAssistantText += event.text;
           }
+          if (event.type === 'stream:reasoning-delta') {
+            reasoningText += event.text;
+          }
+          if (event.type === 'tool:call_start') {
+            toolCalls.push({
+              tool: event.toolName,
+              params: event.input,
+              status: 'running',
+              startedAt: Date.now()
+            });
+          }
+          if (event.type === 'tool:call_end') {
+            // 同名工具可能连续调用多次：更新最后一条仍在运行的那次
+            const running = [...toolCalls]
+              .reverse()
+              .find((t) => t.tool === event.toolName && t.status === 'running');
+            if (running) {
+              const rejected = String(event.output || '').includes('拒绝');
+              let isError = rejected;
+              if (typeof event.output === 'object' && event.output !== null) {
+                const outObj = event.output as any;
+                if (outObj.error || (outObj.exitCode !== undefined && outObj.exitCode !== 0)) {
+                  isError = true;
+                }
+              }
+              running.status = isError ? (rejected ? 'rejected' : 'failed') : 'done';
+              running.ok = !isError;
+              running.durationMs = event.durationMs || 0;
+              running.result = clipToolOutput(event.output);
+            }
+          }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
           (res as any).flush?.();
         }
@@ -1709,11 +2080,22 @@ fi
           content: text || (attachments.length ? '（已上传附件）' : ''),
           ...(attachments.length ? { attachments } : {})
         });
-        if (fullAssistantText || clientGone) {
+        if (fullAssistantText || clientGone || toolCalls.length > 0 || reasoningText.trim()) {
           const content = clientGone
             ? `${fullAssistantText ? `${fullAssistantText}\n\n` : ''}（已停止）`
             : fullAssistantText;
-          session.messages.push({ role: 'assistant', content });
+          for (const tc of toolCalls) {
+            if (tc.status === 'running') {
+              tc.status = clientGone ? 'stopped' : 'done';
+              tc.durationMs = tc.durationMs || (Date.now() - (Number(tc.startedAt) || Date.now()));
+            }
+          }
+          session.messages.push({
+            role: 'assistant',
+            content,
+            ...(reasoningText.trim() ? { reasoning: reasoningText.trim() } : {}),
+            ...(toolCalls.length ? { toolCalls } : {})
+          });
         }
         sessionStore.save(session, userId);
         if (!clientGone) {
@@ -1876,6 +2258,7 @@ fi
     console.log(`⏰ 主动任务管理端点: http://localhost:${port}/api/routines | 外部 Webhook: http://localhost:${port}/api/hooks/:id`);
     console.log(`📦 交付工件存储端点: http://localhost:${port}/api/artifacts`);
     console.log(`🔌 MCP 工具生态端点: http://localhost:${port}/api/mcp/servers`);
+    console.log(`⚡ Agent Skills 规程库端点: http://localhost:${port}/api/skills`);
 
     // 初始化已配置的 MCP 服务器工具生态
     try {

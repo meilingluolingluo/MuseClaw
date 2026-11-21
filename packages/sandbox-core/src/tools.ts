@@ -6,6 +6,13 @@ import { MicroSandbox, getSanitizedEnv } from './micro-sandbox.ts';
 
 export { getSanitizedEnv };
 
+export interface SkillsProvider {
+  list: (botId?: string) => Array<{ name: string; description: string; source: string; channel: string; enabled: boolean }>;
+  get: (name: string) => { name: string; description: string; content: string; body: string; channel: string; enabled: boolean } | null;
+  save: (data: { name: string; description: string; channel?: string; body?: string }) => { success: boolean; skill?: unknown; error?: string };
+  remove: (name: string) => { success: boolean; error?: string };
+}
+
 /**
  * 基础内置工具集（含 MicroSandbox 隔离与技能阶梯工具）
  */
@@ -14,15 +21,116 @@ export function createDefaultTools(options?: {
   artifactsDir?: string;
   workspaceDir?: string;
   microSandbox?: MicroSandbox;
+  skillsProvider?: SkillsProvider;
 }): ToolDefinition[] {
   const browserWorkerUrl = options?.browserWorkerUrl || 'http://127.0.0.1:8790';
   const artifactsDir = options?.artifactsDir || path.resolve(process.cwd(), 'apps/gateway/data/artifacts');
   const workspaceDir = options?.workspaceDir || process.cwd();
+  const skillsProvider = options?.skillsProvider;
 
   // 初始化微沙箱引擎（若外部未传入，则根据工作区自动创建）
   const sandbox = options?.microSandbox || new MicroSandbox({ workspaceDir });
 
   return [
+    // Agent Skills 规程库加载、执行与自学习沉淀
+    {
+      name: 'skills',
+      description: 'Agent Skills (规程与能力包)：标准化任务指南与操作手册。action="use" 获取指导与配套脚本，action="list" 列出技能与运行就绪状态，action="save" 新建技能，action="learn" 自主学习沉淀工坊技能，action="remove" 移除自建技能。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['use', 'list', 'save', 'learn', 'remove'], description: '操作类型' },
+          name: { type: 'string', description: '技能英文名称（如 amap, trip-plan 等）' },
+          category: { type: 'string', enum: ['devops', 'productivity', 'research', 'integration', 'utility', 'custom'], description: '技能业务分类（save/learn 时使用）' },
+          description: { type: 'string', description: '技能简短说明（仅在 save/learn 时使用）' },
+          instructions: { type: 'string', description: '技能 Markdown 指导正文（仅在 save/learn 时使用）' }
+        },
+        required: ['action']
+      },
+      execute: async (args) => {
+        const action = String(args.action || '');
+        const name = String(args.name || '').trim().toLowerCase();
+        console.log(`[Tool:skills] action=${action} name=${name}`);
+
+        if (!skillsProvider) {
+          return { error: 'Skills provider is not configured in this sandbox environment.' };
+        }
+
+        try {
+          if (action === 'list') {
+            const list = skillsProvider.list().filter((s: any) => s.enabled);
+            if (list.length === 0) {
+              return { message: '当前没有已启用的技能。' };
+            }
+            return {
+              total: list.length,
+              skills: list.map((s: any) => ({
+                name: s.name,
+                category: s.category || 'utility',
+                source: s.source,
+                readiness: s.readiness?.ready ? 'ready' : (s.readiness?.details || 'needs_setup'),
+                description: s.description
+              }))
+            };
+          }
+
+          if (action === 'use') {
+            if (!name) return { error: '参数 name 不能为空' };
+            const skill = skillsProvider.get(name);
+            if (!skill || !skill.enabled) {
+              const available = skillsProvider.list().filter((s: any) => s.enabled).map((s: any) => s.name).join(', ');
+              return { error: `未找到或已禁用的技能 "${name}"。当前可用技能: ${available || '无'}` };
+            }
+            return {
+              name: skill.name,
+              category: skill.category || 'utility',
+              readiness: skill.readiness,
+              dirPath: skill.dirPath,
+              files: (skill.files || []).map((f: any) => f.path),
+              description: skill.description,
+              instructions: skill.body || skill.content
+            };
+          }
+
+          if (action === 'save' || action === 'learn') {
+            if (!name) return { error: '参数 name 不能为空' };
+            const desc = String(args.description || '').trim();
+            const inst = String(args.instructions || '').trim();
+            const cat = (args.category || 'custom') as any;
+            if (!desc) return { error: '沉淀技能时必须提供 description 说明何时使用' };
+            if (!inst) return { error: '沉淀技能时必须提供 instructions 指令步骤' };
+
+            const source = action === 'learn' ? 'learned' : 'custom';
+            const res = skillsProvider.save({
+              name,
+              description: desc,
+              category: cat,
+              source,
+              body: inst
+            });
+            if (!res.success) {
+              return { error: res.error || '保存技能失败' };
+            }
+            const label = action === 'learn' ? '工坊自学技能' : '自定义技能';
+            return {
+              success: true,
+              message: `已成功保存${label} "${name}" [${cat}]，后续对话或通过 /${name} 命令可直接调用。`
+            };
+          }
+
+          if (action === 'remove') {
+            if (!name) return { error: '参数 name 不能为空' };
+            const res = skillsProvider.remove(name);
+            if (!res.success) return { error: res.error || '删除技能失败' };
+            return { success: true, message: `技能 "${name}" 已成功删除。` };
+          }
+
+          return { error: `未知操作 action: ${action}` };
+        } catch (err: any) {
+          return { error: err.message || String(err) };
+        }
+      }
+    },
     // 阶梯 2 (CLI): 微沙箱隔离 Shell 执行
     {
       name: 'execute_shell',

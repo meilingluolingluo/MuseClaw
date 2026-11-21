@@ -1,10 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Rss, Clock, Settings, Sparkles, RefreshCw, MessageSquare } from 'lucide-react';
+import {
+  Rss,
+  Clock,
+  Sparkles,
+  RefreshCw,
+  MessageSquare,
+  ShieldAlert,
+  FileText,
+  Trash2,
+  ArrowRight,
+} from 'lucide-react';
 import type { FeedPost, FeedActivity } from '../../types';
 import { api } from '../../services/api';
 import { renderMarkdown } from '../../utils/markdown';
-import { formatTime } from '../../utils/format';
+import { formatRelativeTime } from '../../utils/format';
+
+const AREA_CONFIG: Record<string, { emoji: string; label: string }> = {
+  planning: { emoji: '🗓️', label: '规划巡检' },
+  research: { emoji: '🔍', label: '技术调研' },
+  goals: { emoji: '🎯', label: '目标推进' },
+  money: { emoji: '💰', label: '预算资产' },
+  health: { emoji: '🌿', label: '运维健康' },
+  home: { emoji: '🏠', label: '环境设施' },
+  learning: { emoji: '📚', label: '知识沉淀' },
+  people: { emoji: '👥', label: '协作对接' },
+  files: { emoji: '📄', label: '工件交付' },
+  fun: { emoji: '🎈', label: '灵感探索' },
+};
+
+const KIND_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
+  chat: { icon: <MessageSquare size={15} />, label: '对话互动' },
+  goal: { icon: <Sparkles size={15} />, label: '自驱目标' },
+  routine: { icon: <Clock size={15} />, label: '定时任务' },
+  approval: { icon: <ShieldAlert size={15} />, label: '门禁审批' },
+  artifact: { icon: <FileText size={15} />, label: '工件交付' },
+};
 
 export const FeedView: React.FC = () => {
   const { setTab, selectSession, showToast } = useApp();
@@ -17,10 +48,11 @@ export const FeedView: React.FC = () => {
     setLoading(true);
     try {
       const [feedData, actData] = await Promise.all([api.getFeed(), api.getFeedActivities()]);
-      setPosts(feedData.posts || []);
+      setPosts(Array.isArray(feedData?.posts) ? feedData.posts : []);
       setActivities(Array.isArray(actData) ? actData : []);
     } catch (err: any) {
       console.error('Failed to load feed:', err);
+      showToast('获取动态数据异常', 'error');
     } finally {
       setLoading(false);
     }
@@ -34,16 +66,40 @@ export const FeedView: React.FC = () => {
     setIsWriting(true);
     showToast('智能体正在根据近期记忆与工作记录撰写动态...', 'info');
     try {
-      const newPost = await api.triggerFeedWrite();
-      if (newPost) {
-        setPosts((prev) => [newPost, ...prev]);
+      const result: any = await api.triggerFeedWrite();
+      if (result?.posts && Array.isArray(result.posts)) {
+        setPosts(result.posts);
         showToast('新动态已生成并沉淀！', 'success');
+      } else if (result?.id) {
+        setPosts((prev) => [result, ...prev]);
+        showToast('新动态已生成并沉淀！', 'success');
+      } else {
+        await loadFeed();
+        showToast('动态已刷新！', 'success');
       }
     } catch (err: any) {
       showToast(`生成动态失败: ${err.message}`, 'error');
     } finally {
       setIsWriting(false);
     }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    try {
+      await api.deleteFeedPost(postId);
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      showToast('动态条目已删除', 'success');
+    } catch (err: any) {
+      showToast(`删除失败: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDiscuss = (post: FeedPost) => {
+    if (post.sessionId) {
+      selectSession(post.sessionId);
+    }
+    setTab('chat');
+    showToast(`已就「${post.title}」进入对话`, 'info');
   };
 
   return (
@@ -79,6 +135,7 @@ export const FeedView: React.FC = () => {
 
       <div className="feed-layout">
         <div className="feed-main-col">
+          {/* Feed Posts */}
           {posts.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-dim)' }}>
               <div style={{ fontSize: '32px', marginBottom: '12px' }}>📰</div>
@@ -88,93 +145,174 @@ export const FeedView: React.FC = () => {
               </div>
             </div>
           ) : (
-            posts.map((post) => (
-              <div
-                key={post.id}
-                className="feed-post-card"
-                style={{
-                  background: 'var(--om-surface)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '12px',
-                  padding: '20px',
-                  marginBottom: '16px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>{post.area || '📝'}</span>
-                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>{post.title}</h4>
+            posts.map((post) => {
+              const area = AREA_CONFIG[post.area || ''] || { emoji: '📝', label: '工作动态' };
+              const postBody = post.body || post.content || '';
+              const postDate = formatRelativeTime(post.ts || post.date);
+
+              return (
+                <div key={post.id} className="feed-card feed-post-card">
+                  <div className="feed-post-top">
+                    <div className="feed-area-badge" title={area.label}>
+                      {area.emoji}
+                    </div>
+                    <div className="feed-post-content">
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          marginBottom: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <h3 className="feed-post-title" style={{ margin: 0 }}>
+                            {post.title}
+                          </h3>
+                          <span className="pill-badge pill-blue" style={{ fontSize: '11px', padding: '2px 8px' }}>
+                            {area.label}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                            {postDate}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            title="删除此动态"
+                            style={{ opacity: 0.6, padding: '4px' }}
+                            onClick={() => handleDeletePost(post.id)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div
+                        className="feed-post-body markdown-body"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(postBody) }}
+                      />
+
+                      {post.tags && post.tags.length > 0 && (
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '10px', flexWrap: 'wrap' }}>
+                          {post.tags.map((tag, idx) => (
+                            <span key={idx} className="pill-badge pill-blue" style={{ fontSize: '11px' }}>
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {post.prompt && (
+                        <div className="feed-post-actions">
+                          <button
+                            type="button"
+                            className="feed-action-btn"
+                            onClick={() => handleDiscuss(post)}
+                            title="一键就此条目进入对话深入探讨"
+                          >
+                            <MessageSquare size={14} /> 一键跟进讨论
+                          </button>
+                          <span
+                            style={{
+                              fontSize: '12px',
+                              color: 'var(--text-dim)',
+                              fontStyle: 'italic',
+                              maxWidth: '420px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            “{post.prompt}”
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>{post.date}</span>
                 </div>
-
-                <div
-                  className="feed-post-content"
-                  style={{ fontSize: '13.5px', lineHeight: 1.6, color: 'var(--text-main)' }}
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(post.content) }}
-                />
-
-                {post.tags && post.tags.length > 0 && (
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
-                    {post.tags.map((tag, idx) => (
-                      <span key={idx} className="pill-badge pill-blue" style={{ fontSize: '11px' }}>
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))
+              );
+            })
           )}
 
-          {/* While you were away */}
+          {/* While you were away (在你离开时) */}
           <div className="feed-activity-section" style={{ marginTop: '32px' }}>
-            <div className="feed-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <span className="feed-section-title" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)' }}>
+            <div className="feed-section-header">
+              <span className="feed-section-title">
                 在你离开时 (WHILE YOU WERE AWAY)
+                {activities.length > 0 && (
+                  <span style={{ marginLeft: '8px', fontWeight: 'normal', opacity: 0.7 }}>
+                    ({activities.length})
+                  </span>
+                )}
               </span>
               <button
                 type="button"
                 className="btn-secondary"
                 onClick={loadFeed}
-                style={{ padding: '2px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                disabled={loading}
+                style={{ padding: '3px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
               >
-                <RefreshCw size={11} /> 刷新
+                <RefreshCw size={11} className={loading ? 'tool-spin' : ''} /> 刷新
               </button>
             </div>
 
-            <div className="feed-activity-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="feed-activity-list">
               {activities.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'var(--text-dim)', padding: '12px 0' }}>暂无后台执行动态</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-dim)', padding: '16px 0', textAlign: 'center' }}>
+                  暂无后台执行动态
+                </div>
               ) : (
-                activities.map((act) => (
-                  <div
-                    key={act.id}
-                    className="feed-activity-item"
-                    onClick={() => {
-                      if (act.sessionId) {
-                        selectSession(act.sessionId);
-                        setTab('chat');
-                      }
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 14px',
-                      background: 'var(--om-surface)',
-                      border: '1px solid var(--om-border)',
-                      borderRadius: '8px',
-                      cursor: act.sessionId ? 'pointer' : 'default',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span className="pill-badge pill-blue" style={{ fontSize: '11px' }}>{act.botName || 'Bot'}</span>
-                      <span style={{ fontSize: '13px', color: 'var(--text-main)' }}>{act.summary}</span>
+                activities.map((act) => {
+                  const kindCfg = KIND_CONFIG[act.kind || act.type || 'chat'] || {
+                    icon: <Sparkles size={15} />,
+                    label: act.botName || '智能体',
+                  };
+                  const titleText = act.title || act.sessionTitle || act.summary || '动态记录';
+                  const textSnippet = (act.text || act.summary || '').replace(/[\r\n]+/g, ' ').trim();
+                  const timeText = formatRelativeTime(act.ts || act.timestamp);
+
+                  return (
+                    <div
+                      key={act.id}
+                      className="feed-activity-row"
+                      onClick={() => {
+                        if (act.sessionId) {
+                          selectSession(act.sessionId);
+                          setTab('chat');
+                        }
+                      }}
+                      title={act.sessionId ? '点击跳转查看对应会话' : undefined}
+                    >
+                      <div className="feed-activity-icon" title={kindCfg.label}>
+                        {kindCfg.icon}
+                      </div>
+                      <div className="feed-activity-body">
+                        <div className="feed-activity-title-bar">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                            <span className="feed-activity-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {titleText}
+                            </span>
+                            <span className="pill-badge pill-blue" style={{ fontSize: '10px', padding: '1px 6px', flexShrink: 0 }}>
+                              {kindCfg.label}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                            <span className="feed-activity-time">{timeText}</span>
+                            {act.sessionId && <ArrowRight size={12} style={{ color: 'var(--text-dim)' }} />}
+                          </div>
+                        </div>
+                        {textSnippet && (
+                          <div className="feed-activity-text" title={textSnippet}>
+                            {textSnippet}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{formatTime(act.timestamp)}</span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

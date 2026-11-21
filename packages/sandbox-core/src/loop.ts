@@ -66,6 +66,7 @@ export async function* runAgentLoop(
     maxSteps?: number;
     profile?: AgentProfile;
     isTainted?: boolean;
+    skills?: Array<{ name: string; description: string; category?: string; channel?: string }>;
   }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
@@ -79,6 +80,12 @@ export async function* runAgentLoop(
     effectivePrompt += `\n\n[Bot Memory & Preferences]:\n${context.profile.memory}`;
   } else if (context.profile?.memory_ns) {
     effectivePrompt += `\n[Memory Workspace: ${context.profile.memory_ns}]`;
+  }
+
+  // 1.1 动态注入当前 Bot 启用的技能清单索引 (Agent Skills Index)
+  if (context.skills && context.skills.length > 0) {
+    const skillsList = context.skills.map((s) => `- ${s.name} [${s.category || 'general'}]: ${s.description}`).join('\n');
+    effectivePrompt += `\n\n[Available Skills (Agent 技能规程库)]:\n当用户需求与下列预置技能匹配时，第一步请调用 skills(action="use", name="<name>") 获取完整执行指导、配套脚本与步骤；在解决复杂业务后，亦可调用 skills(action="learn", ...) 自主学习沉淀到工坊，或 skills(action="save", ...) 创建新技能。\n${skillsList}`;
   }
 
   // 2. 按 profile 过滤 tool_allowlist
