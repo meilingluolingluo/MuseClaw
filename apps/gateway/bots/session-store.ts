@@ -93,15 +93,13 @@ export class SessionStore {
     }
   }
 
-  public create(id: string, botId: string, title = '新会话', userId: string): Session {
+  public create(id: string, botId: string, title = '新会话', userId = 'system_proactive'): Session {
     if (!botId) {
       throw new Error('创建会话必须指定归属的 bot_id');
     }
-    if (!userId) {
-      throw new Error('创建会话必须指定归属的员工身份 userId');
-    }
+    const effectiveUserId = userId || 'system_proactive';
 
-    const sanitized = userId.replace(/[^\w-]/g, '_');
+    const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
 
     const existing = sessionMap.get(id);
@@ -129,14 +127,12 @@ export class SessionStore {
     return session;
   }
 
-  public save(session: Session, userId: string): void {
+  public save(session: Session, userId?: string): void {
     if (!session.bot_id && !session.botId) {
       throw new Error('会话缺少必填字段 bot_id');
     }
-    const effectiveUserId = (userId || session.userId)?.replace(/[^\w-]/g, '_');
-    if (!effectiveUserId) {
-      throw new Error('保存会话必须指定归属的员工身份 userId');
-    }
+    const rawUserId = userId || session.userId || (session as any).user_id || 'system_proactive';
+    const effectiveUserId = rawUserId.replace(/[^\w-]/g, '_');
 
     const sessionMap = this.loadUser(effectiveUserId);
     const targetBotId = session.bot_id || session.botId!;

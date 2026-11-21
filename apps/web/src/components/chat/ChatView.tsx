@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { MessageBubble } from './MessageBubble';
 import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
+import { AgentCapsule } from './AgentCapsule';
 import { ClawLogo } from '../../utils/icons';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
@@ -17,10 +18,13 @@ export const ChatView: React.FC = () => {
     loadSessions,
     isAuditDrawerOpen,
     setIsAuditDrawerOpen,
+    setIsBotModalOpen,
   } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const activeSessionIdRef = useRef<string | null>(activeSessionId);
+  const currentStreamingSessionIdRef = useRef<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
@@ -32,8 +36,22 @@ export const ChatView: React.FC = () => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // 切换会话：先清空再拉取，并丢弃过期响应（避免快速切换时串话）
   useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  // 切换会话：终止上一个会话可能未完成的流并重置流状态，拉取目标会话的消息记录
+  useEffect(() => {
+    if (currentStreamingSessionIdRef.current && currentStreamingSessionIdRef.current !== activeSessionId) {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      currentStreamingSessionIdRef.current = null;
+      setIsStreaming(false);
+      setStreamingContent('');
+      setStreamingReasoning('');
+      setStreamingTools([]);
+    }
+
     if (!activeSessionId) {
       setMessages([]);
       setLoadingSession(false);
@@ -45,17 +63,19 @@ export const ChatView: React.FC = () => {
     api
       .getMessages(activeSessionId)
       .then((res) => {
-        if (cancelled) return;
+        if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
         setMessages(Array.isArray(res) ? res : []);
         setTimeout(scrollToBottom, 50);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
         console.error('Failed to load messages:', err);
         showToast(`会话记录载入失败：${err.message}`, 'error');
       })
       .finally(() => {
-        if (!cancelled) setLoadingSession(false);
+        if (!cancelled && activeSessionIdRef.current === activeSessionId) {
+          setLoadingSession(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -76,7 +96,11 @@ export const ChatView: React.FC = () => {
         showToast('还没有可用的数字员工，请检查 gateway 配置', 'warning');
         return;
       }
+      activeSessionIdRef.current = sessionId;
     }
+
+    const targetSessionId = sessionId;
+    currentStreamingSessionIdRef.current = targetSessionId;
 
     const userMessage: Message = {
       id: `usr_${Date.now()}`,
@@ -127,14 +151,26 @@ export const ChatView: React.FC = () => {
       const toolsAccumulator: any[] = [];
 
       while (true) {
+        if (activeSessionIdRef.current !== targetSessionId) {
+          try {
+            await reader.cancel();
+          } catch {}
+          break;
+        }
+
         const { done, value } = await reader.read();
         if (done) break;
+
+        if (activeSessionIdRef.current !== targetSessionId) {
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n\n');
         buffer = lines.pop() || '';
 
         for (const block of lines) {
+          if (activeSessionIdRef.current !== targetSessionId) break;
           const line = block.trim();
           if (!line.startsWith('data: ')) continue;
           const jsonStr = line.slice(6);
@@ -143,22 +179,30 @@ export const ChatView: React.FC = () => {
 
             if (event.type === 'stream:text-delta') {
               accumulatedText += event.text;
-              setStreamingContent(accumulatedText);
+              if (activeSessionIdRef.current === targetSessionId) {
+                setStreamingContent(accumulatedText);
+              }
             } else if (event.type === 'stream:reasoning-delta') {
               accumulatedReasoning += event.text;
-              setStreamingReasoning(accumulatedReasoning);
+              if (activeSessionIdRef.current === targetSessionId) {
+                setStreamingReasoning(accumulatedReasoning);
+              }
             } else if (event.type === 'agent:error') {
               const errSnippet = event.text || `\n[执行出错: ${event.error || '未知异常'}]`;
               accumulatedText += errSnippet;
-              setStreamingContent(accumulatedText);
-              showToast(`执行出错: ${event.error || '未知异常'}`, 'error');
+              if (activeSessionIdRef.current === targetSessionId) {
+                setStreamingContent(accumulatedText);
+                showToast(`执行出错: ${event.error || '未知异常'}`, 'error');
+              }
             } else if (event.type === 'tool:call_start') {
               toolsAccumulator.push({
                 tool: event.toolName,
                 params: event.input,
                 status: 'running',
               });
-              setStreamingTools([...toolsAccumulator]);
+              if (activeSessionIdRef.current === targetSessionId) {
+                setStreamingTools([...toolsAccumulator]);
+              }
             } else if (event.type === 'tool:call_end') {
               // 同名工具可能连续调用，更新最后一条仍在运行的记录
               const running = [...toolsAccumulator]
@@ -178,29 +222,36 @@ export const ChatView: React.FC = () => {
                 running.durationMs = event.durationMs || 0;
                 running.result = event.output;
               }
-              setStreamingTools([...toolsAccumulator]);
+              if (activeSessionIdRef.current === targetSessionId) {
+                setStreamingTools([...toolsAccumulator]);
+              }
             } else if (event.type === 'sentinel:taint_updated') {
               setTainted(event.isTainted, event.reason);
             } else if (event.type === 'sentinel:approval_needed') {
-              // Add approval request item to messages
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: `appr_${Date.now()}`,
-                  role: 'assistant',
-                  content: '触发安全门禁审批：请审核以下操作是否批准执行。',
-                  approvalRequest: {
-                    actionId: event.request?.approvalId,
-                    description: event.request?.actionSummary,
-                    command: event.request?.targetDetails?.command,
+              if (activeSessionIdRef.current === targetSessionId) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `appr_${Date.now()}`,
+                    role: 'assistant',
+                    content: '触发安全门禁审批：请审核以下操作是否批准执行。',
+                    approvalRequest: {
+                      actionId: event.request?.approvalId,
+                      description: event.request?.actionSummary,
+                      command: event.request?.targetDetails?.command,
+                    },
                   },
-                },
-              ]);
+                ]);
+              }
             }
           } catch (e) {
             console.warn('Failed to parse SSE line:', e);
           }
         }
+      }
+
+      if (activeSessionIdRef.current !== targetSessionId) {
+        return;
       }
 
       if (accumulatedText.trim() || accumulatedReasoning.trim()) {
@@ -223,6 +274,9 @@ export const ChatView: React.FC = () => {
         setMessages((prev) => [...prev, fallbackMsg]);
       }
     } catch (err: any) {
+      if (activeSessionIdRef.current !== targetSessionId) {
+        return;
+      }
       if (err?.name === 'AbortError') {
         const partial = accumulatedText.trim();
         setMessages((prev) => [
@@ -247,11 +301,18 @@ export const ChatView: React.FC = () => {
         ]);
       }
     } finally {
-      abortRef.current = null;
-      setIsStreaming(false);
-      setStreamingContent('');
-      setStreamingReasoning('');
-      setStreamingTools([]);
+      if (activeSessionIdRef.current === targetSessionId) {
+        setIsStreaming(false);
+        setStreamingContent('');
+        setStreamingReasoning('');
+        setStreamingTools([]);
+      }
+      if (currentStreamingSessionIdRef.current === targetSessionId) {
+        currentStreamingSessionIdRef.current = null;
+      }
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       // 首轮之后标题/条数由服务端生成，刷新侧栏
       if (activeBot?.id) loadSessions(activeBot.id);
     }
@@ -264,6 +325,27 @@ export const ChatView: React.FC = () => {
   return (
     <div className="chat-stage-wrapper">
       <section className="chat-container">
+        {/* 会话顶部常驻智能体活动胶囊 */}
+        {messages.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: '6px 16px',
+              borderBottom: '1px solid var(--om-border)',
+              background: 'var(--om-surface)',
+            }}
+          >
+            <AgentCapsule
+              bot={activeBot}
+              variant="header"
+              isStreaming={isStreaming}
+              onClick={() => setIsBotModalOpen(true)}
+            />
+          </div>
+        )}
+
         <div className="chat-history">
           {loadingSession ? (
             <div className="chat-loading" role="status" aria-live="polite">
@@ -271,25 +353,18 @@ export const ChatView: React.FC = () => {
               正在载入会话记录…
             </div>
           ) : messages.length === 0 && !isStreaming ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-dim)', margin: 'auto', padding: '40px' }}>
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '18px',
-                  background: 'var(--om-surface)',
-                  border: '1px solid var(--om-border)',
-                  boxShadow: '0 4px 14px color-mix(in srgb, var(--om-accent) 12%, transparent)',
-                  marginBottom: '16px',
-                }}
-              >
-                <ClawLogo size={28} color="var(--om-accent)" />
+            <div style={{ textAlign: 'center', color: 'var(--text-dim)', margin: 'auto', padding: '40px 20px' }}>
+              {/* 对话框正中间的活体动态 Logo 与名字胶囊 */}
+              <AgentCapsule
+                bot={activeBot}
+                variant="hero"
+                isStreaming={isStreaming}
+                onClick={() => setIsBotModalOpen(true)}
+              />
+              <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-muted)', marginTop: '12px' }}>
+                随时为您效劳
               </div>
-              <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-muted)' }}>随时为您服务</div>
-              <div style={{ fontSize: '13px', marginTop: '6px' }}>
+              <div style={{ fontSize: '12.5px', marginTop: '4px', color: 'var(--text-dim)' }}>
                 输入指令即可调遣数字员工执行任务、自动分析或沉淀工件
               </div>
             </div>

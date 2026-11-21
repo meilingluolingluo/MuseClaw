@@ -23,6 +23,12 @@ export class GoalStore {
     }
   }
 
+  public computeProgress(goal: Goal): number {
+    if (!goal.steps || goal.steps.length === 0) return 0;
+    const doneCount = goal.steps.filter((s) => s.status === 'done' || s.status === 'skipped').length;
+    return Math.round((doneCount / goal.steps.length) * 100);
+  }
+
   private load() {
     if (!fs.existsSync(this.filePath)) {
       return;
@@ -30,6 +36,13 @@ export class GoalStore {
     try {
       const list: Goal[] = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
       for (const g of list) {
+        g.progress = this.computeProgress(g);
+        // 保证 steps 带有 idx 属性
+        if (Array.isArray(g.steps)) {
+          g.steps.forEach((s, i) => {
+            if (!s.idx) s.idx = i + 1;
+          });
+        }
         this.goals.set(g.id, g);
       }
     } catch (err: any) {
@@ -39,52 +52,83 @@ export class GoalStore {
 
   public save() {
     this.ensureDir();
-    const list = Array.from(this.goals.values());
+    const list = Array.from(this.goals.values()).map((g) => ({
+      ...g,
+      progress: this.computeProgress(g)
+    }));
     const tmp = `${this.filePath}.tmp.${Date.now()}`;
     fs.writeFileSync(tmp, JSON.stringify(list, null, 2), 'utf-8');
     fs.renameSync(tmp, this.filePath);
   }
 
-  public list(filter?: { botId?: string; status?: GoalStatus; userId?: string }): Goal[] {
-    let list = Array.from(this.goals.values());
+  public list(filter?: { botId?: string; status?: GoalStatus; category?: string; userId?: string }): Goal[] {
+    let list = Array.from(this.goals.values()).map((g) => {
+      g.progress = this.computeProgress(g);
+      return g;
+    });
     if (filter?.botId) list = list.filter((g) => g.botId === filter.botId);
     if (filter?.status) list = list.filter((g) => g.status === filter.status);
+    if (filter?.category) list = list.filter((g) => g.category?.toLowerCase() === filter.category?.toLowerCase());
     if (filter?.userId) list = list.filter((g) => g.userId === filter.userId);
     return list.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   public get(id: string): Goal | undefined {
-    return this.goals.get(id);
+    const goal = this.goals.get(id);
+    if (goal) {
+      goal.progress = this.computeProgress(goal);
+    }
+    return goal;
   }
 
   public create(data: {
+    id?: string;
     title: string;
-    description: string;
-    botId: string;
-    userId: string;
+    description?: string;
+    botId?: string;
+    userId?: string;
     category?: string;
+    due?: string;
     cadence?: string;
-    steps?: Array<Omit<GoalStep, 'id' | 'status' | 'updatedAt'> & { id?: string; status?: StepStatus }>;
+    steps?: Array<string | Partial<GoalStep>>;
+    notes?: string;
   }): Goal {
-    const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const id = data.id || `goal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const now = Date.now();
-    const cadence = data.cadence || 'weekdays 09:30';
-    const cronExpr = cadenceToCron(cadence);
-    const nextCheckInAt = computeNextCheckIn(cadence);
+    const cadence = data.cadence !== undefined ? data.cadence : 'weekdays 09:30';
+    const cronExpr = cadence ? cadenceToCron(cadence) : '';
+    const nextCheckInAt = cadence ? computeNextCheckIn(cadence) : 0;
 
-    const steps: GoalStep[] = (data.steps || []).map((s, idx) => ({
-      id: s.id || `step_${idx + 1}`,
-      title: s.title,
-      description: s.description || s.title,
-      status: s.status || 'pending',
-      updatedAt: now
-    }));
+    const rawSteps = data.steps || [];
+    const steps: GoalStep[] = rawSteps.map((s, idx) => {
+      if (typeof s === 'string') {
+        return {
+          id: `step_${idx + 1}`,
+          idx: idx + 1,
+          title: s.trim(),
+          description: s.trim(),
+          status: 'pending',
+          updatedAt: now
+        };
+      }
+      return {
+        id: s.id || `step_${idx + 1}`,
+        idx: s.idx || idx + 1,
+        title: s.title || `步骤 ${idx + 1}`,
+        description: s.description || s.title || '',
+        verificationCommand: s.verificationCommand,
+        status: s.status || 'pending',
+        note: s.note,
+        result: s.result,
+        updatedAt: now
+      };
+    });
 
-    // 若未传入步骤，默认提供第一步规划
     if (steps.length === 0) {
       steps.push({
         id: 'step_1',
-        title: '初始任务梳理与可行性预研',
+        idx: 1,
+        title: '初始目标梳理与背景准备',
         description: data.description || data.title,
         status: 'pending',
         updatedAt: now
@@ -93,23 +137,27 @@ export class GoalStore {
 
     const goal: Goal = {
       id,
-      title: data.title,
-      description: data.description,
-      botId: data.botId,
-      userId: data.userId,
-      category: data.category || 'engineering',
+      title: data.title.trim(),
+      description: (data.description || '').trim(),
+      botId: data.botId || 'muse',
+      userId: data.userId || 'user_web',
+      category: (data.category || 'other').trim().toLowerCase(),
       status: 'active',
+      due: (data.due || '').trim(),
       cadence,
       cronExpr,
       nextCheckInAt,
       steps,
+      notes: data.notes || '',
+      progress: 0,
       createdAt: now,
       updatedAt: now
     };
 
+    goal.progress = this.computeProgress(goal);
     this.goals.set(id, goal);
     this.save();
-    console.log(`[GoalStore] 创建新长周期目标: ${goal.title} (ID: ${id}, Cadence: ${cadence})`);
+    console.log(`[GoalStore] 创建新长周期目标: ${goal.title} (ID: ${id}, Category: ${goal.category}, Cadence: ${cadence})`);
     return goal;
   }
 
@@ -117,15 +165,29 @@ export class GoalStore {
     const goal = this.goals.get(id);
     if (!goal) return undefined;
 
-    if (updates.cadence && updates.cadence !== goal.cadence) {
+    if (updates.cadence !== undefined && updates.cadence !== goal.cadence) {
       goal.cadence = updates.cadence;
-      goal.cronExpr = cadenceToCron(updates.cadence);
-      goal.nextCheckInAt = computeNextCheckIn(updates.cadence);
+      goal.cronExpr = updates.cadence ? cadenceToCron(updates.cadence) : '';
+      goal.nextCheckInAt = updates.cadence ? computeNextCheckIn(updates.cadence) : 0;
     }
 
     Object.assign(goal, updates, { updatedAt: Date.now() });
+    goal.progress = this.computeProgress(goal);
     this.save();
     return goal;
+  }
+
+  public setStatus(id: string, status: GoalStatus): Goal | undefined {
+    return this.update(id, { status });
+  }
+
+  public appendNote(id: string, note: string): Goal | undefined {
+    const goal = this.goals.get(id);
+    if (!goal) return undefined;
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const line = `[${timestamp}] ${note.trim()}`;
+    const nextNotes = goal.notes ? `${goal.notes}\n${line}` : line;
+    return this.update(id, { notes: nextNotes });
   }
 
   public delete(id: string): boolean {
@@ -135,13 +197,50 @@ export class GoalStore {
   }
 
   /**
-   * 更新目标下特定步骤状态
+   * 添加步骤
    */
-  public advanceStep(
+  public addStep(
+    goalId: string,
+    title: string,
+    description?: string,
+    verificationCommand?: string
+  ): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+
+    const maxIdx = Math.max(0, ...(goal.steps || []).map((s) => s.idx || 0));
+    const nextIdx = maxIdx + 1;
+    const newStep: GoalStep = {
+      id: `s_${nextIdx}`,
+      idx: nextIdx,
+      title: title.trim(),
+      description: description?.trim() || title.trim(),
+      verificationCommand: verificationCommand?.trim() || undefined,
+      status: 'pending',
+      updatedAt: Date.now()
+    };
+
+    goal.steps.push(newStep);
+    goal.progress = this.computeProgress(goal);
+    goal.updatedAt = Date.now();
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 按 stepId 更新步骤
+   */
+  public updateStep(
     goalId: string,
     stepId: string,
-    status: StepStatus,
-    options?: { result?: string; blockedReason?: string }
+    status?: StepStatus,
+    options?: {
+      note?: string;
+      result?: string;
+      blockedReason?: string;
+      verificationCommand?: string;
+      verificationOutput?: string;
+    }
   ): Goal | undefined {
     const goal = this.goals.get(goalId);
     if (!goal) return undefined;
@@ -149,35 +248,58 @@ export class GoalStore {
     const step = goal.steps.find((s) => s.id === stepId);
     if (!step) return undefined;
 
-    step.status = status;
+    if (status) step.status = status;
     step.updatedAt = Date.now();
-    if (options?.result) step.result = options.result;
-    if (options?.blockedReason) step.blockedReason = options.blockedReason;
+    if (options?.note !== undefined) step.note = options.note;
+    if (options?.result !== undefined) step.result = options.result;
+    if (options?.blockedReason !== undefined) step.blockedReason = options.blockedReason;
+    if (options?.verificationCommand !== undefined) step.verificationCommand = options.verificationCommand;
+    if (options?.verificationOutput !== undefined) step.verificationOutput = options.verificationOutput;
 
-    // 检查是否所有步骤都已完成
-    const allDone = goal.steps.every((s) => s.status === 'done' || s.status === 'skipped');
-    if (allDone) {
+    // 当全部步骤完成或跳过时，自动标记目标达成
+    const allDone = goal.steps.length > 0 && goal.steps.every((s) => s.status === 'done' || s.status === 'skipped');
+    if (allDone && goal.status === 'active') {
       goal.status = 'done';
-      console.log(`[GoalStore] 目标所有阶段步骤已全部完成，目标达成: ${goal.title} (ID: ${goalId})`);
+      console.log(`[GoalStore] 目标步骤已全部完成，目标状态流转为达成: ${goal.title}`);
     }
 
+    goal.progress = this.computeProgress(goal);
     goal.updatedAt = Date.now();
     this.save();
     return goal;
   }
 
   /**
-   * 提交计划修订提案（Re-planning Proposal）
-   * 严禁静默乱改原有规划：生成提案供用户决策
+   * 按 stepIndex (1-based) 更新步骤
    */
-  public proposeReplan(goalId: string, reason: string, proposedSteps: GoalStep[]): GoalProposal | undefined {
+  public updateStepByIndex(
+    goalId: string,
+    stepIndex: number,
+    status?: StepStatus,
+    note?: string
+  ): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+    const step = goal.steps.find((s) => s.idx === stepIndex) || goal.steps[stepIndex - 1];
+    if (!step) return undefined;
+    return this.updateStep(goalId, step.id, status, { note });
+  }
+
+  /**
+   * 提交修订提案
+   */
+  public proposeReplan(
+    goalId: string,
+    reason: string,
+    proposedSteps: Array<string | GoalStep>
+  ): GoalProposal | undefined {
     const goal = this.goals.get(goalId);
     if (!goal) return undefined;
 
-    const proposalId = `prop_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const proposalId = `prop_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const proposal: GoalProposal = {
       proposalId,
-      reason,
+      reason: reason.trim(),
       proposedSteps,
       status: 'pending',
       createdAt: Date.now()
@@ -186,12 +308,12 @@ export class GoalStore {
     goal.proposal = proposal;
     goal.updatedAt = Date.now();
     this.save();
-    console.log(`[GoalStore] 为目标 ${goal.title} 提交新修订提案: ${reason} (Proposal ID: ${proposalId})`);
+    console.log(`[GoalStore] 为目标 ${goal.title} 提出计划修订提案: ${reason}`);
     return proposal;
   }
 
   /**
-   * 用户审批重新规划提案 (Accept / Reject)
+   * 审批处理修订提案
    */
   public resolveProposal(
     goalId: string,
@@ -210,18 +332,155 @@ export class GoalStore {
     proposal.decidedAt = Date.now();
 
     if (accept) {
-      // 接受提案：新规划步骤正式替换生效
-      goal.steps = proposal.proposedSteps;
-      goal.updatedAt = Date.now();
+      // 保留已完成或跳过的步骤
+      const completedSteps = goal.steps.filter((s) => s.status === 'done' || s.status === 'skipped');
+      const completedIds = new Set(completedSteps.map((s) => s.id));
+      let nextIdx = completedSteps.length;
+      const now = Date.now();
+
+      // 仅引入未完成的新步骤（若 proposedSteps 中包含了旧完成步骤，则去重过滤）
+      const incoming = proposal.proposedSteps.filter((item) => {
+        if (typeof item === 'string') return true;
+        return !completedIds.has(item.id);
+      });
+
+      const newSteps: GoalStep[] = incoming.map((item) => {
+        nextIdx += 1;
+        if (typeof item === 'string') {
+          return {
+            id: `step_${nextIdx}`,
+            idx: nextIdx,
+            title: item.trim(),
+            description: item.trim(),
+            status: 'pending',
+            updatedAt: now
+          };
+        }
+        return {
+          id: item.id || `step_${nextIdx}`,
+          idx: nextIdx,
+          title: item.title,
+          description: item.description || item.title,
+          verificationCommand: item.verificationCommand,
+          status: 'pending',
+          updatedAt: now
+        };
+      });
+
+      goal.steps = [...completedSteps, ...newSteps];
+      goal.status = 'active';
+      goal.progress = this.computeProgress(goal);
+      this.appendNote(goalId, `计划调整已采纳生效: ${proposal.reason}`);
       this.save();
-      console.log(`[GoalStore] 用户【批准】提案: 目标 ${goal.title} 步骤已更新为新修订方案`);
       return { success: true, goal, message: '已接受修订提案，新规划步骤已生效' };
     } else {
-      // 拒绝提案：保留原规划，步骤不发生变更
-      goal.updatedAt = Date.now();
+      this.appendNote(goalId, `用户保留原计划方案 (驳回修订: ${proposal.reason})`);
       this.save();
-      console.log(`[GoalStore] 用户【驳回】提案: 目标 ${goal.title} 保持原有规划不变`);
-      return { success: true, goal, message: '已驳回修订提案，原计划步骤保持不变' };
+      return { success: true, goal, message: '已驳回修订提案，保持原规划步骤不变' };
     }
+  }
+
+  /**
+   * 退回指定历史步骤返工
+   */
+  public rollbackStep(goalId: string, targetStepId: string, reason?: string): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+
+    const targetIdx = goal.steps.findIndex((s) => s.id === targetStepId);
+    if (targetIdx === -1) return undefined;
+
+    for (let i = targetIdx; i < goal.steps.length; i++) {
+      const step = goal.steps[i];
+      step.status = 'pending';
+      step.blockedReason = undefined;
+      step.result = undefined;
+      step.verificationOutput = undefined;
+      step.updatedAt = Date.now();
+    }
+
+    if (goal.proposal && goal.proposal.status === 'pending') {
+      goal.proposal.status = 'rejected';
+      goal.proposal.decidedAt = Date.now();
+    }
+
+    goal.status = 'active';
+    goal.progress = this.computeProgress(goal);
+    this.appendNote(goalId, `退回步骤 [${goal.steps[targetIdx].title}] 返工: ${reason || '手动退回'}`);
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 现场补充指导并在当前步骤重试
+   */
+  public retryStep(goalId: string, stepId?: string): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+
+    let targetStep = stepId ? goal.steps.find((s) => s.id === stepId) : undefined;
+    if (!targetStep) {
+      targetStep = goal.steps.find((s) => s.status === 'blocked') || goal.steps.find((s) => s.status === 'in_progress');
+    }
+    if (!targetStep) {
+      targetStep = goal.steps.find((s) => s.status === 'pending');
+    }
+    if (!targetStep) return undefined;
+
+    targetStep.status = 'in_progress';
+    targetStep.blockedReason = undefined;
+    targetStep.updatedAt = Date.now();
+
+    if (goal.proposal && goal.proposal.status === 'pending') {
+      goal.proposal.status = 'rejected';
+      goal.proposal.decidedAt = Date.now();
+    }
+
+    goal.status = 'active';
+    goal.progress = this.computeProgress(goal);
+    goal.updatedAt = Date.now();
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 到期巡检目标列表
+   */
+  public dueCheckIns(now = Date.now()): Goal[] {
+    return Array.from(this.goals.values()).filter(
+      (g) => g.status === 'active' && g.nextCheckInAt > 0 && g.nextCheckInAt <= now
+    );
+  }
+
+  /**
+   * 格式化输出目标文本（供 Agent 文本交互或工具返回）
+   */
+  public render(goal: Goal, withNotes = true): string {
+    const icons: Record<string, string> = {
+      pending: '[ ]',
+      in_progress: '[~]',
+      done: '[x]',
+      blocked: '[!]',
+      skipped: '[-]'
+    };
+    const meta = [`状态=${goal.status}`, `进度=${goal.progress || 0}%`];
+    if (goal.category) meta.push(`领域=${goal.category}`);
+    if (goal.due) meta.push(`截止日期=${goal.due}`);
+    if (goal.cadence) meta.push(`巡检周期="${goal.cadence}"`);
+
+    const lines = [`目标 ${goal.id}: ${goal.title} (${meta.join(', ')})`];
+    if (goal.description) lines.push(`  描述: ${goal.description}`);
+    for (const s of goal.steps || []) {
+      const extra = s.note || s.result ? ` · ${s.note || s.result}` : '';
+      lines.push(`  ${icons[s.status] || '[ ]'} ${s.idx}. ${s.title}${extra}`);
+    }
+    if (goal.proposal && goal.proposal.status === 'pending') {
+      const pSteps = goal.proposal.proposedSteps.map((x) => (typeof x === 'string' ? x : x.title)).join('; ');
+      lines.push(`  等待用户审批的计划修订提案: ${goal.proposal.reason} -> ${pSteps}`);
+    }
+    if (withNotes && goal.notes) {
+      lines.push(`  进展备忘:\n${goal.notes}`);
+    }
+    return lines.join('\n');
   }
 }

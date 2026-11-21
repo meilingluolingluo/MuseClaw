@@ -136,8 +136,8 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
 };
 
 export const ToolTrace: React.FC<{ tools: ToolTraceItem[]; live?: boolean }> = ({ tools, live }) => {
-  // 保持工具过程默认展开（对标 nanoMuse / OpenMausBot 历史回放可见性），用户亦可一键折叠
-  const [open, setOpen] = useState(true);
+  // 默认折叠工具调用过程，仅展示紧凑摘要栏，用户点击按需展开完整调用明细
+  const [open, setOpen] = useState(false);
   if (!tools || tools.length === 0) return null;
 
   const running = tools.filter(isRunning);

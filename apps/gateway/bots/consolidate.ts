@@ -1,22 +1,52 @@
 /**
- * 受控长期记忆整理与去冗余引擎 (Memory Consolidation)
- * 参考 nanoMuse: nanomuse/memory/consolidate.py
+ * 受控长期记忆整理与去冗余引擎 (Memory Consolidation Engine)
  *
- * 核心原则：模型提议，确定性规则兜底 (Model Proposes, Deterministic Module Decides)
- * 1. 操作原子化：仅支持 merge（合并事实）与 drop（删除碎屑）
- * 2. 实体守恒：严禁 LLM 捏造原事实中未曾出现过的新实体与词汇
- * 3. 用户锚点保护：严禁删除用户亲自录入的声明（[user] 标记）
- * 4. 预算约束：单次整理最多精简存储量的 20%，防止大面积误删
- * 5. 变更留痕与一键撤销：输出结构化 TidyReport，支持原子级 Undo 回滚
+ * 核心设计原则：模型提议，确定性规则兜底 (Model Proposes, Deterministic Rules Decide)
+ * 1. 结构化类别支持：包含用户画像、偏好习惯、关键人物、例行流程、业务约束红线与通用事实。
+ * 2. 实体守恒：严禁模型提炼时捏造原事实中未曾出现过的新实体与词汇（幻觉硬拦截）。
+ * 3. 用户锚点保护：严禁删除带有 [user] 标记的用户显式录入声明。
+ * 4. 预算约束与防激进：单次整理最多精简存储量的 20%，防止大面积误删。
+ * 5. 变更留痕与一键撤销：输出结构化审计报告，支持原子级 Undo 回滚。
  */
+
+export type MemoryCategory = 'profile' | 'preference' | 'people' | 'routine' | 'constraint' | 'general';
+
+export interface CategoryMeta {
+  key: MemoryCategory;
+  label: string;
+  header: string;
+  description: string;
+}
+
+export const MEMORY_CATEGORIES: CategoryMeta[] = [
+  { key: 'profile', label: '用户画像与身份', header: '## 用户画像与核心身份 (Profile)', description: '核心职业、角色定位、技术背景与专长领域' },
+  { key: 'preference', label: '偏好与习惯', header: '## 偏好与工作习惯 (Preferences)', description: '技术偏好、代码规范、沟通风格与工具习惯' },
+  { key: 'people', label: '关键人物与协作', header: '## 关键人物与协作关系 (People)', description: '核心利益相关方、团队成员与角色分工' },
+  { key: 'routine', label: '例行约定与流程', header: '## 例行约定与流程 (Routines)', description: '周期性任务、例会时间点与规范流程' },
+  { key: 'constraint', label: '业务约束与红线', header: '## 业务约束与红线 (Constraints)', description: '安全准则、权限边界与绝对禁止操作' },
+  { key: 'general', label: '通用沉淀知识', header: '## 通用沉淀事实 (General)', description: '环境配置、服务地址、系统固定参数等' }
+];
 
 export interface MemoryItem {
   id: string; // m_1, m_2, ...
-  content: string; // 事实内容
-  source: 'user' | 'agent'; // user 为用户亲自录入的声明，不可 drop
-  category?: string;
+  content: string; // 事实内容纯文本
+  source: 'user' | 'agent'; // user 为用户亲自录入的声明，具有最高保护优先级
+  category: MemoryCategory;
+  protected: boolean;
   rawLine: string;
   prefix: string; // 如 "- ", "* ", "1. "
+}
+
+export interface MemoryStats {
+  totalBytes: number;
+  maxBytes: number; // 24576 (24KB)
+  lineCount: number;
+  maxLines: number; // 200
+  itemCount: number;
+  userAnchorCount: number;
+  agentItemCount: number;
+  usagePercent: number;
+  status: 'healthy' | 'warning' | 'critical';
 }
 
 export interface MemoryChange {
@@ -51,6 +81,7 @@ export interface TidyReport {
   }>;
   more: boolean;
   dryRun: boolean;
+  summary?: string;
 }
 
 // 允许在合并时使用的中英文连接词与过渡字符（不算作新捏造事实）
@@ -61,33 +92,60 @@ const CONNECTIVE_WORDS = new Set(
 );
 
 const CONNECTIVE_CHARS = new Set(
-  '在从搬到现以前和与并且喜欢不的了是住工作用曾经后来已改为原偏好（）()，、。；：：+-/—'.split('')
+  '在从搬到现以前和与并且喜欢不的了是住工作用曾经后来已改为原偏好于即及至且其等等而（）()，、。；：：+-/—'.split('')
 );
 
 /**
- * 将 MEMORY.md 文本解析为结构化条目清单
+ * 识别 Markdown 标题对应的记忆分类
+ */
+export function detectCategoryFromHeader(headerLine: string): MemoryCategory {
+  const lower = headerLine.toLowerCase();
+  if (/画像|身份|profile|identity|who/i.test(lower)) return 'profile';
+  if (/偏好|习惯|preference|style|habit/i.test(lower)) return 'preference';
+  if (/人物|成员|协作|people|team|stakeholder|colleague/i.test(lower)) return 'people';
+  if (/例行|约定|流程|routine|schedule|workflow/i.test(lower)) return 'routine';
+  if (/约束|规则|红线|安全|constraint|policy|rule|boundary/i.test(lower)) return 'constraint';
+  return 'general';
+}
+
+/**
+ * 将 MEMORY.md 文本解析为结构化条目清单与类别划分
  */
 export function parseMemoryMarkdown(markdown: string): { items: MemoryItem[]; lines: string[] } {
-  const rawLines = markdown.split('\n');
+  const rawLines = (markdown || '').split('\n');
   const items: MemoryItem[] = [];
   let itemIndex = 1;
+  let currentCategory: MemoryCategory = 'general';
 
   for (const line of rawLines) {
     const trimmed = line.trim();
-    // 忽略空行和标题行作为候选事实
-    if (!trimmed || trimmed.startsWith('#')) {
+    if (!trimmed) {
+      continue;
+    }
+
+    if (trimmed.startsWith('##')) {
+      currentCategory = detectCategoryFromHeader(trimmed);
+      continue;
+    }
+
+    if (trimmed.startsWith('#')) {
       continue;
     }
 
     // 匹配列表前缀: "- ", "* ", "1. ", 等
     const prefixMatch = line.match(/^(\s*[-*]|\s*\d+\.)\s+/);
-    const prefix = prefixMatch ? prefixMatch[0] : '- ';
-    let text = prefixMatch ? line.slice(prefixMatch[0].length).trim() : trimmed;
+    if (!prefixMatch) {
+      continue;
+    }
+
+    const prefix = prefixMatch[0];
+    let text = line.slice(prefixMatch[0].length).trim();
 
     // 识别用户亲自录入的声明标记
     let source: 'user' | 'agent' = 'agent';
-    if (text.includes('[user]') || text.includes('[用户声明]') || text.includes('[用户]')) {
+    if (/\[(user|用户声明|用户)\]/i.test(text)) {
       source = 'user';
+      text = text.replace(/\[(user|用户声明|用户)\]/gi, '').trim();
     }
 
     const id = `m_${itemIndex++}`;
@@ -95,12 +153,225 @@ export function parseMemoryMarkdown(markdown: string): { items: MemoryItem[]; li
       id,
       content: text,
       source,
+      category: currentCategory,
+      protected: source === 'user',
       rawLine: line,
       prefix
     });
   }
 
   return { items, lines: rawLines };
+}
+
+/**
+ * 计算记忆库配额、健康度与压力指标
+ */
+export function calculateMemoryStats(markdown: string, items: MemoryItem[]): MemoryStats {
+  const totalBytes = Buffer.byteLength(markdown || '', 'utf-8');
+  const maxBytes = 24 * 1024; // 24KB 严格预算
+  const lineCount = (markdown || '').split('\n').filter((l) => l.trim().length > 0).length;
+  const maxLines = 200; // 200 行严格预算
+  const itemCount = items.length;
+  const userAnchorCount = items.filter((i) => i.source === 'user').length;
+  const agentItemCount = itemCount - userAnchorCount;
+
+  const bytePercent = Math.round((totalBytes / maxBytes) * 100);
+  const linePercent = Math.round((lineCount / maxLines) * 100);
+  const usagePercent = Math.max(bytePercent, linePercent);
+
+  let status: 'healthy' | 'warning' | 'critical' = 'healthy';
+  if (usagePercent >= 85) {
+    status = 'critical';
+  } else if (usagePercent >= 60) {
+    status = 'warning';
+  }
+
+  return {
+    totalBytes,
+    maxBytes,
+    lineCount,
+    maxLines,
+    itemCount,
+    userAnchorCount,
+    agentItemCount,
+    usagePercent,
+    status
+  };
+}
+
+/**
+ * 文本分词器 (支持英文单词与中文 CJK 二元分词)
+ */
+export function tokenize(text: string): Set<string> {
+  const tokens = new Set<string>();
+  const lower = text.toLowerCase();
+
+  // 提取英文单词与数字
+  const words = lower.match(/[a-z0-9_.-]+/g) || [];
+  for (const w of words) {
+    if (w.length > 1) tokens.add(w);
+  }
+
+  // 提取中文二元分词 (CJK Bigram)
+  const cjk = lower.match(/[\u4e00-\u9fa5]/g) || [];
+  for (let i = 0; i < cjk.length - 1; i++) {
+    tokens.add(cjk[i] + cjk[i + 1]);
+  }
+  if (cjk.length === 1) {
+    tokens.add(cjk[0]);
+  }
+
+  return tokens;
+}
+
+/**
+ * 计算两段事实文本的 Jaccard 相似度
+ */
+export function similarity(a: string, b: string): number {
+  const setA = tokenize(a);
+  const setB = tokenize(b);
+  if (setA.size === 0 || setB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const t of setA) {
+    if (setB.has(t)) intersection++;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * 记忆事实检索与相似度排序
+ */
+export function searchMemoryItems(
+  items: MemoryItem[],
+  query: string
+): Array<{ item: MemoryItem; score: number }> {
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return items.map((item) => ({ item, score: 1 }));
+  }
+
+  const results: Array<{ item: MemoryItem; score: number }> = [];
+  for (const item of items) {
+    const text = item.content.toLowerCase();
+    let score = 0;
+    if (text.includes(q)) {
+      score += 0.8;
+    }
+    const sim = similarity(text, q);
+    score += sim * 0.5;
+
+    if (score > 0.05) {
+      results.push({ item, score: Math.min(1, score) });
+    }
+  }
+
+  return results.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * 向 Markdown 文本中追加或插入单条记忆事实
+ */
+export function insertItemToMarkdown(
+  markdown: string,
+  content: string,
+  category: MemoryCategory = 'general',
+  isUser = false
+): string {
+  const trimmedContent = content.trim();
+  const lineToAdd = `- ${trimmedContent}${isUser ? ' [user]' : ''}`;
+  const targetCategoryMeta = MEMORY_CATEGORIES.find((c) => c.key === category) || MEMORY_CATEGORIES[5];
+
+  const lines = (markdown || '').split('\n');
+  let headerIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (l.startsWith('##')) {
+      const cat = detectCategoryFromHeader(l);
+      if (cat === category) {
+        headerIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (headerIndex !== -1) {
+    // 找到分类标题，定位到该 section 的尾部
+    let insertIndex = lines.length;
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+      if (lines[i].trim().startsWith('##')) {
+        insertIndex = i;
+        break;
+      }
+    }
+    while (insertIndex > headerIndex + 1 && lines[insertIndex - 1].trim() === '') {
+      insertIndex--;
+    }
+    lines.splice(insertIndex, 0, lineToAdd);
+    return lines.join('\n');
+  }
+
+  // 若未找到对应分类标题，在文本末尾追加该分类区块
+  const clean = (markdown || '').trim();
+  return `${clean}\n\n${targetCategoryMeta.header}\n${lineToAdd}\n`;
+}
+
+/**
+ * 更新 Markdown 中的指定条目
+ */
+export function updateItemInMarkdown(
+  markdown: string,
+  itemId: string,
+  newContent: string,
+  newCategory?: MemoryCategory
+): { newMarkdown: string; updatedItem?: MemoryItem } {
+  const { items, lines } = parseMemoryMarkdown(markdown);
+  const target = items.find((i) => i.id === itemId);
+  if (!target) {
+    return { newMarkdown: markdown };
+  }
+
+  const categoryChanged = newCategory && newCategory !== target.category;
+  const isUser = target.source === 'user';
+
+  if (!categoryChanged) {
+    // 同分类下就地替换内容
+    const updatedLine = `${target.prefix}${newContent.trim()}${isUser ? ' [user]' : ''}`;
+    const newLines = lines.map((l) => (l.trim() === target.rawLine.trim() ? updatedLine : l));
+    return {
+      newMarkdown: newLines.join('\n'),
+      updatedItem: { ...target, content: newContent.trim(), rawLine: updatedLine }
+    };
+  }
+
+  // 跨分类移动：先移除原位置，再插入目标分类
+  const filteredLines = lines.filter((l) => l.trim() !== target.rawLine.trim());
+  const removedMarkdown = filteredLines.join('\n');
+  const finalMarkdown = insertItemToMarkdown(removedMarkdown, newContent, newCategory, isUser);
+
+  return {
+    newMarkdown: finalMarkdown,
+    updatedItem: { ...target, content: newContent.trim(), category: newCategory }
+  };
+}
+
+/**
+ * 删除 Markdown 中的指定记忆条目
+ */
+export function deleteItemFromMarkdown(
+  markdown: string,
+  itemId: string
+): { newMarkdown: string; deletedItem?: MemoryItem } {
+  const { items, lines } = parseMemoryMarkdown(markdown);
+  const target = items.find((i) => i.id === itemId);
+  if (!target) {
+    return { newMarkdown: markdown };
+  }
+
+  const newLines = lines.filter((l) => l.trim() !== target.rawLine.trim());
+  return { newMarkdown: newLines.join('\n'), deletedItem: target };
 }
 
 /**
@@ -139,7 +410,7 @@ export function noNewEntities(merged: string, sources: MemoryItem[]): boolean {
 }
 
 /**
- * 提取大模型回复中的 JSON 数组对象
+ * 提取模型回复中的 JSON 数组对象
  */
 export function extractJsonProposals(rawReply: string): Array<Record<string, unknown>> {
   let cleaned = rawReply.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -154,7 +425,7 @@ export function extractJsonProposals(rawReply: string): Array<Record<string, unk
         return parsed.filter((p) => typeof p === 'object' && p !== null);
       }
     } catch {
-      // 容错进入单对象逐个提取模式
+      // 容错进入逐个提取模式
     }
   }
 
@@ -173,7 +444,7 @@ export function extractJsonProposals(rawReply: string): Array<Record<string, unk
 }
 
 /**
- * 确定性死线过滤：审查 LLM 提议并生成受控执行计划
+ * 确定性规则过滤：审查模型提议并生成受控执行计划
  */
 export function planConsolidation(
   items: MemoryItem[],
@@ -210,9 +481,9 @@ export function planConsolidation(
 
       const sources = ids.map((id) => byId.get(id)!);
 
-      // 死线 1: 严禁新事实捏造
+      // 死线 1: 严禁新实体捏造
       if (!noNewEntities(content, sources)) {
-        skipped.push(`merge of [${ids.join(', ')}]: “${content}” 包含原事实未曾提及的新实体或词汇（触发幻觉拦截）`);
+        skipped.push(`merge of [${ids.join(', ')}]: “${content}” 包含原事实未曾提及的新词汇（触发幻觉硬拦截）`);
         continue;
       }
 
@@ -241,9 +512,9 @@ export function planConsolidation(
         continue;
       }
 
-      // 死线 2: 用户亲自录入的声明绝对不可删除
+      // 死线 2: 用户显式录入的声明绝不可删除
       if (item.source === 'user') {
-        skipped.push(`drop ${id} (“${item.content}”): 严禁删除用户亲自录入的声明 [User Anchor]`);
+        skipped.push(`drop ${id} (“${item.content}”): 严禁删除用户核心声明 [User Anchor Protection]`);
         continue;
       }
 
@@ -256,7 +527,7 @@ export function planConsolidation(
 
       touchedIds.add(id);
       removedCount += 1;
-      ops.push({ op: 'drop', items: [item], reason: String(raw.reason || '过时碎片') });
+      ops.push({ op: 'drop', items: [item], reason: String(raw.reason || '过时琐碎信息') });
     } else {
       skipped.push(`未知操作类型: ${op}`);
     }
@@ -266,7 +537,7 @@ export function planConsolidation(
 }
 
 /**
- * 实际执行整理：基于通过死线审查的 Ops 重塑 MEMORY.md 文本并产出审计报告
+ * 实际执行整理：重构 MEMORY.md 并输出审计报告
  */
 export function applyConsolidation(
   markdown: string,
@@ -323,6 +594,8 @@ export function applyConsolidation(
     }
   }
 
+  const summary = `审阅 ${items.length} 条事实，变更 ${mergedChanges.length + droppedChanges.length} 条 (合并 ${mergedChanges.length} 组，精简 ${droppedChanges.length} 条，忽略/跳过 ${skipped.length} 条)`;
+
   const report: TidyReport = {
     botId,
     timestamp,
@@ -333,16 +606,17 @@ export function applyConsolidation(
     skipped,
     planned,
     more,
-    dryRun
+    dryRun,
+    summary
   };
 
   if (dryRun) {
     return { newMarkdown: markdown, report };
   }
 
-  // 重构文本：保留原有标题、注释与空行，仅替换/删除目标条目
+  // 重构文本：保留原有标题、注释与空行，替换或移除目标条目
   const itemMap = new Map<string, MemoryItem>(items.map((i) => [i.rawLine.trim(), i]));
-  const originalLines = markdown.split('\n');
+  const originalLines = (markdown || '').split('\n');
   const newLines: string[] = [];
 
   for (const line of originalLines) {
@@ -354,18 +628,15 @@ export function applyConsolidation(
     }
 
     if (dropItemIds.has(item.id)) {
-      // 丢弃此行
       continue;
     }
 
     if (mergeReplacements.has(item.id)) {
-      // 替换为合并后的新内容
       const newText = mergeReplacements.get(item.id)!;
-      newLines.push(`${item.prefix}${newText}`);
+      newLines.push(`${item.prefix}${newText}${item.source === 'user' ? ' [user]' : ''}`);
       continue;
     }
 
-    // 未变动行保留
     newLines.push(line);
   }
 
@@ -379,7 +650,7 @@ export function buildTidyPrompt(items: MemoryItem[]): string {
   const linesFormatted = items
     .map(
       (m) =>
-        `- ID: ${m.id} [${m.source === 'user' ? '用户声明(不可删除)' : 'Agent记录'}] 内容: “${m.content}”`
+        `- ID: ${m.id} [分类: ${m.category}] [${m.source === 'user' ? '用户声明(绝对不可删除)' : 'Agent记录'}] 内容: “${m.content}”`
     )
     .join('\n');
 
@@ -387,7 +658,7 @@ export function buildTidyPrompt(items: MemoryItem[]): string {
 
 整理规则：
 1. merge (合并)：两项或多项陈述相同事实，或存在版本升级/递进更新（如“正在尝试升级到 React 19”与“项目升级到了 React 19”），合并为一条保留所有细节（人名、时间、版本、IP 等）的最新事实。
-2. drop (丢弃)：删除一次性跑腿琐事（如已结束的订会议室、查天气、一次性临时排查）、已被后续事实彻底替代且无参考价值的废弃陈述。
+2. drop (丢弃)：删除一次性跑腿琐事（如已结束的排查、一次性命令测试）、已被后续事实彻底替代且无参考价值的废弃陈述。
 3. 绝对约束：
    - 严禁捏造新事实！合并后的文本只能包含原已有词汇和实体，不得凭空补充未经提及的新信息。
    - 用户亲自录入的声明（带有 [user] 或 [用户声明] 标记）绝对禁止删除 (drop)！

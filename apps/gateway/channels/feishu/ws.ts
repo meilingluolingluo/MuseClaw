@@ -74,12 +74,7 @@ export async function startFeishuWebSocket(
         loggerLevel: Lark.LoggerLevel.info,
         autoReconnect: true,
         onError: (err: any) => {
-          console.warn(`[FeishuWS] WebSocket 状态警告: ${err?.message || err}`);
-          // 连接断开或异常时自动防挂起重试
-          setTimeout(() => {
-            console.log('[FeishuWS] 尝试保活自愈重连...');
-            connect().catch(() => {});
-          }, 8000);
+          console.warn(`[FeishuWS] WebSocket 状态提示: ${err?.message || err}`);
         },
         onReconnecting: () => {
           console.log(`[FeishuWS] 正在尝试重新连接飞书长连接网关...`);

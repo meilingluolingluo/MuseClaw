@@ -97,12 +97,11 @@ export const SkillsView: React.FC = () => {
   });
   const [createError, setCreateError] = useState('');
 
-  // 导入技能
+  // 导入技能（仅 ZIP，支持拖拽）
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [importMode, setImportMode] = useState<'zip' | 'text'>('zip');
   const [importZipFile, setImportZipFile] = useState<File | null>(null);
-  const [importText, setImportText] = useState('');
   const [uploadingZip, setUploadingZip] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 试运行技能
@@ -379,45 +378,38 @@ export const SkillsView: React.FC = () => {
     }
   };
 
-  // 导入 ZIP 或文本
-  const handleImportSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (importMode === 'zip') {
-      if (!importZipFile) {
-        showToast('请选择要上传的 .zip 技能包文件', 'error');
-        return;
-      }
-      setUploadingZip(true);
-      try {
-        const res = await api.uploadSkillZip(importZipFile);
-        if (res.success && res.skill) {
-          showToast(`成功导入技能包 "${res.skill.name}" (${res.skill.filesCount || 1} 个文件)`, 'success');
-          setIsImportOpen(false);
-          setImportZipFile(null);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          await loadData();
-        } else {
-          showToast('上传失败：服务端未返回有效技能', 'error');
-        }
-      } catch (err: any) {
-        showToast(err.message || '上传解压技能包失败', 'error');
-      } finally {
-        setUploadingZip(false);
-      }
-    } else {
-      if (!importText.trim()) {
-        showToast('导入文本内容不能为空', 'error');
-        return;
-      }
-      try {
-        const res = await api.importSkill(importText);
-        setSkills((prev) => [res.skill, ...prev.filter((s) => s.name !== res.skill.name)]);
+  // 选择/拖入 ZIP 包
+  const acceptZipFile = (file: File | null | undefined) => {
+    if (!file) return;
+    const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
+    if (!isZip) {
+      showToast('只支持 .zip 技能包文件', 'error');
+      return;
+    }
+    setImportZipFile(file);
+  };
+
+  const handleImportSubmit = async () => {
+    if (!importZipFile) {
+      showToast('请选择要上传的 .zip 技能包文件', 'error');
+      return;
+    }
+    setUploadingZip(true);
+    try {
+      const res = await api.uploadSkillZip(importZipFile);
+      if (res.success && res.skill) {
+        showToast(`成功导入技能包 "${res.skill.name}" (${res.skill.filesCount || 1} 个文件)`, 'success');
         setIsImportOpen(false);
-        setImportText('');
-        showToast(`技能 "${res.skill.name}" 导入成功`, 'success');
-      } catch (err: any) {
-        showToast(err.message || '导入技能失败', 'error');
+        setImportZipFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        await loadData();
+      } else {
+        showToast('上传失败：服务端未返回有效技能', 'error');
       }
+    } catch (err: any) {
+      showToast(err.message || '上传解压技能包失败', 'error');
+    } finally {
+      setUploadingZip(false);
     }
   };
 
@@ -1115,57 +1107,70 @@ export const SkillsView: React.FC = () => {
         </Modal>
       )}
 
-      {/* 模态框 4: 导入 */}
+      {/* 模态框 4: 导入 ZIP */}
       {isImportOpen && (
-        <Modal isOpen={true} onClose={() => setIsImportOpen(false)} title="导入 Agent 技能规程包">
-          <form onSubmit={handleImportSubmit} className="form-col">
-            <div className="import-tabs">
-              <button
-                type="button"
-                className={`tab-btn${importMode === 'zip' ? ' is-active' : ''}`}
-                onClick={() => setImportMode('zip')}
-              >
-                ZIP 完整压缩包 (推荐)
-              </button>
-              <button
-                type="button"
-                className={`tab-btn${importMode === 'text' ? ' is-active' : ''}`}
-                onClick={() => setImportMode('text')}
-              >
-                SKILL.md 纯文本
-              </button>
+        <Modal isOpen={true} onClose={() => setIsImportOpen(false)} title="导入技能规程包">
+          <div className="form-col">
+            <div
+              className={`import-drop${isDragOver ? ' is-dragover' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-label="拖拽或点击选择 ZIP 文件"
+              onClick={() => fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                acceptZipFile(e.dataTransfer.files?.[0]);
+              }}
+            >
+              <Upload size={22} />
+              <div className="import-drop-title">拖拽 .zip 技能包到此处</div>
+              <div className="import-drop-sub">或点击选择文件 · 包含 SKILL.md、scripts/ 脚本与 assets/ 模板</div>
+              <input
+                type="file"
+                accept=".zip,application/zip"
+                aria-label="选择技能 ZIP 包"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={(e) => acceptZipFile(e.target.files?.[0])}
+              />
             </div>
 
-            {importMode === 'zip' ? (
-              <div className="import-zone">
-                <p className="skills-note">
-                  选择包含 <code>SKILL.md</code> 及配套 <code>scripts/</code> 脚本、<code>assets/</code> 模板的 <code>.zip</code> 文件。
-                </p>
-                <input
-                  type="file"
-                  accept=".zip,application/zip"
-                  aria-label="选择技能 ZIP 包"
-                  ref={fileInputRef}
-                  onChange={(e) => setImportZipFile(e.target.files?.[0] || null)}
-                />
+            {importZipFile && (
+              <div className="import-file">
+                <FileCode size={14} />
+                <span className="import-file-name">{importZipFile.name}</span>
+                <span className="import-file-size">{Math.max(1, Math.round(importZipFile.size / 1024))} KB</span>
+                <button
+                  type="button"
+                  className="import-file-remove"
+                  aria-label="移除文件"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setImportZipFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                >
+                  ✕
+                </button>
               </div>
-            ) : (
-              <textarea
-                className="form-input code-textarea"
-                placeholder="粘贴带 YAML Frontmatter 的完整 SKILL.md 文本…"
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                rows={10}
-              />
             )}
 
             <div className="form-actions">
               <button type="button" className="om-btn-subtle" onClick={() => setIsImportOpen(false)}>取消</button>
-              <button type="submit" className="om-btn-primary" disabled={uploadingZip}>
+              <button type="button" className="om-btn-primary" onClick={handleImportSubmit} disabled={uploadingZip || !importZipFile}>
                 {uploadingZip ? '解压校验中…' : '确认导入'}
               </button>
             </div>
-          </form>
+          </div>
         </Modal>
       )}
 

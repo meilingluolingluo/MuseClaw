@@ -68,7 +68,46 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const sentinel = new SentinelPolicyManager();
-const baseTools = createDefaultTools({ skillsProvider: globalSkillStore });
+const botMemory = new BotMemoryManager();
+const goalStore = new GoalStore();
+const baseTools = createDefaultTools({
+  skillsProvider: globalSkillStore,
+  memoryProvider: {
+    getMemory: (botId, userId) => botMemory.getMemory(botId, userId || 'user_web'),
+    addItem: (botId, content, category, isUser, userId) =>
+      botMemory.addMemoryItem(botId, content, category as any, isUser ?? true, userId || 'user_web'),
+    search: (botId, query, userId) => botMemory.searchMemory(botId, query, userId || 'user_web'),
+    deleteItem: (botId, itemId, userId) => botMemory.deleteMemoryItem(botId, itemId, userId || 'user_web', false)
+  },
+  goalProvider: {
+    create: (data) => goalStore.create(data),
+    list: (filter) => goalStore.list(filter),
+    get: (id) => goalStore.get(id),
+    update: (id, updates) => goalStore.update(id, updates),
+    updateStep: (id, stepIdOrIndex, status, options) => {
+      if (typeof stepIdOrIndex === 'number') {
+        return goalStore.updateStepByIndex(id, stepIdOrIndex, status, options?.note);
+      }
+      return goalStore.updateStep(id, stepIdOrIndex, status, options);
+    },
+    addStep: (id, title, desc) => goalStore.addStep(id, title, desc),
+    propose: (id, reason, steps) => goalStore.proposeReplan(id, reason, steps),
+    setStatus: (id, status) => goalStore.setStatus(id, status),
+    appendNote: (id, note) => goalStore.appendNote(id, note),
+    render: (goal) => goalStore.render(goal)
+  },
+  feishuProvider: {
+    sendMessage: async (opts) => {
+      return await feishuChannel.sender.sendMessage(
+        opts.receiveId,
+        opts.content,
+        opts.msgType || 'text',
+        opts.receiveIdType,
+        opts.title
+      );
+    }
+  }
+});
 const mcpManager = new McpClientManager();
 let tools = [...baseTools];
 
@@ -108,8 +147,15 @@ const callLLM: LLMCaller = async (messages, tools, onChunk) => {
 const botRegistry = new BotRegistry();
 const sessionStore = new SessionStore();
 const sessionRouter = new SessionRouter(botRegistry, sessionStore);
-const botMemory = new BotMemoryManager();
 const feedStore = new FeedStore();
+
+function safeJsonParse<T = any>(str: string, fallback: T = {} as T): T {
+  try {
+    return JSON.parse(str || '{}');
+  } catch {
+    return fallback;
+  }
+}
 
 function getOrCreateSession(sessionId?: string, botId?: string, userId = 'system'): Session {
   const id = sessionId || `sess_${Date.now()}`;
@@ -301,7 +347,6 @@ const proactive = new ProactiveManager({
 });
 
 // 5. 初始化长周期目标自驱推进引擎 (Long-Horizon Goals Engine)
-const goalStore = new GoalStore();
 const goalEngine = new GoalEngine({
   store: goalStore,
   sentinel,
@@ -362,6 +407,32 @@ export function startGatewayServer(defaultPort = 8799) {
     // A2. 优先处理飞书 Webhook (Challenge / 交互卡片按钮 / 消息事件)
     const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
     if (handledByFeishu) return;
+
+    // A2.1 飞书消息统一发送接口 (供沙箱工具、自动化脚本与外部系统安全推送飞书消息)
+    if (req.method === 'POST' && (url.pathname === '/api/channels/feishu/send' || url.pathname === '/api/feishu/send')) {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const content = payload.content;
+        if (!content) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: false, error: '消息内容 content 不能为空' }));
+        }
+        const result = await feishuChannel.sender.sendMessage(
+          payload.receive_id,
+          content,
+          payload.msg_type || 'text',
+          payload.receive_id_type,
+          payload.title
+        );
+        res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(result));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+      }
+    }
 
     // A3. 解析当前请求的用户登录身份 (支持 Cookie 与 Authorization Bearer Token)
     const currentUser = authService.getCurrentUser(req);
@@ -485,6 +556,7 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname.startsWith('/api/hooks') ||
     url.pathname.startsWith('/api/skills') ||
     url.pathname.startsWith('/api/infoflow') ||
+    url.pathname.startsWith('/api/channels') ||
     url.pathname.startsWith('/api/feishu');
 
     if (!currentUser && url.pathname.startsWith('/api/') && !isPublicPath) {
@@ -617,10 +689,21 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(botRegistry.list()));
     }
 
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/bots\/[^/]+$/) && !url.pathname.endsWith('/sessions') && !url.pathname.endsWith('/memory')) {
+      const id = url.pathname.replace('/api/bots/', '');
+      const bot = botRegistry.get(id);
+      if (!bot) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `Bot [${id}] 不存在` }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(bot));
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/bots') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      const data = JSON.parse(body || '{}');
+      const data = safeJsonParse(body, {});
       if (!data.name) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Bot name is required' }));
@@ -630,14 +713,17 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(created));
     }
 
-    if (req.method === 'PATCH' && url.pathname.startsWith('/api/bots/')) {
+    if ((req.method === 'PATCH' || req.method === 'PUT') && url.pathname.match(/^\/api\/bots\/[^/]+$/) && !url.pathname.endsWith('/sessions') && !url.pathname.endsWith('/memory')) {
       const id = url.pathname.replace('/api/bots/', '');
       let body = '';
       for await (const chunk of req) body += chunk;
-      const patch = JSON.parse(body || '{}');
+      const patch = safeJsonParse(body, {});
       // 兼容前端 camelCase，落库统一用 snake_case
       if (patch.systemPrompt !== undefined && patch.system_prompt === undefined) {
         patch.system_prompt = patch.systemPrompt;
+      }
+      if (patch.role !== undefined && patch.description === undefined) {
+        patch.description = patch.role;
       }
       if (patch.approvalMode !== undefined && patch.approval_level === undefined) {
         const map: Record<string, string> = { ASK: 'ask', AUTO_EDITS: 'auto_edits', FULL: 'full' };
@@ -645,6 +731,7 @@ export function startGatewayServer(defaultPort = 8799) {
       }
       delete patch.systemPrompt;
       delete patch.approvalMode;
+      delete patch.role;
       try {
         const updated = botRegistry.update(id, patch);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -680,34 +767,14 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(session));
     }
 
+    // 获取指定 Bot 长期记忆、结构化事实与配额健康指标
     if (req.method === 'GET' && (
       (url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) ||
-      url.pathname.startsWith('/api/memory/')
-    ) && !url.pathname.includes('/consolidate') && !url.pathname.includes('/undo') && !url.pathname.includes('/reports')) {
-      let id = '';
-      if (url.pathname.startsWith('/api/bots/')) {
-        id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
-      } else {
-        id = url.pathname.replace('/api/memory/', '').split('/')[0];
-      }
-      id = id || 'muse';
-      const targetUserId = currentUser?.username || 'user_web';
-      const memory = botMemory.getMemory(id, targetUserId);
-      const reports = botMemory.getConsolidationHistory(id, targetUserId);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
-        bot_id: id,
-        userId: targetUserId,
-        memory,
-        content: memory,
-        items: [],
-        reports
-      }));
-    }
-
-    if (req.method === 'PUT' && (
-      (url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) ||
-      url.pathname.startsWith('/api/memory/')
+      (url.pathname.startsWith('/api/memory/') &&
+        !url.pathname.includes('/items') &&
+        !url.pathname.includes('/consolidate') &&
+        !url.pathname.includes('/undo') &&
+        !url.pathname.includes('/reports'))
     )) {
       let id = '';
       if (url.pathname.startsWith('/api/bots/')) {
@@ -717,13 +784,130 @@ export function startGatewayServer(defaultPort = 8799) {
       }
       id = id || 'muse';
       const targetUserId = currentUser?.username || 'user_web';
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
-      const memory = typeof parsed.memory === 'string' ? parsed.memory : (typeof parsed.content === 'string' ? parsed.content : '');
-      botMemory.saveMemory(id, memory, targetUserId);
+      const data = botMemory.getMemoryData(id, targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success: true, bot_id: id, userId: targetUserId, memory, content: memory }));
+      return res.end(JSON.stringify({
+        bot_id: id,
+        userId: targetUserId,
+        memory: data.content,
+        content: data.content,
+        items: data.items,
+        stats: data.stats,
+        reports: data.reports
+      }));
+    }
+
+    // 全量更新指定 Bot 长期记忆 Markdown 文本
+    if (req.method === 'PUT' && (
+      (url.pathname.startsWith('/api/bots/') && url.pathname.endsWith('/memory')) ||
+      (url.pathname.startsWith('/api/memory/') && !url.pathname.includes('/items'))
+    )) {
+      let id = '';
+      if (url.pathname.startsWith('/api/bots/')) {
+        id = url.pathname.replace('/api/bots/', '').replace('/memory', '');
+      } else {
+        id = url.pathname.replace('/api/memory/', '').split('/')[0];
+      }
+      id = id || 'muse';
+      const targetUserId = currentUser?.username || 'user_web';
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const parsed = safeJsonParse(body, {});
+        const memory = typeof parsed.memory === 'string' ? parsed.memory : (typeof parsed.content === 'string' ? parsed.content : '');
+        botMemory.saveMemory(id, memory, targetUserId);
+        const data = botMemory.getMemoryData(id, targetUserId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          success: true,
+          bot_id: id,
+          userId: targetUserId,
+          memory: data.content,
+          content: data.content,
+          items: data.items,
+          stats: data.stats
+        }));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 新增单条记忆事实 (POST /api/memory/:id/items 或 /api/bots/:id/memory/items)
+    if (req.method === 'POST' && (
+      url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/items$/) ||
+      url.pathname.match(/^\/api\/memory\/[^/]+\/items$/)
+    )) {
+      const parts = url.pathname.split('/');
+      const id = parts[2] === 'memory' ? parts[3] : parts[3];
+      const targetUserId = currentUser?.username || 'user_web';
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const parsed = safeJsonParse(body, {});
+        const content = typeof parsed.content === 'string' ? parsed.content : '';
+        const category = parsed.category;
+        const isUser = parsed.isUser;
+
+        if (!content.trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: false, error: 'Field "content" is required and cannot be empty' }));
+        }
+
+        const result = botMemory.addMemoryItem(
+          id,
+          content,
+          category,
+          typeof isUser === 'boolean' ? isUser : true,
+          targetUserId
+        );
+
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ bot_id: id, userId: targetUserId, ...result }));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 编辑单条记忆事实 (PUT /api/memory/:id/items/:itemId 或 /api/bots/:id/memory/items/:itemId)
+    if (req.method === 'PUT' && (
+      url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/items\/[^/]+$/) ||
+      url.pathname.match(/^\/api\/memory\/[^/]+\/items\/[^/]+$/)
+    )) {
+      const parts = url.pathname.split('/');
+      const isBotsPath = parts[2] === 'bots';
+      const id = parts[3];
+      const itemId = isBotsPath ? parts[6] : parts[5];
+      const targetUserId = currentUser?.username || 'user_web';
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { content, category } = safeJsonParse(body, {});
+
+        const result = botMemory.updateMemoryItem(id, itemId, content, category, targetUserId);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ bot_id: id, userId: targetUserId, ...result }));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 删除单条记忆事实 (DELETE /api/memory/:id/items/:itemId 或 /api/bots/:id/memory/items/:itemId)
+    if (req.method === 'DELETE' && (
+      url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/items\/[^/]+$/) ||
+      url.pathname.match(/^\/api\/memory\/[^/]+\/items\/[^/]+$/)
+    )) {
+      const parts = url.pathname.split('/');
+      const isBotsPath = parts[2] === 'bots';
+      const id = parts[3];
+      const itemId = isBotsPath ? parts[6] : parts[5];
+      const targetUserId = currentUser?.username || 'user_web';
+
+      const result = botMemory.deleteMemoryItem(id, itemId, targetUserId, true);
+      res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ bot_id: id, userId: targetUserId, ...result }));
     }
 
     // 记忆受控自整理 (Memory Consolidation)
@@ -734,11 +918,11 @@ export function startGatewayServer(defaultPort = 8799) {
       const parts = url.pathname.split('/');
       const id = parts[2] === 'memory' ? parts[3] : parts[3];
       const targetUserId = currentUser?.username || 'user_web';
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const { dry_run, budget_share, dryRun } = JSON.parse(body || '{}');
-
       try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { dry_run, budget_share, dryRun } = safeJsonParse(body, {});
+
         const report = await botMemory.consolidateMemory(
           id,
           async (prompt) => {
@@ -748,8 +932,16 @@ export function startGatewayServer(defaultPort = 8799) {
           { dryRun: Boolean(dry_run || dryRun), budgetShare: typeof budget_share === 'number' ? budget_share : 0.2 },
           targetUserId
         );
+        const data = botMemory.getMemoryData(id, targetUserId);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ success: true, bot_id: id, userId: targetUserId, report, summary: report.summary }));
+        return res.end(JSON.stringify({
+          success: true,
+          bot_id: id,
+          userId: targetUserId,
+          report,
+          summary: report.summary,
+          stats: data.stats
+        }));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: false, error: err.message }));
@@ -1617,7 +1809,7 @@ fi
       return res.end(JSON.stringify({ routine: r, runs }));
     }
 
-    if (req.method === 'PUT' && url.pathname.match(/^\/api\/routines\/[^/]+$/)) {
+    if ((req.method === 'PUT' || req.method === 'PATCH') && url.pathname.match(/^\/api\/routines\/[^/]+$/)) {
       const id = url.pathname.split('/')[3];
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -1634,6 +1826,25 @@ fi
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: err.message }));
       }
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/trigger')) {
+      const id = url.pathname.replace('/api/routines/', '').replace('/trigger', '');
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsedBody: Record<string, unknown> = {};
+      try {
+        if (body.trim()) parsedBody = JSON.parse(body);
+      } catch {
+        parsedBody = { raw: body };
+      }
+
+      const authHeader = req.headers['authorization'];
+      const token = (authHeader || '').replace(/^Bearer\s+/i, '').trim() || url.searchParams.get('token') || undefined;
+
+      const result = await proactive.handleRoutineWebhookTrigger(id, token, parsedBody);
+      res.writeHead(result.status, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result.body));
     }
 
     if (req.method === 'DELETE' && url.pathname.match(/^\/api\/routines\/[^/]+$/)) {
@@ -1696,12 +1907,31 @@ fi
     // ==========================================
     // D2. 长周期目标与自主推进 API (Long-Horizon Goals API)
     // ==========================================
+    const safeParse = (str: string, fallback: any = {}) => {
+      if (!str || !str.trim()) return fallback;
+      try {
+        return JSON.parse(str);
+      } catch {
+        try {
+          return JSON.parse(str.replace(/\\"/g, '"'));
+        } catch {
+          try {
+            const withQuotes = str.replace(/([{\s,])(\w+)\s*:/g, '$1"$2":');
+            return JSON.parse(withQuotes);
+          } catch {
+            return fallback;
+          }
+        }
+      }
+    };
+
     // 获取目标列表 (GET /api/goals)
     if (req.method === 'GET' && url.pathname === '/api/goals') {
       const botId = url.searchParams.get('bot_id') || undefined;
       const status = (url.searchParams.get('status') as any) || undefined;
+      const category = url.searchParams.get('category') || undefined;
       const targetUserId = currentUser?.username || url.searchParams.get('userId') || undefined;
-      const goals = goalStore.list({ botId, status, userId: targetUserId });
+      const goals = goalStore.list({ botId, status, category, userId: targetUserId });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(goals));
     }
@@ -1710,7 +1940,7 @@ fi
     if (req.method === 'POST' && url.pathname === '/api/goals') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      const data = JSON.parse(body || '{}');
+      const data = safeParse(body, {});
       if (!data.title) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Field "title" is required' }));
@@ -1719,10 +1949,12 @@ fi
         title: data.title,
         description: data.description || data.title,
         botId: data.botId || data.bot_id || 'muse',
-        userId: currentUser?.username || data.userId || data.user_id || 'admin',
+        userId: currentUser?.username || data.userId || data.user_id || 'user_web',
         category: data.category,
+        due: data.due,
         cadence: data.cadence,
-        steps: data.steps
+        steps: data.steps,
+        notes: data.notes
       });
       res.writeHead(201, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(goal));
@@ -1740,16 +1972,112 @@ fi
       return res.end(JSON.stringify(goal));
     }
 
+    // 添加新步骤 (POST /api/goals/:id/steps)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/steps$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { title, description, verificationCommand } = safeParse(body, {});
+      if (!title) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "title" is required' }));
+      }
+      const updated = goalStore.addStep(goalId, title, description, verificationCommand);
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(updated));
+    }
+
+    // 更新单个步骤 (PATCH /api/goals/:id/steps/:stepId)
+    if (req.method === 'PATCH' && url.pathname.match(/^\/api\/goals\/[^/]+\/steps\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const goalId = parts[3];
+      const stepId = parts[5];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = safeParse(body, {});
+      const updated = goalStore.updateStep(goalId, stepId, data.status, {
+        note: data.note,
+        result: data.result,
+        verificationCommand: data.verificationCommand
+      });
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal or step not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(updated));
+    }
+
+    // 触发 Check-in 推进 (POST /api/goals/:id/checkin)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/checkin$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { note } = safeParse(body, {});
+      if (note) {
+        goalStore.appendNote(goalId, note);
+      }
+      try {
+        const result = await goalEngine.advanceGoal(goalId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, ...result }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
     // 自主推进当前步骤 (POST /api/goals/:id/advance)
     if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/advance$/)) {
       const goalId = url.pathname.split('/')[3];
       let body = '';
       for await (const chunk of req) body += chunk;
-      const override = JSON.parse(body || '{}');
+      const override = safeParse(body, {});
       try {
         const result = await goalEngine.advanceGoal(goalId, override);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: true, ...result }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 补充指导重试当前步骤 (POST /api/goals/:id/retry)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/retry$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { stepId, step_id, guidance } = safeParse(body, {});
+      try {
+        const result = await goalEngine.retryGoal(goalId, { stepId: stepId || step_id, guidance });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, ...result }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 退回指定历史步骤返工 (POST /api/goals/:id/rollback)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/rollback$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { targetStepId, target_step_id, reason } = safeParse(body, {});
+      const stepId = targetStepId || target_step_id;
+      if (!stepId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "targetStepId" is required' }));
+      }
+      try {
+        const result = await goalEngine.rollbackGoal(goalId, stepId, reason);
+        res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(result));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: false, error: err.message }));
@@ -1761,7 +2089,7 @@ fi
       const goalId = url.pathname.split('/')[3];
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { reason, proposed_steps, proposedSteps } = JSON.parse(body || '{}');
+      const { reason, proposed_steps, proposedSteps } = safeParse(body, {});
       const steps = proposed_steps || proposedSteps;
       if (!reason || !Array.isArray(steps)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1783,12 +2111,14 @@ fi
       const goalId = url.pathname.split('/')[3];
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { accept } = JSON.parse(body || '{}');
-      if (typeof accept !== 'boolean') {
+      const data = safeParse(body, {});
+      const accept = data.accept;
+      if (typeof accept !== 'boolean' && accept !== 'true' && accept !== 'false') {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Field "accept" (boolean) is required' }));
       }
-      const result = goalStore.resolveProposal(goalId, accept);
+      const isAccepted = accept === true || accept === 'true';
+      const result = goalStore.resolveProposal(goalId, isAccepted);
       res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(result));
     }
@@ -1799,11 +2129,31 @@ fi
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
-        const patch = JSON.parse(body || '{}');
+        const patch = safeParse(body, {});
         const allowed: Record<string, unknown> = {};
-        for (const key of ['title', 'description', 'status', 'progress', 'cadence', 'steps', 'botId']) {
+        for (const key of ['title', 'description', 'status', 'progress', 'cadence', 'due', 'category', 'notes', 'steps', 'botId']) {
           if (patch[key] !== undefined) allowed[key] = patch[key];
         }
+
+        // 支持通过 PATCH 直接修改步骤状态
+        if (patch.step_index !== undefined || patch.step_id !== undefined) {
+          if (patch.step_index !== undefined) {
+            goalStore.updateStepByIndex(
+              goalId,
+              Number(patch.step_index),
+              patch.step_status || patch.status,
+              patch.step_note || patch.note
+            );
+          } else {
+            goalStore.updateStep(
+              goalId,
+              String(patch.step_id),
+              patch.step_status || patch.status,
+              { note: patch.step_note || patch.note }
+            );
+          }
+        }
+
         const updated = goalStore.update(goalId, allowed as any);
         if (!updated) {
           res.writeHead(404, { 'Content-Type': 'application/json' });

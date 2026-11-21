@@ -10,16 +10,24 @@ export interface User {
 export interface Bot {
   id: string;
   name: string;
-  role: string;
+  role?: string;
+  description?: string;
   avatar?: string;
   avatarType?: string;
   model?: string;
   provider?: string;
   systemPrompt?: string;
+  system_prompt?: string;
   tools?: string[];
   allowedTools?: string[];
+  tool_allowlist?: string[];
   approvalMode?: 'ASK' | 'AUTO_EDITS' | 'FULL';
+  approval_level?: 'ask' | 'auto_edits' | 'full';
   tainted?: boolean;
+  enabled?: boolean;
+  is_coordinator?: boolean;
+  created_at?: number;
+  updated_at?: number;
 }
 
 export interface Session {
@@ -61,33 +69,101 @@ export interface Message {
   };
 }
 
-export interface GoalProposal {
+export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked' | 'skipped';
+
+export type GoalCategory =
+  | 'career'
+  | 'learning'
+  | 'engineering'
+  | 'finance'
+  | 'health'
+  | 'relationships'
+  | 'home'
+  | 'travel'
+  | 'creative'
+  | 'other'
+  | string;
+
+export interface GoalStep {
   id: string;
+  idx?: number;
   title: string;
-  diff: string;
+  description?: string;
+  verificationCommand?: string;
+  verificationOutput?: string;
+  status: StepStatus;
+  result?: string;
+  note?: string;
+  blockedReason?: string;
+  updatedAt?: number;
+}
+
+export interface GoalProposal {
+  proposalId: string;
   reason: string;
+  proposedSteps: Array<GoalStep | string>;
   status: 'pending' | 'accepted' | 'rejected';
+  createdAt?: number;
+  decidedAt?: number;
 }
 
 export interface Goal {
   id: string;
   title: string;
   description: string;
-  status: 'active' | 'paused' | 'completed';
-  progress: number;
-  checkInSchedule?: string;
-  lastCheckIn?: number;
-  proposals?: GoalProposal[];
+  botId?: string;
+  userId?: string;
+  category?: string;
+  status: 'active' | 'paused' | 'done' | 'completed' | 'cancelled';
+  progress?: number;
+  due?: string;
+  cadence?: string;
+  cronExpr?: string;
+  nextCheckInAt?: number;
+  lastCheckInAt?: number;
+  steps?: GoalStep[];
+  notes?: string;
+  proposal?: GoalProposal;
   createdAt?: number;
+  updatedAt?: number;
+}
+
+export type ScheduleKind = 'cron' | 'every' | 'at';
+export type DeliverTarget = 'silent' | 'feed' | 'im_webhook' | 'all';
+export type OverlapPolicy = 'skip' | 'queue';
+
+export interface RoutineStats {
+  totalRuns: number;
+  successRuns: number;
+  failedRuns: number;
+  avgDurationMs: number;
+}
+
+export interface RoutineToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  timestamp?: number;
 }
 
 export interface RoutineRun {
   id: string;
   routineId: string;
+  routineName?: string;
+  agentId?: string;
+  triggerSource?: 'schedule' | 'webhook' | 'manual';
   startedAt: number;
   finishedAt?: number;
+  durationMs?: number;
   status: 'running' | 'success' | 'failed';
+  error?: string;
   summary?: string;
+  output?: string;
+  toolCalls?: RoutineToolCall[];
+  approvalRequired?: boolean;
+  quiet?: boolean;
+  sessionId?: string;
   logs?: string[];
 }
 
@@ -95,31 +171,81 @@ export interface Routine {
   id: string;
   name: string;
   description?: string;
-  /** 服务端字段：cron 表达式，如 "0 9 * * 1-5" */
-  cronExpr: string;
-  /** 服务端字段：执行指令 */
-  instructions: string;
-  /** 归属的数字员工 */
   agentId: string;
+  scheduleKind?: ScheduleKind;
+  cronExpr: string;
+  scheduleHumanZh?: string;
+  timezone?: string;
+  instructions: string;
   enabled: boolean;
   status?: 'idle' | 'running' | 'paused';
   nextRunAt?: number;
+  nextRunTimes?: number[];
   lastRunAt?: number;
   lastStatus?: string;
+  overlap?: OverlapPolicy;
+  timeoutSeconds?: number;
+  feedPublish?: boolean;
+  deliverTo?: DeliverTarget;
+  deleteAfterRun?: boolean;
+  webhookSecret?: string;
+  stats?: RoutineStats;
   createdAt?: number;
+  updatedAt?: number;
 }
+
+export type MemoryCategory = 'profile' | 'preference' | 'people' | 'routine' | 'constraint' | 'general';
 
 export interface MemoryItem {
   id: string;
-  section: string;
   content: string;
+  category: MemoryCategory;
+  source: 'user' | 'agent';
   protected?: boolean;
+  rawLine?: string;
+  section?: string;
+}
+
+export interface MemoryStats {
+  totalBytes: number;
+  maxBytes: number;
+  lineCount: number;
+  maxLines: number;
+  itemCount: number;
+  userAnchorCount: number;
+  agentItemCount: number;
+  usagePercent: number;
+  status: 'healthy' | 'warning' | 'critical';
+}
+
+export interface MemoryChange {
+  op: 'merge' | 'drop';
+  before: string[];
+  after?: string;
+  reason?: string;
+  timestamp?: number;
+}
+
+export interface MemoryPlanItem {
+  op: 'merge' | 'drop';
+  ids: string[];
+  before: string[];
+  content?: string;
+  reason?: string;
 }
 
 export interface MemoryReport {
-  id: string;
+  id?: string;
+  botId?: string;
   timestamp: number;
-  summary: string;
+  considered: number;
+  changed: number;
+  merged: MemoryChange[];
+  dropped: MemoryChange[];
+  skipped: string[];
+  planned?: MemoryPlanItem[];
+  summary?: string;
+  dryRun?: boolean;
   details?: string;
 }
 

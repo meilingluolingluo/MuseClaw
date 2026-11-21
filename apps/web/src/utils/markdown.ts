@@ -79,10 +79,24 @@ renderer.html = function (token) {
 };
 
 renderer.table = function ({ header, rows }) {
-  const headerHtml = header.map((cell) => `<th class="cell-nowrap">${cell.text}</th>`).join('');
+  const parseCell = (cell: any) => {
+    if (cell.tokens && cell.tokens.length > 0) {
+      return (this.parser as any).parseInline(cell.tokens);
+    }
+    if (cell.text) {
+      return marked.parseInline(cell.text) as string;
+    }
+    return '';
+  };
+
+  const headerHtml = header
+    .map((cell) => `<th class="cell-nowrap">${parseCell(cell)}</th>`)
+    .join('');
   const bodyHtml = rows
     .map((row) => {
-      const rowCells = row.map((cell) => `<td class="cell-nowrap">${cell.text}</td>`).join('');
+      const rowCells = row
+        .map((cell) => `<td class="cell-nowrap">${parseCell(cell)}</td>`)
+        .join('');
       return `<tr>${rowCells}</tr>`;
     })
     .join('');

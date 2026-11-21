@@ -53,7 +53,7 @@ export class BotRegistry {
         id: 'muse',
         name: '小哀',
         description: 'MuseClaw 智能数字员工与协调助手',
-        system_prompt: '你是一个严谨、高效且富有同理心的自动化数字员工。你可以自主调用工具链与沙箱执行任务。',
+        system_prompt: '你是一个敏捷、自驱动的自动化代码与运维助手。直奔要点，执行命令与编辑文件前先做必要安全检查，以最少交互最快落地用户诉求。\n【网络通信与飞书推送重要规程】：\n1. 命令执行沙箱采用隔离策略（禁外网/无外部DNS），严禁在沙箱 Shell 中通过 curl、wget 直连 open.feishu.cn 等外部接口。\n2. 发送飞书通知、报告或消息时，直接调用内置工具 feishu_send_message，由宿主网关代理获取 Token 并完成消息外发。\n3. 调用 feishu_send_message 时，若未指定接收人会自动路由至系统默认通知人；推荐使用富文本互动卡片 (msg_type: "interactive")。',
         tool_allowlist: ['*'],
         memory_ns: 'bots/muse',
         is_coordinator: true,

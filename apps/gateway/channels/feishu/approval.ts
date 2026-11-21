@@ -67,7 +67,8 @@ export class FeishuApprovalBridge {
   public async pushApprovalCard(receiveId: string, req: ApprovalRequest): Promise<boolean> {
     const card = this.buildApprovalCard(req);
     try {
-      return await this.sender.sendMessage(receiveId, card, 'interactive', 'open_id');
+      const res = await this.sender.sendMessage(receiveId, card, 'interactive', 'open_id');
+      return typeof res === 'boolean' ? res : Boolean(res?.success);
     } catch (err: any) {
       console.error('[FeishuBridge] 推送审批卡片失败:', err.message);
       return false;

@@ -5,7 +5,7 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute: (args: Record<string, unknown>) => Promise<unknown>;
+  execute: (args: Record<string, unknown>, context?: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface SentinelHook {
@@ -186,7 +186,18 @@ export async function* runAgentLoop(
       break;
     }
 
-    // 4. 遍历并执行工具调用
+    // 4. 规范注入 Assistant 消息与工具声明（遵循 OpenAI/DeepSeek 协议要求 tool 前必有 assistant tool_calls）
+    messages.push({
+      role: 'assistant',
+      content: response.content || '',
+      reasoning_content: response.reasoning_content ?? '',
+      tool_calls: response.toolCalls.map((c) => ({
+        id: c.id,
+        function: { name: c.name, arguments: JSON.stringify(c.args) }
+      }))
+    });
+
+    // 5. 遍历并执行工具调用
     for (const call of response.toolCalls) {
       const toolDef = effectiveTools.find((t) => t.name === call.name);
       if (!toolDef) {
@@ -256,12 +267,12 @@ export async function* runAgentLoop(
         yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'running' };
       }
 
-      // 6. 执行具体工具 (自动还原 {{vault:KEY}} 凭据占位符)
+      // 6. 执行具体工具 (自动还原 {{vault:KEY}} 凭据占位符，支持透传执行上下文)
       const startTime = Date.now();
       let output: unknown;
       try {
         const resolvedArgs = defaultVault.resolve(call.args);
-        output = await toolDef.execute(resolvedArgs);
+        output = await toolDef.execute(resolvedArgs, context);
       } catch (err: unknown) {
         output = { error: err instanceof Error ? err.message : String(err) };
       }
@@ -320,13 +331,7 @@ export async function* runAgentLoop(
         lastErrorSig = '';
       }
 
-      // 7. 记录执行结果并注入上下文
-      messages.push({
-        role: 'assistant',
-        content: response.content,
-        reasoning_content: response.reasoning_content ?? '',
-        tool_calls: [{ id: call.id, function: { name: call.name, arguments: JSON.stringify(call.args) } }]
-      });
+      // 7. 记录具体工具执行结果并注入上下文
       messages.push({
         role: 'tool',
         tool_call_id: call.id,
@@ -340,6 +345,23 @@ export async function* runAgentLoop(
         toolCalls: [{ name: call.name, args: call.args }],
         observation: output
       });
+    }
+  }
+
+  // 9. 若执行到达最大步数且最后一条消息是工具执行结果（尚未产出最终结论），进行最后一轮无工具的纯文本总结输出
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg && lastMsg.role === 'tool') {
+    try {
+      messages.push({
+        role: 'user',
+        content: '请根据前面所有工具的调用与数据排查结果，总结并输出完整的执行结论与建议。'
+      });
+      const finalResp = await callLLM(messages, []);
+      if (finalResp?.content) {
+        yield { type: 'stream:text-delta', text: `\n\n${finalResp.content}`, bot_id: context.botId, session_id: context.sessionId };
+      }
+    } catch {
+      // 容错处理
     }
   }
 

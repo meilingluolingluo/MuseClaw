@@ -5,6 +5,13 @@ export interface FeishuSenderConfig {
   apiBase?: string;    // 默认 https://open.feishu.cn
 }
 
+export interface FeishuSendResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+  raw?: unknown;
+}
+
 export class FeishuSender {
   private appId?: string;
   private appSecret?: string;
@@ -55,62 +62,150 @@ export class FeishuSender {
   }
 
   /**
-   * 发送私聊消息（支持文本或互动卡片）
+   * 发送飞书消息（支持私聊、群聊、默认接收人，支持纯文本与互动卡片）
    */
   public async sendMessage(
-    receiveId: string,
-    content: Record<string, unknown> | string,
+    receiveId?: string,
+    content?: Record<string, unknown> | string,
     msgType: 'text' | 'interactive' = 'text',
-    receiveIdType: 'open_id' | 'user_id' | 'chat_id' = 'open_id'
-  ): Promise<boolean> {
+    receiveIdType?: 'open_id' | 'user_id' | 'chat_id' | 'email',
+    title?: string
+  ): Promise<FeishuSendResult> {
+    const targetId = receiveId || process.env.FEISHU_NOTIFY_USER_ID;
+
     // 优先支持自定义机器人 Webhook
-    if (this.webhookUrl) {
-      return this.sendWebhook(content, msgType);
+    if (this.webhookUrl && !targetId) {
+      return this.sendWebhook(content || '', msgType, title);
     }
 
-    const token = await this.getTenantAccessToken();
-    const url = `${this.apiBase}/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`;
+    if (!targetId && !this.webhookUrl) {
+      return {
+        success: false,
+        error: '未指定接收人 ID (receive_id)，且环境变量未配置 FEISHU_NOTIFY_USER_ID 或 FEISHU_WEBHOOK_URL'
+      };
+    }
 
-    const bodyContent = typeof content === 'string'
-      ? (msgType === 'text' ? JSON.stringify({ text: content }) : content)
-      : JSON.stringify(content);
+    // 智能推断 receive_id_type
+    let effectiveIdType = receiveIdType;
+    if (!effectiveIdType && targetId) {
+      if (targetId.startsWith('oc_')) effectiveIdType = 'chat_id';
+      else if (targetId.startsWith('ou_')) effectiveIdType = 'open_id';
+      else if (targetId.startsWith('on_')) effectiveIdType = 'open_id';
+      else if (targetId.includes('@')) effectiveIdType = 'email';
+      else effectiveIdType = 'open_id';
+    }
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        receive_id: receiveId,
-        msg_type: msgType,
-        content: bodyContent
-      })
-    });
+    try {
+      const token = await this.getTenantAccessToken();
+      const url = `${this.apiBase}/open-apis/im/v1/messages?receive_id_type=${effectiveIdType || 'open_id'}`;
 
-    const data = await res.json();
-    return res.ok && data.code === 0;
+      let bodyContent: string;
+      if (msgType === 'interactive') {
+        let cardObj: Record<string, unknown>;
+        if (typeof content === 'string') {
+          // 如果传入普通 Markdown 或文本，自动格式化为飞书标准富文本卡片
+          cardObj = {
+            config: { wide_screen_mode: true },
+            header: {
+              template: 'blue',
+              title: { tag: 'plain_text', content: title || 'MuseClaw 巡检与通知' }
+            },
+            elements: [
+              {
+                tag: 'div',
+                text: { tag: 'lark_md', content }
+              }
+            ]
+          };
+        } else {
+          cardObj = content || {};
+        }
+        bodyContent = JSON.stringify(cardObj);
+      } else {
+        const textStr = typeof content === 'string' ? content : JSON.stringify(content);
+        bodyContent = JSON.stringify({ text: textStr });
+      }
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          receive_id: targetId,
+          msg_type: msgType,
+          content: bodyContent
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.code !== 0) {
+        return {
+          success: false,
+          error: `飞书 API 调用失败 (code: ${data?.code}): ${data?.msg || JSON.stringify(data)}`,
+          raw: data
+        };
+      }
+
+      return {
+        success: true,
+        messageId: data.data?.message_id,
+        raw: data.data
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `发送飞书消息异常: ${err?.message || String(err)}`
+      };
+    }
   }
 
   /**
    * 通过群机器人 Webhook 发送
    */
-  public async sendWebhook(content: Record<string, unknown> | string, msgType: 'text' | 'interactive' = 'text'): Promise<boolean> {
+  public async sendWebhook(
+    content: Record<string, unknown> | string,
+    msgType: 'text' | 'interactive' = 'text',
+    title?: string
+  ): Promise<FeishuSendResult> {
     if (!this.webhookUrl) {
-      throw new Error('未配置 飞书 webhookUrl');
+      return { success: false, error: '未配置 飞书 webhookUrl' };
     }
 
-    const payload = msgType === 'text'
-      ? { msg_type: 'text', content: { text: typeof content === 'string' ? content : JSON.stringify(content) } }
-      : { msg_type: 'interactive', card: typeof content === 'string' ? JSON.parse(content) : content };
+    try {
+      let payload: Record<string, unknown>;
+      if (msgType === 'text') {
+        const textStr = typeof content === 'string' ? content : JSON.stringify(content);
+        payload = { msg_type: 'text', content: { text: textStr } };
+      } else {
+        let card = typeof content === 'string' ? null : content;
+        if (!card && typeof content === 'string') {
+          card = {
+            config: { wide_screen_mode: true },
+            header: {
+              template: 'blue',
+              title: { tag: 'plain_text', content: title || 'MuseClaw 巡检与通知' }
+            },
+            elements: [{ tag: 'div', text: { tag: 'lark_md', content } }]
+          };
+        }
+        payload = { msg_type: 'interactive', card };
+      }
 
-    const res = await fetch(this.webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+      const res = await fetch(this.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-    const data = await res.json();
-    return res.ok && data.code === 0;
+      const data = await res.json();
+      if (!res.ok || data.code !== 0) {
+        return { success: false, error: `Webhook 发送失败: ${data?.msg || JSON.stringify(data)}`, raw: data };
+      }
+      return { success: true, raw: data };
+    } catch (err: any) {
+      return { success: false, error: `Webhook 异常: ${err?.message || err}` };
+    }
   }
 }

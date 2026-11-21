@@ -152,6 +152,11 @@ export class SentinelPolicyManager implements SentinelHook {
   ): { isSource: boolean; reason?: string } {
     const toolLower = name.toLowerCase();
 
+    // 排除内置记忆、工件与技能：Agent 检索自身记忆或工件是标准协作行为，严禁将其污染扩散为外泄风险
+    if (toolLower === 'memory' || toolLower === 'read_memory' || toolLower === 'save_artifact' || toolLower === 'skills') {
+      return { isSource: false };
+    }
+
     // 显式私有数据读取工具
     const sourcePatterns = [
       'read_file',
@@ -163,7 +168,6 @@ export class SentinelPolicyManager implements SentinelHook {
       'fetch_internal_api',
       'get_secret',
       'read_secret',
-      'read_memory',
       'get_contacts',
       'fetch_user_profile',
       'load_private_data'
@@ -178,21 +182,14 @@ export class SentinelPolicyManager implements SentinelHook {
       const readCommands = ['cat ', 'head ', 'tail ', 'less ', 'more ', 'grep ', 'awk ', 'sed '];
       const sensitiveKeywords = [
         '.env',
+        '/etc/shadow',
         'id_rsa',
         'id_ed25519',
-        'credentials',
-        'shadow',
-        'token',
-        'key',
-        'password',
+        '.aws/credentials',
+        'salaries.xlsx',
         'salary',
-        'finance',
-        'financial',
-        'user_data',
-        'customer',
-        'database',
-        'dump.sql',
-        'private'
+        'financial_report',
+        'dump.sql'
       ];
       const hasReadCmd = readCommands.some((c) => cmd.includes(c));
       const hasSensitiveKeyword = sensitiveKeywords.some((k) => cmd.includes(k));
@@ -209,6 +206,12 @@ export class SentinelPolicyManager implements SentinelHook {
    */
   public isEgressAction(name: string, args: Record<string, unknown>): { isEgress: boolean; target?: string } {
     const toolLower = name.toLowerCase();
+
+    // 飞书消息发送工具
+    if (toolLower === 'feishu_send_message' || toolLower.includes('feishu')) {
+      const target = `open.feishu.cn (Feishu: ${args.receive_id || 'default_user'})`;
+      return { isEgress: true, target };
+    }
 
     // 显式出网与通信类工具
     const egressToolPatterns = [
@@ -347,17 +350,22 @@ export class SentinelPolicyManager implements SentinelHook {
 
       // 核心凭证与敏感系统文件外泄防御
       const credentialPatterns = this.policyConfig.credential_patterns || ['/etc/shadow', '/etc/sudoers', '.ssh/id_rsa', '.ssh/id_ed25519', '.aws/credentials'];
-      const matchedCred = credentialPatterns.find((pattern) => cmd.includes(pattern));
+      const isHarmlessGitMeta = /git\s+(check-ignore|status|diff\s+--name-only|ls-files)/.test(cmd);
+      const matchedCred = !isHarmlessGitMeta ? credentialPatterns.find((pattern) => cmd.includes(pattern)) : undefined;
       if (matchedCred) {
-        const reason = `Shell 尝试访问敏感凭证或私钥文件 [${matchedCred}]: ${cmd}`;
-        this.auditLog.record('SENTINEL_INTERCEPT', {
-          sessionId: context?.sessionId,
-          botId: context?.botId,
-          tool: name,
-          target: cmd,
-          details: { reason }
-        });
-        return { isDangerous: true, reason };
+        // 在 full 模式下，项目工作区内的 .env / 配置文件读取免批放行；仅阻止对操作系统级高危凭证 (/etc/shadow, /etc/sudoers, 私钥 id_rsa) 的非授权窥探
+        const isSystemCredential = ['/etc/shadow', '/etc/sudoers', 'id_rsa', 'id_ed25519', '.aws/credentials'].some((sc) => matchedCred.includes(sc));
+        if (isSystemCredential || level !== 'full') {
+          const reason = `Shell 尝试访问敏感凭证或私钥文件 [${matchedCred}]: ${cmd}`;
+          this.auditLog.record('SENTINEL_INTERCEPT', {
+            sessionId: context?.sessionId,
+            botId: context?.botId,
+            tool: name,
+            target: cmd,
+            details: { reason }
+          });
+          return { isDangerous: true, reason };
+        }
       }
     }
 
@@ -387,8 +395,8 @@ export class SentinelPolicyManager implements SentinelHook {
       const targetHost = String(egress.target || '');
       const isAllowed = allowlist.some((domain) => {
         if (domain === '*') return true;
-        if (domain.startsWith('*.')) return targetHost.includes(domain.slice(2));
-        return targetHost.includes(domain);
+        if (domain.startsWith('*.')) return targetHost.toLowerCase().includes(domain.slice(2).toLowerCase());
+        return targetHost.toLowerCase().includes(domain.toLowerCase());
       });
 
       if (!isAllowed) {

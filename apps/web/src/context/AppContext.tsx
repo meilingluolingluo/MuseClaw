@@ -17,6 +17,7 @@ interface AppContextType {
   sessions: Session[];
   activeSessionId: string | null;
   activeSession: Session | null;
+  setActiveBotId: (botId: string) => void;
   selectSession: (sessionId: string) => void;
   createNewSession: (silent?: boolean) => Promise<Session | undefined>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -329,6 +330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         tab,
         setTab,
+        setActiveBotId,
         theme,
         setTheme,
         user,

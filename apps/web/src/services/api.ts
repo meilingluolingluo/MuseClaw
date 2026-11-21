@@ -7,6 +7,8 @@ import type {
   RoutineRun,
   MemoryItem,
   MemoryReport,
+  MemoryCategory,
+  MemoryStats,
   Artifact,
   AuditLog,
   Grant,
@@ -112,14 +114,38 @@ export const api = {
   getMeshNodes: () => request<any[]>('/api/mesh/nodes'),
 
   // Goals
-  getGoals: () => request<Goal[]>('/api/goals'),
+  getGoals: (filter?: { category?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    if (filter?.category) params.set('category', filter.category);
+    if (filter?.status) params.set('status', filter.status);
+    const qs = params.toString();
+    return request<Goal[]>(`/api/goals${qs ? `?${qs}` : ''}`);
+  },
   createGoal: (data: Partial<Goal>) => request<Goal>('/api/goals', { method: 'POST', body: JSON.stringify(data) }),
-  updateGoal: (id: string, data: Partial<Goal>) =>
+  updateGoal: (id: string, data: Partial<Goal> & Record<string, any>) =>
     request<Goal>(`/api/goals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteGoal: (id: string) => request<{ success: boolean }>(`/api/goals/${id}`, { method: 'DELETE' }),
+  addGoalStep: (goalId: string, data: { title: string; description?: string; verificationCommand?: string }) =>
+    request<Goal>(`/api/goals/${goalId}/steps`, { method: 'POST', body: JSON.stringify(data) }),
+  updateGoalStep: (
+    goalId: string,
+    stepId: string,
+    data: { status?: string; note?: string; verificationCommand?: string }
+  ) => request<Goal>(`/api/goals/${goalId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  advanceGoal: (id: string, override?: any) =>
+    request<any>(`/api/goals/${id}/advance`, { method: 'POST', body: JSON.stringify(override || {}) }),
+  checkInGoal: (id: string, note?: string) =>
+    request<any>(`/api/goals/${id}/checkin`, { method: 'POST', body: JSON.stringify({ note }) }),
+  retryGoal: (id: string, data?: { stepId?: string; guidance?: string }) =>
+    request<any>(`/api/goals/${id}/retry`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  rollbackGoal: (id: string, data: { targetStepId: string; reason?: string }) =>
+    request<any>(`/api/goals/${id}/rollback`, { method: 'POST', body: JSON.stringify(data) }),
+  resolveProposal: (id: string, accept: boolean) =>
+    request<any>(`/api/goals/${id}/proposal/resolve`, { method: 'POST', body: JSON.stringify({ accept }) }),
 
   // Routines
   getRoutines: () => request<Routine[]>('/api/routines'),
+  getRoutine: (id: string) => request<{ routine: Routine; runs: RoutineRun[] }>(`/api/routines/${id}`),
   createRoutine: async (data: Partial<Routine>): Promise<Routine> => {
     const res = await request<{ success: boolean; routine: Routine }>('/api/routines', {
       method: 'POST',
@@ -130,20 +156,56 @@ export const api = {
   updateRoutine: (id: string, data: Partial<Routine>) =>
     request<Routine>(`/api/routines/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteRoutine: (id: string) => request<{ success: boolean }>(`/api/routines/${id}`, { method: 'DELETE' }),
-  runRoutine: (id: string) => request<RoutineRun>(`/api/routines/${id}/run`, { method: 'POST' }),
+  runRoutine: (id: string) => request<{ success: boolean; message: string; run?: RoutineRun }>(`/api/routines/${id}/run`, { method: 'POST' }),
+  toggleRoutine: (id: string) => request<{ success: boolean; enabled: boolean }>(`/api/routines/${id}/toggle`, { method: 'POST' }),
   getRoutineRuns: (id: string) => request<RoutineRun[]>(`/api/routines/${id}/runs`),
+  triggerRoutineWebhook: (id: string, token?: string, payload?: unknown) =>
+    request<{ success: boolean; message: string }>(
+      `/api/routines/${id}/trigger${token ? `?token=${encodeURIComponent(token)}` : ''}`,
+      { method: 'POST', body: JSON.stringify(payload || {}) }
+    ),
 
   // Memory
   getMemory: (botId: string) =>
-    request<{ content: string; items: MemoryItem[]; reports: MemoryReport[] }>(`/api/memory/${botId}`),
+    request<{
+      content: string;
+      items: MemoryItem[];
+      stats?: MemoryStats;
+      reports: MemoryReport[];
+    }>(`/api/memory/${botId}`),
   updateMemory: (botId: string, content: string) =>
-    request<{ success: boolean }>(`/api/memory/${botId}`, { method: 'PUT', body: JSON.stringify({ content }) }),
-  consolidateMemory: (botId: string, dryRun: boolean) =>
-    request<{ success: boolean; summary?: string; diff?: string }>(`/api/memory/${botId}/consolidate`, {
-      method: 'POST',
-      body: JSON.stringify({ dryRun }),
-    }),
-  undoMemory: (botId: string) => request<{ success: boolean }>(`/api/memory/${botId}/undo`, { method: 'POST' }),
+    request<{ success: boolean; content: string; items: MemoryItem[]; stats: MemoryStats }>(
+      `/api/memory/${botId}`,
+      { method: 'PUT', body: JSON.stringify({ content }) }
+    ),
+  addMemoryItem: (botId: string, content: string, category: MemoryCategory = 'general', isUser = true) =>
+    request<{ success: boolean; item?: MemoryItem; items: MemoryItem[]; stats: MemoryStats; warning?: string; error?: string }>(
+      `/api/memory/${botId}/items`,
+      { method: 'POST', body: JSON.stringify({ content, category, isUser }) }
+    ),
+  updateMemoryItem: (botId: string, itemId: string, content: string, category?: MemoryCategory) =>
+    request<{ success: boolean; item?: MemoryItem; items: MemoryItem[]; stats: MemoryStats; error?: string }>(
+      `/api/memory/${botId}/items/${itemId}`,
+      { method: 'PUT', body: JSON.stringify({ content, category }) }
+    ),
+  deleteMemoryItem: (botId: string, itemId: string) =>
+    request<{ success: boolean; items: MemoryItem[]; stats: MemoryStats; error?: string }>(
+      `/api/memory/${botId}/items/${itemId}`,
+      { method: 'DELETE' }
+    ),
+  consolidateMemory: (botId: string, dryRun: boolean, budgetShare = 0.2) =>
+    request<{ success: boolean; report: MemoryReport; summary?: string; stats?: MemoryStats; error?: string }>(
+      `/api/memory/${botId}/consolidate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dryRun, budget_share: budgetShare })
+      }
+    ),
+  undoMemory: (botId: string) =>
+    request<{ success: boolean; message: string; restoredMemory?: string; stats?: MemoryStats; error?: string }>(
+      `/api/memory/${botId}/undo`,
+      { method: 'POST' }
+    ),
 
   // Feed
   getFeed: () => request<{ posts: FeedPost[]; settings?: any }>('/api/feed'),
@@ -237,6 +299,10 @@ export const api = {
     request<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(filePath)}`, {
       method: 'DELETE',
     }),
+
+  // Feed & Activity
+  getFeedActivity: (userId?: string) =>
+    request<any[]>(`/api/feed/activity${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`),
 
   // Security & Audit
   getPolicy: () => request<any>('/api/policy'),

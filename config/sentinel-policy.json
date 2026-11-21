@@ -34,6 +34,7 @@
     "127.0.0.1",
     "*.feishu.cn",
     "open.feishu.cn",
+    "feishu",
     "api.deepseek.com",
     "api.openai.com"
   ],

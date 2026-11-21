@@ -13,6 +13,46 @@ export interface SkillsProvider {
   remove: (name: string) => { success: boolean; error?: string };
 }
 
+export interface MemoryProvider {
+  getMemory?: (botId: string, userId?: string) => string;
+  addItem?: (botId: string, content: string, category?: string, isUser?: boolean, userId?: string) => { success: boolean; item?: any; warning?: string; error?: string };
+  search?: (botId: string, query: string, userId?: string) => Array<{ item: any; score: number }>;
+  deleteItem?: (botId: string, itemId: string, userId?: string) => { success: boolean; error?: string };
+}
+
+export interface GoalProvider {
+  create?: (data: {
+    title: string;
+    description?: string;
+    steps?: string[];
+    category?: string;
+    due?: string;
+    cadence?: string;
+    botId?: string;
+    userId?: string;
+    notes?: string;
+  }) => any;
+  list?: (filter?: { botId?: string; status?: any; category?: string; userId?: string }) => any[];
+  get?: (id: string) => any;
+  update?: (id: string, updates: any) => any;
+  updateStep?: (id: string, stepIdOrIndex: string | number, status?: any, options?: any) => any;
+  addStep?: (id: string, title: string, description?: string) => any;
+  propose?: (id: string, reason: string, steps: string[]) => any;
+  setStatus?: (id: string, status: any) => any;
+  appendNote?: (id: string, note: string) => any;
+  render?: (goal: any) => string;
+}
+
+export interface FeishuProvider {
+  sendMessage: (options: {
+    receiveId?: string;
+    content: string | Record<string, unknown>;
+    msgType?: 'text' | 'interactive';
+    receiveIdType?: 'open_id' | 'user_id' | 'chat_id' | 'email';
+    title?: string;
+  }) => Promise<{ success: boolean; messageId?: string; error?: string; raw?: unknown }>;
+}
+
 /**
  * 基础内置工具集（含 MicroSandbox 隔离与技能阶梯工具）
  */
@@ -22,11 +62,16 @@ export function createDefaultTools(options?: {
   workspaceDir?: string;
   microSandbox?: MicroSandbox;
   skillsProvider?: SkillsProvider;
+  memoryProvider?: MemoryProvider;
+  goalProvider?: GoalProvider;
+  feishuProvider?: FeishuProvider;
 }): ToolDefinition[] {
   const browserWorkerUrl = options?.browserWorkerUrl || 'http://127.0.0.1:8790';
   const artifactsDir = options?.artifactsDir || path.resolve(process.cwd(), 'apps/gateway/data/artifacts');
   const workspaceDir = options?.workspaceDir || process.cwd();
   const skillsProvider = options?.skillsProvider;
+  const goalProvider = options?.goalProvider;
+  const feishuProvider = options?.feishuProvider;
 
   // 初始化微沙箱引擎（若外部未传入，则根据工作区自动创建）
   const sandbox = options?.microSandbox || new MicroSandbox({ workspaceDir });
@@ -126,6 +171,252 @@ export function createDefaultTools(options?: {
           }
 
           return { error: `未知操作 action: ${action}` };
+        } catch (err: any) {
+          return { error: err.message || String(err) };
+        }
+      }
+    },
+    // 长期受控记忆检索与事实持久化沉淀
+    {
+      name: 'memory',
+      description: '数字员工受控长期记忆检索与事实沉淀工具。action="recall" 检索已有关键事实与偏好；action="remember" 沉淀新发现的重要规则、环境信息或协作偏好；action="forget" 遗忘特定过时条目。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['recall', 'remember', 'forget'], description: '操作类型' },
+          content: { type: 'string', description: '要沉淀的事实文本（remember 时必填）' },
+          category: {
+            type: 'string',
+            enum: ['profile', 'preference', 'people', 'routine', 'constraint', 'general'],
+            description: '记忆分类：profile(身份画像), preference(偏好习惯), people(关键人物), routine(例行约定), constraint(业务红线), general(通用知识)'
+          },
+          query: { type: 'string', description: '检索查询词或待遗忘的条目 ID/关键词（recall/forget 时必填）' },
+          botId: { type: 'string', description: '目标员工标识，默认为当前员工' }
+        },
+        required: ['action']
+      },
+      execute: async (args, execContext?: any) => {
+        const memoryProvider = options?.memoryProvider;
+        if (!memoryProvider) {
+          return { error: '当前沙箱运行环境未挂载长期记忆管理器 (MemoryProvider 未配置)' };
+        }
+        const action = String(args.action || '');
+        const targetBot = String(args.botId || execContext?.botId || execContext?.profile?.id || 'muse');
+        const targetUser = String(execContext?.userId || 'user_web');
+
+        try {
+          if (action === 'recall') {
+            const q = String(args.query || '').trim();
+            if (!q) {
+              const raw = memoryProvider.getMemory ? memoryProvider.getMemory(targetBot, targetUser) : '';
+              return { botId: targetBot, userId: targetUser, memory: raw };
+            }
+            if (memoryProvider.search) {
+              const results = memoryProvider.search(targetBot, q, targetUser);
+              return {
+                botId: targetBot,
+                userId: targetUser,
+                query: q,
+                matchedCount: results.length,
+                facts: results.slice(0, 10).map((r) => ({
+                  id: r.item.id,
+                  category: r.item.category,
+                  source: r.item.source,
+                  content: r.item.content,
+                  score: Math.round(r.score * 100) / 100
+                }))
+              };
+            }
+            return { error: '当前记忆管理器不支持 search 方法' };
+          }
+
+          if (action === 'remember') {
+            const text = String(args.content || '').trim();
+            if (!text) return { error: '沉淀记忆事实时 content 不能为空' };
+            const cat = (args.category || 'general') as any;
+            const isUser = typeof args.isUser === 'boolean' ? args.isUser : true;
+            if (memoryProvider.addItem) {
+              const res = memoryProvider.addItem(targetBot, text, cat, isUser, targetUser);
+              return {
+                success: res.success,
+                botId: targetBot,
+                userId: targetUser,
+                recorded: text,
+                category: cat,
+                item: res.item,
+                warning: res.warning,
+                error: res.error
+              };
+            }
+            return { error: '当前记忆管理器不支持 addItem 方法' };
+          }
+
+          if (action === 'forget') {
+            const target = String(args.query || args.content || '').trim();
+            if (!target) return { error: '遗忘记忆时必须提供 query 指定待删除的条目 ID 或关键事实' };
+            if (memoryProvider.deleteItem) {
+              const res = memoryProvider.deleteItem(targetBot, target, targetUser);
+              return {
+                success: res.success,
+                botId: targetBot,
+                userId: targetUser,
+                target,
+                error: res.error
+              };
+            }
+            return { error: '当前记忆管理器不支持 deleteItem 方法' };
+          }
+
+          return { error: `未知操作 action: ${action}` };
+        } catch (err: any) {
+          return { error: err.message || String(err) };
+        }
+      }
+    },
+    // 长周期跨会话目标与计划推进管理
+    {
+      name: 'goals',
+      description: '管理用户的长周期跨会话目标与分步推进计划。操作: `create` (title, description, steps[], category, due, cadence), `list` (status, category), `get` (goal_id), `update` (goal_id, title, description, category, due, cadence), `update_step` (goal_id, step_index, status, note), `add_step` (goal_id, title), `propose` (goal_id, reason, steps: 建议修订的新后续步骤), `set_status` (goal_id, status: active|paused|done|cancelled), `note` (goal_id, note)。当用户提出多步骤、中长周期目标或项目时，创建或更新目标；并随着推进及时标记步骤状态与成果。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['create', 'list', 'get', 'update', 'update_step', 'add_step', 'propose', 'set_status', 'note'],
+            description: '操作动作'
+          },
+          goal_id: { type: 'string', description: '目标 ID' },
+          title: { type: 'string', description: '目标名称' },
+          description: { type: 'string', description: '目标描述与背景说明' },
+          steps: { type: 'array', items: { type: 'string' }, description: '步骤标题列表' },
+          category: {
+            type: 'string',
+            description: '领域分类: career(职业), learning(学习), engineering(研发), finance(财务), health(健康), relationships(协作), home(日常), travel(差旅), creative(创意), other(其他)'
+          },
+          due: { type: 'string', description: '目标截止日期 (YYYY-MM-DD)' },
+          cadence: {
+            type: 'string',
+            description: '提醒与巡检周期，如 "daily 09:00", "weekdays 09:30", "weekly mon 10:00", "monthly 1 09:00" 或 ""(不提醒)'
+          },
+          step_index: { type: 'integer', description: '步骤序号 (1-based)' },
+          step_id: { type: 'string', description: '步骤 ID (如 s_1)' },
+          status: { type: 'string', description: '目标状态 (active|paused|done|cancelled) 或步骤状态 (pending|in_progress|done|blocked|skipped)' },
+          reason: { type: 'string', description: '修订计划的充分理由 (propose 时使用)' },
+          note: { type: 'string', description: '备忘或阶段性进展记录' }
+        },
+        required: ['action']
+      },
+      execute: async (args, context) => {
+        if (!goalProvider) {
+          return { error: '长周期目标服务提供者未初始化' };
+        }
+        const action = String(args.action || '');
+        const targetBot = context?.botId || 'muse';
+        const targetUser = context?.userId || 'user_web';
+
+        try {
+          if (action === 'create') {
+            if (!args.title) return { error: '创建目标缺少 title 参数' };
+            const goal = goalProvider.create?.({
+              title: String(args.title),
+              description: args.description ? String(args.description) : '',
+              steps: Array.isArray(args.steps) ? args.steps.map(String) : [],
+              category: args.category ? String(args.category) : 'other',
+              due: args.due ? String(args.due) : '',
+              cadence: args.cadence !== undefined ? String(args.cadence) : 'weekdays 09:30',
+              botId: targetBot,
+              userId: targetUser,
+              notes: args.note ? String(args.note) : ''
+            });
+            return {
+              success: true,
+              message: `已创建目标 "${goal.title}" (ID: ${goal.id})`,
+              goal: goalProvider.render ? goalProvider.render(goal) : goal
+            };
+          }
+
+          if (action === 'list') {
+            const list = goalProvider.list?.({
+              status: args.status ? (String(args.status) as any) : undefined,
+              category: args.category ? String(args.category) : undefined,
+              botId: targetBot,
+              userId: targetUser
+            }) || [];
+            if (list.length === 0) {
+              return { success: true, message: '暂无符合条件的目标', count: 0, goals: [] };
+            }
+            const rendered = goalProvider.render
+              ? list.map((g) => goalProvider.render!(g)).join('\n\n')
+              : list;
+            return { success: true, count: list.length, output: rendered };
+          }
+
+          const goalId = String(args.goal_id || '');
+          if (!goalId) {
+            return { error: '该操作必须提供 goal_id 参数' };
+          }
+
+          if (action === 'get') {
+            const goal = goalProvider.get?.(goalId);
+            if (!goal) return { error: `未找到目标 ${goalId}` };
+            return { success: true, output: goalProvider.render ? goalProvider.render(goal) : goal };
+          }
+
+          if (action === 'update') {
+            const updates: Record<string, any> = {};
+            if (args.title !== undefined) updates.title = String(args.title);
+            if (args.description !== undefined) updates.description = String(args.description);
+            if (args.category !== undefined) updates.category = String(args.category);
+            if (args.due !== undefined) updates.due = String(args.due);
+            if (args.cadence !== undefined) updates.cadence = String(args.cadence);
+            const goal = goalProvider.update?.(goalId, updates);
+            if (!goal) return { error: `更新目标 ${goalId} 失败` };
+            return { success: true, message: `目标已更新`, output: goalProvider.render ? goalProvider.render(goal) : goal };
+          }
+
+          if (action === 'update_step') {
+            let stepIdx = args.step_index ? Number(args.step_index) : undefined;
+            const stepId = args.step_id ? String(args.step_id) : undefined;
+            const status = args.status ? (String(args.status) as any) : undefined;
+            const note = args.note ? String(args.note) : undefined;
+
+            const goal = goalProvider.updateStep?.(goalId, stepId || stepIdx || 1, status, { note });
+            if (!goal) return { error: `步骤更新失败` };
+            return { success: true, message: `步骤状态已更新`, output: goalProvider.render ? goalProvider.render(goal) : goal };
+          }
+
+          if (action === 'add_step') {
+            if (!args.title) return { error: 'add_step 需要提供 title 参数' };
+            const goal = goalProvider.addStep?.(goalId, String(args.title), args.description ? String(args.description) : undefined);
+            if (!goal) return { error: `增加步骤失败` };
+            return { success: true, message: `已增加步骤: ${args.title}`, output: goalProvider.render ? goalProvider.render(goal) : goal };
+          }
+
+          if (action === 'propose') {
+            if (!args.reason || !Array.isArray(args.steps) || args.steps.length === 0) {
+              return { error: 'propose 需要提供 reason 和至少一个后续步骤 steps 数组' };
+            }
+            const proposal = goalProvider.propose?.(goalId, String(args.reason), args.steps.map(String));
+            return {
+              success: true,
+              message: `已提交计划修订提案，等待用户在应用内审批 (理由: ${args.reason})`,
+              proposal
+            };
+          }
+
+          if (action === 'set_status') {
+            if (!args.status) return { error: 'set_status 需要提供 status 参数' };
+            const goal = goalProvider.setStatus?.(goalId, String(args.status) as any);
+            return { success: true, message: `目标状态已变更为 ${args.status}`, goal };
+          }
+
+          if (action === 'note') {
+            if (!args.note) return { error: 'note 操作需要提供 note 参数' };
+            const goal = goalProvider.appendNote?.(goalId, String(args.note));
+            return { success: true, message: `已追加备忘记录`, goal };
+          }
+
+          return { error: `不支持的 action: ${action}` };
         } catch (err: any) {
           return { error: err.message || String(err) };
         }
@@ -379,6 +670,79 @@ export function createDefaultTools(options?: {
           return { content, sizeBytes: Buffer.byteLength(content, 'utf-8') };
         } catch (error: any) {
           return { error: error.message };
+        }
+      }
+    },
+
+    // 阶梯 1/3 (IM Egress): 飞书消息安全推送 (由宿主网关代发，解决沙箱禁网/无DNS问题)
+    {
+      name: 'feishu_send_message',
+      description: '通过宿主网关飞书通道发送消息（支持私聊 open_id、群聊 chat_id、邮箱或系统预设通知人；支持纯文本与互动卡片）。沙箱 Shell 默认隔离外网与 DNS，禁止直接 curl open.feishu.cn，必须通过此工具由宿主网关代理外发。',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: '消息正文内容，支持纯文本或 Markdown 排版' },
+          receive_id: { type: 'string', description: '接收者标识（用户 open_id 如 ou_xxx，群聊 chat_id 如 oc_xxx，或邮箱）。如不提供则自动推送到系统预设通知人' },
+          title: { type: 'string', description: '消息或卡片标题（可选，如 "代码巡检完成通知"）' },
+          msg_type: {
+            type: 'string',
+            enum: ['text', 'interactive'],
+            description: '消息类型：text (纯文本) 或 interactive (富文本互动卡片，默认推荐)'
+          },
+          receive_id_type: {
+            type: 'string',
+            enum: ['open_id', 'chat_id', 'user_id', 'email'],
+            description: '接收者 ID 类型（可选，会自动根据 ID 前缀智能推导）'
+          }
+        },
+        required: ['content']
+      },
+      execute: async (args) => {
+        const content = String(args.content || '');
+        const receiveId = args.receive_id ? String(args.receive_id) : undefined;
+        const title = args.title ? String(args.title) : undefined;
+        const msgType = (args.msg_type === 'text' ? 'text' : 'interactive') as 'text' | 'interactive';
+        const receiveIdType = args.receive_id_type as any;
+
+        console.log(`[Tool:feishu_send_message] 推送飞书消息: to=${receiveId || 'default_notify_user'} type=${msgType}`);
+
+        if (feishuProvider) {
+          return await feishuProvider.sendMessage({
+            receiveId,
+            content,
+            msgType,
+            receiveIdType,
+            title
+          });
+        }
+
+        // 回退方案：通过宿主网关本地接口发送 (127.0.0.1:8799 或 8787)
+        try {
+          const gwPort = process.env.PORT || 8799;
+          const res = await fetch(`http://127.0.0.1:${gwPort}/api/channels/feishu/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              receive_id: receiveId,
+              content,
+              msg_type: msgType,
+              receive_id_type: receiveIdType,
+              title
+            })
+          });
+          if (res.ok) {
+            return await res.json();
+          }
+          const errData = await res.json().catch(() => ({}));
+          return {
+            success: false,
+            error: (errData as any).error || `Gateway returned HTTP ${res.status}`
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `宿主网关飞书服务未连接或未配置 (FEISHU_APP_ID / FEISHU_APP_SECRET): ${err.message}`
+          };
         }
       }
     },

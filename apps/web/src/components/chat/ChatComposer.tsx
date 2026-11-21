@@ -34,6 +34,24 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     }
   }, [inputText]);
 
+  // Check for chat draft from other views (e.g. Goals)
+  useEffect(() => {
+    const draft = sessionStorage.getItem('museclaw_chat_draft');
+    if (draft) {
+      sessionStorage.removeItem('museclaw_chat_draft');
+      setInputText(draft);
+      textareaRef.current?.focus();
+    }
+    const handleDraftEvent = (e: CustomEvent<string>) => {
+      if (e.detail) {
+        setInputText(e.detail);
+        textareaRef.current?.focus();
+      }
+    };
+    window.addEventListener('museclaw:chat_draft' as any, handleDraftEvent);
+    return () => window.removeEventListener('museclaw:chat_draft' as any, handleDraftEvent);
+  }, []);
+
   // Handle outside clicks to close popovers
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

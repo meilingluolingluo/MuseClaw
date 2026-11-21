@@ -194,6 +194,67 @@ assert(updatedAutoGoal.nextCheckInAt > Date.now(), '巡检完成后必须自动�
 
 console.log('  ✅ 定时调度器成功捕获到期目标并自主向前推进一步\n');
 
+// =========================================================================
+// 7. 验证 verificationCommand 确定性自动化验收与三向流转
+// =========================================================================
+console.log('7. 验证 verificationCommand 确定性脚本验收与退回/重试机制 (Deterministic Verification & Rollback)...');
+
+const verifyGoal = store.create({
+  title: '支付核心模块重构与确定性测试',
+  description: '重构并验证支付网关',
+  botId: 'muse',
+  userId: 'user_web',
+  cadence: 'weekdays 09:30',
+  steps: [
+    { id: 'step_1', title: '代码重构实现', status: 'pending' },
+    {
+      id: 'step_2',
+      title: '执行确定性回归测试',
+      status: 'pending',
+      verificationCommand: 'echo "TEST_FAILED_FOR_NOW" && exit 1' // 模拟测试失败
+    },
+    { id: 'step_3', title: '交付汇总与上线', status: 'pending' }
+  ]
+});
+
+// 推进第 1 步
+await engine.advanceGoal(verifyGoal.id, { mockOutput: '第 1 步重构完成' });
+const gAfterStep1 = store.get(verifyGoal.id)!;
+assert.strictEqual(gAfterStep1.steps[0].status, 'done');
+assert.strictEqual(gAfterStep1.progress, 33);
+
+// 推进第 2 步，触发 verificationCommand 失败阻断
+const vRes = await engine.advanceGoal(verifyGoal.id, { mockOutput: 'Agent 自行认为测试完成' });
+assert.strictEqual(vRes.status, 'blocked', '当验证命令退出码非 0 时，必须硬阻断步骤推进');
+assert(vRes.blockedReason?.includes('自动化验收命令执行未通过'), '阻断原因中必须准确标明验收命令失败');
+
+const gAfterBlock = store.get(verifyGoal.id)!;
+assert.strictEqual(gAfterBlock.steps[1].status, 'blocked');
+assert(gAfterBlock.proposal !== undefined, '步骤受阻后必须自动生成修订提案');
+
+// 模拟现场将 verificationCommand 改为通过命令
+const gBeforePass = store.get(verifyGoal.id)!;
+gBeforePass.steps[1].verificationCommand = 'echo "ALL_TESTS_PASSED" && exit 0';
+store.save();
+
+const passRes = await engine.retryGoal(verifyGoal.id, {
+  stepId: 'step_2',
+  mockOutput: '已修正并重新测试'
+} as any);
+assert.strictEqual(passRes.status, 'done', '验收命令返回 0 时，步骤必须顺利达成');
+const gAfterPass = store.get(verifyGoal.id)!;
+assert.strictEqual(gAfterPass.steps[1].status, 'done');
+assert.strictEqual(gAfterPass.progress, 67);
+
+// 验证退回指定历史步骤返工 (Rollback to Step)
+await engine.rollbackGoal(verifyGoal.id, 'step_1', '发现底层架构需要微调，打回到第 1 步返工');
+const gAfterRollback = store.get(verifyGoal.id)!;
+assert.strictEqual(gAfterRollback.steps[0].status, 'pending', '退回后目标第 1 步必须重置为 pending');
+assert.strictEqual(gAfterRollback.steps[1].status, 'pending', '退回后目标第 2 步也必须重置为 pending');
+assert.strictEqual(gAfterRollback.progress, 0, '打回后进度自动归零');
+
+console.log('  ✅ verificationCommand 确定性自动化验收、补充重试与步骤打回返工验证 100% 通过\n');
+
 // 清理测试目录
 fs.rmSync(testDataDir, { recursive: true, force: true });
 
