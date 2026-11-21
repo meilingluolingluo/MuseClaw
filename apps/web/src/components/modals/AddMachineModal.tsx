@@ -60,7 +60,7 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
       maxWidth="640px"
       zIndex={1100}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div className="modal-actions-bar modal-actions-right">
           <button
             type="button"
             className="btn-primary"
@@ -71,76 +71,41 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
         </div>
       }
     >
-      <div style={{ fontSize: '13px', color: 'var(--om-muted)', marginBottom: '14px', lineHeight: 1.5 }}>
+      <div className="add-machine-desc">
         在要连接的个人电脑（Mac 或 Linux）终端中，复制并运行以下整组命令。伴侣进程启动后，系统将自动识别并就绪你电脑上的 <code>ducc</code>、<code>ducx</code> 等本地 Agent。
       </div>
 
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-          <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--om-fg)' }}>
-            💻 个人电脑终端接入命令 <span style={{ fontSize: '11px', color: 'var(--om-muted)', fontWeight: 400 }}>(免安装依赖 · Node.js 即时运行)</span>
+      <div className="add-machine-cmd-section">
+        <div className="add-machine-cmd-header">
+          <div className="add-machine-cmd-title">
+            💻 个人电脑终端接入命令 <span className="add-machine-cmd-sub">(免安装依赖 · Node.js 即时运行)</span>
           </div>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary add-machine-copy-btn"
             onClick={handleCopy}
-            style={{ padding: '2px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
           >
-            <Copy size={11} /> 📋 一键复制整组命令
+            <Copy size={11} /> <span>一键复制整组命令</span>
           </button>
         </div>
 
-        <pre
-          style={{
-            background: 'var(--om-surface-3)',
-            border: '1px solid var(--om-border)',
-            borderRadius: '8px',
-            padding: '12px',
-            fontFamily: 'monospace',
-            fontSize: '12px',
-            lineHeight: 1.5,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-            color: 'var(--om-fg)',
-            userSelect: 'all',
-          }}
-        >
+        <pre className="add-machine-cmd-pre">
           {installCmd}
         </pre>
       </div>
 
-      <div
-        style={{
-          background: onlineNode ? 'rgba(48, 209, 88, 0.08)' : 'var(--om-surface-2)',
-          border: `1px solid ${onlineNode ? 'var(--accent-green)' : 'var(--om-border)'}`,
-          borderRadius: '10px',
-          padding: '12px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-        }}
-      >
+      <div className={`add-machine-status-box ${onlineNode ? 'is-online' : 'is-waiting'}`}>
         {onlineNode ? (
           <>
-            <CheckCircle2 size={16} style={{ color: 'var(--accent-green)' }} />
-            <div style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 600 }}>
+            <CheckCircle2 size={16} className="add-machine-status-icon is-online" />
+            <div className="add-machine-status-text is-online">
               🎉 个人电脑计算节点已上线: {onlineNode}，本地 Agent 已成功连接就绪！
             </div>
           </>
         ) : (
           <>
-            <span
-              style={{
-                display: 'inline-block',
-                width: '14px',
-                height: '14px',
-                border: '2px solid var(--om-border)',
-                borderTopColor: 'var(--accent-blue)',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite',
-              }}
-            />
-            <div style={{ fontSize: '12px', color: 'var(--om-muted)' }}>
+            <span className="add-machine-spinner" />
+            <div className="add-machine-status-text is-waiting">
               正在等待个人电脑计算节点连接... (请在终端运行上方命令)
             </div>
           </>

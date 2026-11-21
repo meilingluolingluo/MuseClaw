@@ -358,10 +358,9 @@ export const AgentProfileDrawer: React.FC = () => {
           </button>
 
           {/* 头像区域：活体动效 + 编辑笔徽章 */}
-          <div style={{ position: 'relative', display: 'inline-flex', marginBottom: '8px' }}>
+          <div className="agent-drawer-avatar-wrap">
             <div
               className="agent-capsule-avatar-aura"
-              style={{ cursor: 'pointer' }}
               onClick={() => setIsLookModalOpen(true)}
               title="点击更换形象"
             >
@@ -371,37 +370,26 @@ export const AgentProfileDrawer: React.FC = () => {
             {/* 笔形徽章 */}
             <button
               type="button"
-              className="avatar-edit-badge"
+              className="avatar-edit-badge agent-drawer-avatar-badge"
               onClick={() => setIsLookModalOpen(true)}
               title="更换智能体外观形象"
-              style={{ width: '28px', height: '28px', bottom: '0', right: '0' }}
             >
               <Pencil size={13} />
             </button>
           </div>
 
           {/* 名字与状态 */}
-          <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--om-fg)', marginTop: '4px' }}>
+          <div className="agent-drawer-name">
             {name}
           </div>
 
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '12.5px',
-              fontWeight: 500,
-              color: '#10b981',
-              marginTop: '4px',
-            }}
-          >
+          <div className="agent-drawer-status">
             <span className="bot-status-dot-pulse" />
             <span>已连接</span>
           </div>
 
           {/* 三个设定分区 */}
-          <div className="bot-segmented-tabs" role="tablist" aria-label="智能体设定分区" style={{ marginTop: '14px' }}>
+          <div className="bot-segmented-tabs agent-drawer-tabs" role="tablist" aria-label="智能体设定分区">
             {[
               { key: 'tasks' as const, label: '任务', icon: <List size={15} /> },
               { key: 'security' as const, label: '安全', icon: <Shield size={15} /> },
@@ -423,7 +411,7 @@ export const AgentProfileDrawer: React.FC = () => {
         </div>
 
         {/* 抽屉主体内容区 */}
-        <div className="bot-tab-body" style={{ flex: 1, padding: '18px 22px', overflowY: 'auto' }}>
+        <div className="agent-drawer-body">
           {loadError && (
             <div className="agent-inline-alert" role="alert">
               <AlertTriangle size={14} />
@@ -435,10 +423,10 @@ export const AgentProfileDrawer: React.FC = () => {
           )}
           {/* TAB 1: 预定任务与近期动态 */}
           {currentTab === 'tasks' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="agent-drawer-stack">
               {/* 预定任务概况（真实例行任务） */}
               <div>
-                <div style={{ fontSize: '13.5px', fontWeight: 650, color: 'var(--om-fg)', marginBottom: '10px' }}>
+                <div className="agent-drawer-section-heading">
                   {botRoutines.length > 0 ? `${botRoutines.length} 项预定任务` : '预定任务（0）'}
                 </div>
 
@@ -461,11 +449,11 @@ export const AgentProfileDrawer: React.FC = () => {
                       <div className="agent-scheduled-icon-wrap agent-scheduled-icon-routine">
                         <Clock size={16} />
                       </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--om-fg)' }}>
+                      <div className="agent-scheduled-info">
+                        <div className="agent-scheduled-title">
                           {task.name}
                         </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                        <div className="agent-scheduled-desc">
                           {task.scheduleHumanZh || task.cronExpr || '按周期定时执行'} · {task.enabled ? '运行中' : '已暂停'}
                         </div>
                       </div>
@@ -475,24 +463,10 @@ export const AgentProfileDrawer: React.FC = () => {
 
                 <button
                   type="button"
+                  className="agent-view-all-routines-btn"
                   onClick={() => {
                     setIsBotModalOpen(false);
                     setTab('routines');
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '4px',
-                    width: '100%',
-                    padding: '8px',
-                    fontSize: '12.5px',
-                    color: 'var(--om-accent)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontWeight: 500,
-                    marginTop: '4px',
                   }}
                 >
                   查看所有预定任务 <ChevronRight size={14} />
@@ -501,7 +475,7 @@ export const AgentProfileDrawer: React.FC = () => {
 
               {/* 动态轨迹流 (Timeline - 按天分组并支持展开收起) */}
               <div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div className="agent-drawer-stack-sm">
                   {activityGroups.length > 0 ? (
                     activityGroups.map((group) => {
                       const isExpanded = expandedGroups[group.label] !== false;
@@ -521,11 +495,7 @@ export const AgentProfileDrawer: React.FC = () => {
                             <span>{group.label}</span>
                             <ChevronDown
                               size={16}
-                              style={{
-                                transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                                transition: 'transform 0.2s ease',
-                                color: 'var(--text-dim)',
-                              }}
+                              className={`agent-group-chevron ${isExpanded ? 'is-open' : 'is-collapsed'}`}
                             />
                           </button>
 
@@ -543,57 +513,29 @@ export const AgentProfileDrawer: React.FC = () => {
                                     {item.status === 'running' ? (
                                       <Loader2 size={12} className="spin" />
                                     ) : item.status === 'error' ? (
-                                      <AlertTriangle size={12} style={{ color: '#ef4444' }} />
+                                      <AlertTriangle size={12} className="agent-activity-error-icon" />
                                     ) : (
                                       <Check size={12} strokeWidth={2.4} />
                                     )}
                                   </div>
 
                                   {/* 动作主标题与自然语言说明 */}
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div
-                                      style={{
-                                        fontSize: '13.5px',
-                                        fontWeight: 600,
-                                        color: 'var(--om-fg)',
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                      }}
-                                    >
+                                  <div className="agent-activity-info">
+                                    <div className="agent-activity-title">
                                       {item.title}
                                     </div>
-                                    <div
-                                      style={{
-                                        fontSize: '12px',
-                                        color: 'var(--text-dim)',
-                                        marginTop: '2px',
-                                        lineHeight: 1.35,
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                      }}
-                                    >
+                                    <div className="agent-activity-subtitle">
                                       {item.subtitle}
                                     </div>
                                   </div>
 
                                   {/* 时间与交互来源头像 */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                  <div className="agent-activity-meta">
                                     <span className="agent-activity-time">
                                       {formatTimeLabel(item.timestamp)}
                                     </span>
                                     {item.showAvatar && (
-                                      <div
-                                        style={{
-                                          width: '18px',
-                                          height: '18px',
-                                          borderRadius: '50%',
-                                          overflow: 'hidden',
-                                          flexShrink: 0,
-                                          opacity: 0.85,
-                                        }}
-                                      >
+                                      <div className="agent-activity-avatar">
                                         <BotAvatar bot={{ ...activeBot, avatar } as any} size={18} />
                                       </div>
                                     )}
@@ -617,12 +559,12 @@ export const AgentProfileDrawer: React.FC = () => {
 
           {/* TAB 2: 门禁审批与安全权限 */}
           {currentTab === 'security' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="agent-drawer-stack">
               <div>
-                <label style={{ fontSize: '12.5px', fontWeight: 650, display: 'block', marginBottom: '6px' }}>
+                <label className="agent-security-label">
                   门禁审批级别 (Sentinel Approval Mode)
                 </label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="agent-approval-options">
                   {[
                     { mode: 'ASK', label: 'ASK (严格模式)', desc: '高危文件写入、外网访问与破坏性操作全量拦截审批' },
                     { mode: 'AUTO_EDITS', label: 'AUTO_EDITS (自驱编辑)', desc: '代码编写与常规分析自主执行，高危命令仍需审批' },
@@ -635,21 +577,12 @@ export const AgentProfileDrawer: React.FC = () => {
                       aria-checked={approvalMode === opt.mode}
                       disabled={Boolean(savingMode)}
                       onClick={() => handleUpdateApproval(opt.mode as any)}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '10px 14px',
-                        borderRadius: '12px',
-                        border: approvalMode === opt.mode ? '2px solid var(--om-accent)' : '1px solid var(--om-border)',
-                        background: approvalMode === opt.mode ? 'rgba(2, 132, 199, 0.06)' : 'var(--om-surface-2)',
-                        cursor: savingMode ? 'wait' : 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
+                      className={`agent-approval-option ${approvalMode === opt.mode ? 'is-active' : ''}`}
                     >
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: approvalMode === opt.mode ? 'var(--om-accent)' : 'var(--om-fg)' }}>
+                      <div className={`agent-approval-title ${approvalMode === opt.mode ? 'is-active' : ''}`}>
                         {opt.label}
                       </div>
-                      <div style={{ fontSize: '11.5px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      <div className="agent-approval-desc">
                         {opt.desc}
                       </div>
                     </button>
@@ -658,32 +591,13 @@ export const AgentProfileDrawer: React.FC = () => {
               </div>
 
               {/* 微沙箱与防污状态 */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px 14px',
-                    background: 'var(--om-surface-2)',
-                    borderRadius: '12px',
-                    border: '1px solid var(--om-border)',
-                  }}
-                >
-                  <span style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Terminal size={15} style={{ color: 'var(--om-accent)' }} />
+              <div className="agent-drawer-stack-sm">
+                <div className="agent-security-card">
+                  <span className="agent-security-card-title">
+                    <Terminal size={15} className="agent-security-icon-blue" />
                     微沙箱隔离容器
                   </span>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '3px 8px',
-                      borderRadius: '6px',
-                      background: 'rgba(2, 132, 199, 0.1)',
-                      color: 'var(--om-accent)',
-                    }}
-                  >
+                  <span className="agent-security-badge-blue">
                     {sandboxStatus
                       ? sandboxStatus.available
                         ? `${sandboxStatus.engine} 就绪`
@@ -692,31 +606,12 @@ export const AgentProfileDrawer: React.FC = () => {
                   </span>
                 </div>
 
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px 14px',
-                    background: 'var(--om-surface-2)',
-                    borderRadius: '12px',
-                    border: '1px solid var(--om-border)',
-                  }}
-                >
-                  <span style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ShieldCheck size={15} style={{ color: '#10b981' }} />
+                <div className="agent-security-card">
+                  <span className="agent-security-card-title">
+                    <ShieldCheck size={15} className="agent-security-icon-green" />
                     动态污点跟踪
                   </span>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '3px 8px',
-                      borderRadius: '6px',
-                      background: 'rgba(16, 185, 129, 0.1)',
-                      color: '#10b981',
-                    }}
-                  >
+                  <span className="agent-security-badge-green">
                     {isTainted ? '已标记敏感数据' : '纯净态'}
                   </span>
                 </div>
@@ -724,66 +619,52 @@ export const AgentProfileDrawer: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 3: 灵魂设定与核心记忆 (Image 3 精髓) */}
+          {/* TAB 3: 灵魂设定与核心记忆 */}
           {currentTab === 'identity' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="agent-drawer-stack">
               {/* 名片基本信息卡 */}
-              <div
-                style={{
-                  background: 'var(--om-surface-2)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '18px',
-                  padding: '14px 16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px',
-                }}
-              >
+              <div className="agent-identity-card">
                 {isEditingInfo ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label htmlFor="agent-name" style={{ fontSize: '11.5px', fontWeight: 600 }}>
-                      名称 <span style={{ color: 'var(--accent-red)' }}>*</span>
+                  <div className="agent-identity-form">
+                    <label htmlFor="agent-name" className="agent-identity-label">
+                      名称 <span className="agent-required-mark">*</span>
                     </label>
                     <input
                       id="agent-name"
                       type="text"
-                      className="form-control"
+                      className="form-control agent-identity-input"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="智能体名称"
                       maxLength={40}
-                      style={{ fontSize: '13px', padding: '6px 10px' }}
                     />
-                    <label htmlFor="agent-role" style={{ fontSize: '11.5px', fontWeight: 600 }}>
+                    <label htmlFor="agent-role" className="agent-identity-label">
                       角色描述
                     </label>
                     <input
                       id="agent-role"
                       type="text"
-                      className="form-control"
+                      className="form-control agent-identity-input"
                       value={role}
                       onChange={(e) => setRole(e.target.value)}
                       placeholder="例如：负责巡检与故障排查"
                       maxLength={120}
-                      style={{ fontSize: '12.5px', padding: '6px 10px' }}
                     />
                     {infoError && <div className="agent-form-error" role="alert">{infoError}</div>}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '4px' }}>
+                    <div className="agent-identity-actions">
                       <button
                         type="button"
-                        className="btn-secondary"
+                        className="btn-secondary agent-btn-sm"
                         onClick={resetInfoForm}
                         disabled={savingInfo}
-                        style={{ padding: '4px 10px', fontSize: '12px' }}
                       >
                         取消
                       </button>
                       <button
                         type="button"
-                        className="btn-primary"
+                        className="btn-primary agent-btn-sm"
                         onClick={handleSaveInfo}
                         disabled={savingInfo || !name.trim()}
-                        style={{ padding: '4px 12px', fontSize: '12px' }}
                       >
                         {savingInfo ? '保存中…' : '保存'}
                       </button>
@@ -791,33 +672,25 @@ export const AgentProfileDrawer: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--om-fg)' }}>{name}</div>
+                    <div className="agent-identity-header">
+                      <div className="agent-identity-name">{name}</div>
                       <button
                         type="button"
-                        className="btn-secondary"
+                        className="btn-secondary agent-identity-edit-btn"
                         onClick={() => setIsEditingInfo(true)}
-                        style={{
-                          padding: '4px 12px',
-                          borderRadius: '9999px',
-                          fontSize: '12px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
                       >
-                        <Pencil size={11} /> 编辑
+                        <Pencil size={11} /> <span>编辑</span>
                       </button>
                     </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+                    <div className="agent-identity-role">
                       {role || '企业自动化总协调数字员工'}
                     </div>
                   </>
                 )}
               </div>
 
-              {/* 沉浸式双渐变卡片 (SOUL 与 记忆，精确对齐用户期望) */}
-              <div className="agent-gradient-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              {/* 沉浸式双渐变卡片 (SOUL 与 记忆) */}
+              <div className="agent-gradient-grid">
                 {/* 🔴 SOUL 卡片 */}
                 <div
                   className="agent-gradient-card agent-card-soul"
@@ -858,7 +731,7 @@ export const AgentProfileDrawer: React.FC = () => {
               </div>
 
               <div className="agent-soul-preview">
-                <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)' }}>
+                <div className="agent-soul-preview-title">
                   当前 SOUL 设定
                 </div>
                 <p title={activeBot.systemPrompt || activeBot.system_prompt || ''}>
@@ -877,14 +750,14 @@ export const AgentProfileDrawer: React.FC = () => {
         onClose={closeSoulModal}
         zIndex={1060}
         title="编辑 SOUL 核心人设"
-        icon={<Sparkles size={18} style={{ color: '#ef4444' }} />}
+        icon={<Sparkles size={18} className="agent-modal-soul-icon" />}
         maxWidth="680px"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+          <div className="modal-actions-bar">
+            <span className="agent-modal-char-count">
               字符数: {soulPromptBuffer.length}
             </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="agent-modal-actions-right">
               <button type="button" className="btn-secondary" onClick={closeSoulModal} disabled={savingSoul}>
                 取消
               </button>
@@ -895,49 +768,41 @@ export const AgentProfileDrawer: React.FC = () => {
           </div>
         }
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div className="agent-drawer-stack">
           <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '8px' }}>
+            <div className="agent-preset-label">
               快速套用性格准则模板：
             </div>
-            <div className="agent-preset-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+            <div className="agent-soul-presets-grid">
               {SOUL_PRESETS.map((p) => (
                 <button
                   key={p.name}
                   type="button"
+                  className="agent-soul-preset-btn"
                   onClick={() => setSoulPromptBuffer(p.prompt)}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--om-border)',
-                    background: 'var(--om-surface-2)',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
                 >
-                  <div style={{ fontSize: '12px', fontWeight: 650, color: 'var(--om-fg)' }}>{p.name}</div>
-                  <div style={{ fontSize: '10.5px', color: 'var(--text-dim)', marginTop: '2px' }}>{p.desc}</div>
+                  <div className="agent-soul-preset-name">{p.name}</div>
+                  <div className="agent-soul-preset-desc">{p.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
           <div>
-            <label style={{ fontSize: '12.5px', fontWeight: 650, display: 'block', marginBottom: '6px' }}>
-              SOUL 正文 <span style={{ color: 'var(--accent-red)' }}>*</span>
+            <label className="agent-soul-body-label">
+              SOUL 正文 <span className="agent-required-mark">*</span>
             </label>
             <textarea
-              className="form-control"
+              className="form-control agent-soul-textarea"
               rows={12}
               autoFocus
               value={soulPromptBuffer}
               onChange={(e) => setSoulPromptBuffer(e.target.value)}
-              style={{ width: '100%', fontFamily: 'monospace', fontSize: '12.5px', lineHeight: 1.6 }}
               placeholder="定义智能体的语气、工作准则、红线与边界..."
               maxLength={8000}
             />
             {soulError && <div className="agent-form-error" role="alert">{soulError}</div>}
-            <div style={{ fontSize: '11px', color: 'var(--text-dim)' }}>
+            <div className="agent-soul-tip">
               修改后立即生效；点击取消会还原到已保存的内容。
             </div>
           </div>
@@ -953,7 +818,7 @@ export const AgentProfileDrawer: React.FC = () => {
         icon={<Pencil size={18} />}
         maxWidth="540px"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
+          <div className="modal-actions-bar modal-actions-right">
             <button type="button" className="btn-secondary" onClick={() => { setAvatarError(''); setIsLookModalOpen(false); }} disabled={savingAvatar}>
               取消
             </button>
@@ -963,37 +828,34 @@ export const AgentProfileDrawer: React.FC = () => {
           </div>
         }
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="agent-drawer-stack">
           {/* 选项卡 */}
-          <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--om-border)', paddingBottom: '10px' }}>
+          <div className="agent-avatar-tabs">
             <button
               type="button"
-              className={avatarChoice === 'preset' ? 'btn-primary' : 'btn-secondary'}
+              className={avatarChoice === 'preset' ? 'btn-primary agent-avatar-tab' : 'btn-secondary agent-avatar-tab'}
               onClick={() => setAvatarChoice('preset')}
-              style={{ fontSize: '12px', padding: '4px 12px' }}
             >
               形象预设
             </button>
             <button
               type="button"
-              className={avatarChoice === 'emoji' ? 'btn-primary' : 'btn-secondary'}
+              className={avatarChoice === 'emoji' ? 'btn-primary agent-avatar-tab' : 'btn-secondary agent-avatar-tab'}
               onClick={() => setAvatarChoice('emoji')}
-              style={{ fontSize: '12px', padding: '4px 12px' }}
             >
               Emoji 表情
             </button>
             <button
               type="button"
-              className={avatarChoice === 'custom' ? 'btn-primary' : 'btn-secondary'}
+              className={avatarChoice === 'custom' ? 'btn-primary agent-avatar-tab' : 'btn-secondary agent-avatar-tab'}
               onClick={() => setAvatarChoice('custom')}
-              style={{ fontSize: '12px', padding: '4px 12px' }}
             >
               自定义地址
             </button>
           </div>
 
           {avatarChoice === 'preset' && (
-            <div className="agent-avatar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+            <div className="agent-avatar-presets-grid">
               {AVATAR_PRESETS.map((p) => {
                 const isSelected = selectedPreset === p.id;
                 return (
@@ -1001,22 +863,12 @@ export const AgentProfileDrawer: React.FC = () => {
                     key={p.id}
                     type="button"
                     onClick={() => setSelectedPreset(p.id)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      padding: '10px',
-                      borderRadius: '12px',
-                      border: isSelected ? '2px solid var(--om-accent)' : '1px solid var(--om-border)',
-                      background: isSelected ? 'rgba(2, 132, 199, 0.08)' : 'var(--om-surface-2)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                    }}
+                    className={`agent-avatar-preset-btn ${isSelected ? 'is-selected' : ''}`}
                   >
                     <BotAvatar bot={{ avatar: p.id } as any} size={40} motion="avatar-idle" />
                     <div>
-                      <div style={{ fontSize: '13px', fontWeight: 650, color: 'var(--om-fg)' }}>{p.name}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>{p.desc}</div>
+                      <div className="agent-avatar-preset-name">{p.name}</div>
+                      <div className="agent-avatar-preset-desc">{p.desc}</div>
                     </div>
                   </button>
                 );
@@ -1025,49 +877,38 @@ export const AgentProfileDrawer: React.FC = () => {
           )}
 
           {avatarChoice === 'emoji' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div className="agent-drawer-stack">
               <div>
-                <label style={{ fontSize: '12px', color: 'var(--text-dim)', display: 'block', marginBottom: '8px' }}>
+                <label className="agent-emoji-label">
                   选择表情:
                 </label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                <div className="agent-emoji-grid">
                   {EMOJI_CHOICES.map((e) => (
                     <button
                       key={e}
                       type="button"
                       onClick={() => setSelectedEmoji(e)}
-                      style={{
-                        width: '38px',
-                        height: '38px',
-                        fontSize: '20px',
-                        borderRadius: '8px',
-                        border: selectedEmoji === e ? '2px solid var(--om-accent)' : '1px solid var(--om-border)',
-                        background: 'var(--om-surface-2)',
-                        cursor: 'pointer',
-                      }}
+                      className={`agent-emoji-btn ${selectedEmoji === e ? 'is-selected' : ''}`}
                     >
                       {e}
                     </button>
                   ))}
                 </div>
               </div>
-
-
             </div>
           )}
 
           {avatarChoice === 'custom' && (
             <div>
-              <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <label className="agent-custom-avatar-label">
                 输入图像绝对 URL 或 WebP 地址:
               </label>
               <input
                 type="text"
-                className="form-control"
+                className="form-control agent-custom-avatar-input"
                 placeholder="https://... 或 /avatars/..."
                 value={customAvatarUrl}
                 onChange={(e) => setCustomAvatarUrl(e.target.value)}
-                style={{ width: '100%', fontSize: '13px' }}
                 aria-label="自定义头像地址"
               />
               {avatarError && <div className="agent-form-error" role="alert">{avatarError}</div>}

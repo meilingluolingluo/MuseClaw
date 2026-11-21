@@ -9416,3 +9416,966 @@ details[open] .thought-toggle::after {
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+/* ============================================================================
+   Phase 5: 全局模态窗、表单控件与智能体设定抽屉精细样式
+   ============================================================================ */
+
+/* ── 通用模态窗底部动作栏 ─────────────────────────────── */
+.modal-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.modal-actions-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ── 添加计算节点模态窗 (AddMachineModal) ─────────────── */
+.add-machine-desc {
+  font-size: 13px;
+  color: var(--om-muted);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.add-machine-cmd-section {
+  margin-bottom: 16px;
+}
+
+.add-machine-cmd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.add-machine-cmd-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.add-machine-cmd-sub {
+  font-size: 11px;
+  color: var(--om-muted);
+  font-weight: 400;
+}
+
+.add-machine-copy-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.add-machine-cmd-pre {
+  background: var(--om-surface-3);
+  border: 1px solid var(--om-border);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--om-fg);
+  user-select: all;
+}
+
+.add-machine-status-box {
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.add-machine-status-box.is-online {
+  background: rgba(48, 209, 88, 0.08);
+  border: 1px solid var(--accent-green);
+}
+
+.add-machine-status-box.is-waiting {
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+}
+
+.add-machine-status-icon.is-online {
+  color: var(--accent-green);
+  flex-shrink: 0;
+}
+
+.add-machine-status-text.is-online {
+  font-size: 12px;
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.add-machine-status-text.is-waiting {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.add-machine-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--om-border);
+  border-top-color: var(--om-accent);
+  border-radius: 50%;
+  animation: om-spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── 身份认证与登录注册模态窗 (AuthModal) ─────────────── */
+.auth-user-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  margin-bottom: 20px;
+}
+
+.auth-user-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--om-accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--om-accent);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.auth-user-name {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--om-fg);
+}
+
+.auth-user-role {
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.auth-logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  border-radius: 8px;
+  margin-left: auto;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--om-border);
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+.auth-tab {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--om-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.auth-tab.active {
+  background: var(--om-surface-2);
+  color: var(--om-fg);
+}
+
+.auth-alert {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  margin-bottom: 16px;
+}
+
+.auth-alert.is-error {
+  background: rgba(255, 69, 58, 0.08);
+  border: 1px solid var(--accent-red);
+  color: var(--accent-red);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.auth-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+  color: var(--om-fg);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.auth-input:focus {
+  border-color: var(--om-accent);
+}
+
+.auth-submit-btn {
+  margin-top: 8px;
+  padding: 11px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+/* ── 大模型设置中心 (ModelSettingsModal) ─────────────── */
+.model-compute-banner {
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.model-compute-banner-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.model-compute-banner-icon {
+  color: var(--om-accent);
+  flex-shrink: 0;
+}
+
+.model-compute-banner-title {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--om-fg);
+}
+
+.model-compute-banner-desc {
+  font-size: 11px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.model-compute-banner-btn {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.model-config-section {
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.model-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.model-config-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-config-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--om-fg);
+}
+
+.model-config-badge {
+  font-size: 11px;
+}
+
+.model-config-desc {
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.model-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.model-probe-box {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--om-surface-3);
+  border: 1px solid var(--om-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.model-probe-box.is-ready {
+  color: var(--om-fg);
+}
+
+.model-probe-box.is-missing {
+  color: var(--accent-amber);
+}
+
+.model-probe-version {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding-left: 2px;
+}
+
+.model-probe-version.is-ready {
+  color: var(--accent-green);
+}
+
+.model-probe-version.is-missing {
+  color: var(--om-muted);
+}
+
+.model-select,
+.model-input {
+  width: 100%;
+}
+
+.model-candidate-tag.is-selected {
+  border-color: var(--om-accent);
+  color: var(--om-accent);
+  font-weight: 600;
+}
+
+.model-test-banner {
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.model-test-banner.is-success {
+  background: rgba(48, 209, 88, 0.08);
+  border: 1px solid var(--accent-green);
+}
+
+.model-test-banner.is-error {
+  background: rgba(255, 69, 58, 0.08);
+  border: 1px solid var(--accent-red);
+}
+
+.model-test-banner.is-ready {
+  background: rgba(48, 209, 88, 0.06);
+  border: 1px solid var(--om-border);
+}
+
+.model-test-banner.is-warning {
+  background: rgba(255, 149, 0, 0.08);
+  border: 1px solid var(--accent-amber);
+}
+
+.model-test-dot.is-success {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  flex-shrink: 0;
+}
+
+.model-test-icon.is-error {
+  color: var(--accent-red);
+  flex-shrink: 0;
+}
+
+.model-test-icon.is-warning {
+  color: var(--accent-amber);
+  flex-shrink: 0;
+}
+
+.model-test-heading {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.model-test-heading.is-success {
+  color: var(--accent-green);
+}
+
+.model-test-heading.is-error {
+  color: var(--accent-red);
+}
+
+.model-test-heading.is-ready {
+  color: var(--om-fg);
+}
+
+.model-test-heading.is-warning {
+  color: var(--accent-amber);
+}
+
+.model-test-detail {
+  font-size: 11px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.model-test-banner-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.model-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.model-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── 智能体设定抽屉 (AgentProfileDrawer) ─────────────── */
+.agent-drawer-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  margin-bottom: 8px;
+}
+
+.agent-drawer-avatar-badge {
+  width: 28px;
+  height: 28px;
+  bottom: 0;
+  right: 0;
+}
+
+.agent-drawer-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--om-fg);
+  margin-top: 4px;
+}
+
+.agent-drawer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent-green);
+  margin-top: 4px;
+}
+
+.agent-drawer-tabs {
+  margin-top: 14px;
+}
+
+.agent-drawer-body {
+  flex: 1;
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+
+.agent-drawer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.agent-drawer-stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-drawer-section-heading {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--om-fg);
+  margin-bottom: 10px;
+}
+
+.agent-scheduled-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-scheduled-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.agent-scheduled-desc {
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.agent-view-all-routines-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px;
+  font-size: 12.5px;
+  color: var(--om-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  margin-top: 4px;
+  transition: opacity 0.15s ease;
+}
+
+.agent-view-all-routines-btn:hover {
+  opacity: 0.8;
+}
+
+.agent-group-chevron {
+  transition: transform 0.2s ease;
+  color: var(--om-muted);
+}
+
+.agent-group-chevron.is-open {
+  transform: rotate(0deg);
+}
+
+.agent-group-chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.agent-activity-error-icon {
+  color: var(--accent-red);
+}
+
+.agent-activity-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-activity-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-subtitle {
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-top: 2px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.agent-activity-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.agent-security-label {
+  font-size: 12.5px;
+  font-weight: 650;
+  display: block;
+  margin-bottom: 6px;
+  color: var(--om-fg);
+}
+
+.agent-approval-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-approval-option {
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.agent-approval-option.is-active {
+  border: 2px solid var(--om-accent);
+  background: var(--om-accent-soft);
+}
+
+.agent-approval-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.agent-approval-title.is-active {
+  color: var(--om-accent);
+}
+
+.agent-approval-desc {
+  font-size: 11.5px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.agent-security-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: var(--om-surface-2);
+  border-radius: 12px;
+  border: 1px solid var(--om-border);
+}
+
+.agent-security-card-title {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--om-fg);
+}
+
+.agent-security-icon-blue {
+  color: var(--om-accent);
+}
+
+.agent-security-icon-green {
+  color: var(--accent-green);
+}
+
+.agent-security-badge-blue {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--om-accent-soft);
+  color: var(--om-accent);
+}
+
+.agent-security-badge-green {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(48, 209, 88, 0.1);
+  color: var(--accent-green);
+}
+
+.agent-identity-card {
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  border-radius: 18px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-identity-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-identity-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.agent-required-mark {
+  color: var(--accent-red);
+}
+
+.agent-identity-input {
+  font-size: 13px;
+  padding: 6px 10px;
+  width: 100%;
+}
+
+.agent-identity-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.agent-btn-sm {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.agent-identity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.agent-identity-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--om-fg);
+}
+
+.agent-identity-edit-btn {
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-identity-role {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.agent-soul-preview-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--om-muted);
+}
+
+.agent-modal-soul-icon {
+  color: var(--accent-red);
+}
+
+.agent-modal-char-count {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.agent-modal-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-preset-label {
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-bottom: 8px;
+}
+
+.agent-soul-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.agent-soul-preset-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.agent-soul-preset-btn:hover {
+  border-color: var(--om-accent);
+}
+
+.agent-soul-preset-name {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--om-fg);
+}
+
+.agent-soul-preset-desc {
+  font-size: 10.5px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.agent-soul-body-label {
+  font-size: 12.5px;
+  font-weight: 650;
+  display: block;
+  margin-bottom: 6px;
+  color: var(--om-fg);
+}
+
+.agent-soul-textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.agent-soul-tip {
+  font-size: 11px;
+  color: var(--om-muted);
+  margin-top: 4px;
+}
+
+.agent-avatar-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--om-border);
+  padding-bottom: 10px;
+}
+
+.agent-avatar-tab {
+  font-size: 12px;
+  padding: 4px 12px;
+}
+
+.agent-avatar-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.agent-avatar-preset-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.agent-avatar-preset-btn.is-selected {
+  border: 2px solid var(--om-accent);
+  background: var(--om-accent-soft);
+}
+
+.agent-avatar-preset-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--om-fg);
+}
+
+.agent-avatar-preset-desc {
+  font-size: 11px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.agent-emoji-label {
+  font-size: 12px;
+  color: var(--om-muted);
+  display: block;
+  margin-bottom: 8px;
+}
+
+.agent-emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-emoji-btn {
+  width: 38px;
+  height: 38px;
+  font-size: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.agent-emoji-btn.is-selected {
+  border: 2px solid var(--om-accent);
+}
+
+.agent-custom-avatar-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 6px;
+  color: var(--om-fg);
+}
+
+.agent-custom-avatar-input {
+  width: 100%;
+  font-size: 13px;
+}

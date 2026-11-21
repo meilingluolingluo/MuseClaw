@@ -87,92 +87,60 @@ export const AuthModal: React.FC = () => {
       maxWidth="460px"
     >
       {user ? (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--om-border)' }}>
-            <div
-              style={{
-                width: '52px',
-                height: '52px',
-                borderRadius: '50%',
-                background: 'var(--om-accent)',
-                color: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '22px',
-                fontWeight: 650,
-              }}
-            >
+        <div className="auth-profile-container">
+          <div className="auth-user-header">
+            <div className="auth-user-avatar">
               {(user.displayName || user.username).slice(0, 1).toUpperCase()}
             </div>
-            <div>
-              <div style={{ fontSize: '16px', fontWeight: 650, color: 'var(--om-fg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>{user.displayName || user.username}</span>
-                <span className="pill-badge pill-blue" style={{ fontSize: '11px' }}>账号已就绪</span>
+            <div className="auth-user-info">
+              <div className="auth-user-name-line">
+                <span className="auth-user-display-name">{user.displayName || user.username}</span>
+                <span className="pill-badge pill-blue">账号已就绪</span>
               </div>
-              <div style={{ fontSize: '13px', color: 'var(--om-muted)', marginTop: '3px' }}>
+              <div className="auth-user-username">
                 用户名: <code>{user.username}</code>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px', marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--om-muted)' }}>数据沙箱隔离</span>
-              <span style={{ color: 'var(--accent-green)', fontWeight: 550 }}>● 独立数据存储就绪</span>
+          <div className="auth-user-meta-list">
+            <div className="auth-user-meta-row">
+              <span className="auth-user-meta-label">数据沙箱隔离</span>
+              <span className="auth-user-meta-val is-green">● 独立数据存储就绪</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--om-muted)' }}>计算节点接入 Token</span>
-              <span style={{ fontFamily: 'monospace' }}>{user.username}</span>
+            <div className="auth-user-meta-row">
+              <span className="auth-user-meta-label">计算节点接入 Token</span>
+              <span className="auth-user-meta-val font-mono">{user.username}</span>
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <div className="modal-actions-bar modal-actions-right">
             <button type="button" className="btn-secondary" onClick={() => setIsAuthModalOpen(false)}>
               关闭
             </button>
             <button
               type="button"
-              className="btn-danger"
+              className="btn-danger auth-logout-btn"
               onClick={handleLogout}
-              style={{ padding: '6px 14px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
-              <LogOut size={14} /> 退出登录
+              <LogOut size={14} /> <span>退出登录</span>
             </button>
           </div>
         </div>
       ) : (
-        <div>
-          <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--om-border)', paddingBottom: '10px', marginBottom: '18px' }}>
+        <div className="auth-form-container">
+          <div className="auth-tabs-row">
             <button
               type="button"
               onClick={() => { setActiveTab('login'); setErrorMsg(''); }}
-              style={{
-                padding: '6px 18px',
-                borderRadius: '20px',
-                fontWeight: 600,
-                fontSize: '13px',
-                border: 'none',
-                cursor: 'pointer',
-                background: activeTab === 'login' ? 'var(--om-accent)' : 'transparent',
-                color: activeTab === 'login' ? '#fff' : 'var(--om-muted)',
-              }}
+              className={`auth-tab-btn ${activeTab === 'login' ? 'is-active' : ''}`}
             >
               账号登录
             </button>
             <button
               type="button"
               onClick={() => { setActiveTab('register'); setErrorMsg(''); }}
-              style={{
-                padding: '6px 18px',
-                borderRadius: '20px',
-                fontWeight: 600,
-                fontSize: '13px',
-                border: 'none',
-                cursor: 'pointer',
-                background: activeTab === 'register' ? 'var(--om-accent)' : 'transparent',
-                color: activeTab === 'register' ? '#fff' : 'var(--om-muted)',
-              }}
+              className={`auth-tab-btn ${activeTab === 'register' ? 'is-active' : ''}`}
             >
               注册新账号
             </button>
@@ -182,16 +150,16 @@ export const AuthModal: React.FC = () => {
             <div
               role="alert"
               aria-live="polite"
-              style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', fontSize: '12.5px', marginBottom: '14px' }}
+              className="auth-error-alert"
             >
               {errorMsg}
             </div>
           )}
 
           {activeTab === 'login' ? (
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label htmlFor="login-username" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>用户名</label>
+            <form onSubmit={handleLogin} className="auth-form">
+              <div className="auth-field">
+                <label htmlFor="login-username" className="auth-label">用户名</label>
                 <input
                   id="login-username"
                   name="username"
@@ -201,11 +169,11 @@ export const AuthModal: React.FC = () => {
                   placeholder="请输入账号用户名"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--om-border)', background: 'var(--om-surface-2)', color: 'var(--om-fg)' }}
+                  className="auth-input"
                 />
               </div>
-              <div>
-                <label htmlFor="login-password" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>密码</label>
+              <div className="auth-field">
+                <label htmlFor="login-password" className="auth-label">密码</label>
                 <input
                   id="login-password"
                   name="password"
@@ -215,22 +183,21 @@ export const AuthModal: React.FC = () => {
                   placeholder="请输入密码"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--om-border)', background: 'var(--om-surface-2)', color: 'var(--om-fg)' }}
+                  className="auth-input"
                 />
               </div>
               <button
                 type="submit"
-                className="btn-primary"
+                className="btn-primary auth-submit-btn"
                 disabled={loading}
-                style={{ marginTop: '8px', padding: '11px', borderRadius: '8px', fontWeight: 600 }}
               >
                 {loading ? '正在登录...' : '立即登录'}
               </button>
             </form>
           ) : (
-            <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label htmlFor="reg-username" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>用户名</label>
+            <form onSubmit={handleRegister} className="auth-form">
+              <div className="auth-field">
+                <label htmlFor="reg-username" className="auth-label">用户名</label>
                 <input
                   id="reg-username"
                   name="username"
@@ -240,11 +207,11 @@ export const AuthModal: React.FC = () => {
                   placeholder="2-32位字符"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--om-border)', background: 'var(--om-surface-2)', color: 'var(--om-fg)' }}
+                  className="auth-input"
                 />
               </div>
-              <div>
-                <label htmlFor="reg-display" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>显示昵称 (选填)</label>
+              <div className="auth-field">
+                <label htmlFor="reg-display" className="auth-label">显示昵称 (选填)</label>
                 <input
                   id="reg-display"
                   name="displayName"
@@ -253,11 +220,11 @@ export const AuthModal: React.FC = () => {
                   placeholder="例如：开发助手小李"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--om-border)', background: 'var(--om-surface-2)', color: 'var(--om-fg)' }}
+                  className="auth-input"
                 />
               </div>
-              <div>
-                <label htmlFor="reg-password" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>密码</label>
+              <div className="auth-field">
+                <label htmlFor="reg-password" className="auth-label">密码</label>
                 <input
                   id="reg-password"
                   name="new-password"
@@ -268,11 +235,11 @@ export const AuthModal: React.FC = () => {
                   placeholder="至少 6 位密码"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--om-border)', background: 'var(--om-surface-2)', color: 'var(--om-fg)' }}
+                  className="auth-input"
                 />
               </div>
-              <div>
-                <label htmlFor="reg-confirm" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>确认密码</label>
+              <div className="auth-field">
+                <label htmlFor="reg-confirm" className="auth-label">确认密码</label>
                 <input
                   id="reg-confirm"
                   name="confirm-password"
@@ -283,14 +250,13 @@ export const AuthModal: React.FC = () => {
                   placeholder="再次输入密码"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--om-border)', background: 'var(--om-surface-2)', color: 'var(--om-fg)' }}
+                  className="auth-input"
                 />
               </div>
               <button
                 type="submit"
-                className="btn-primary"
+                className="btn-primary auth-submit-btn"
                 disabled={loading}
-                style={{ marginTop: '8px', padding: '11px', borderRadius: '8px', fontWeight: 600 }}
               >
                 {loading ? '正在注册...' : '立即注册并登录'}
               </button>

@@ -126,37 +126,25 @@ export const ModelSettingsModal: React.FC = () => {
       zIndex={1000}
     >
       {/* 顶部接入计算节点快捷横幅 */}
-      <div
-        style={{
-          background: 'var(--om-surface-2)',
-          border: '1px solid var(--om-border)',
-          borderRadius: '12px',
-          padding: '12px 16px',
-          marginBottom: '18px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Laptop size={18} style={{ color: 'var(--om-accent)' }} />
+      <div className="model-compute-banner">
+        <div className="model-compute-banner-info">
+          <Laptop size={18} className="model-compute-banner-icon" />
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 650 }}>
+            <div className="model-compute-banner-title">
               连接个人电脑计算节点 (Mac / Linux)
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '2px' }}>
+            <div className="model-compute-banner-desc">
               一键在个人电脑终端运行伴侣，即可就绪本机 ducc、ducx 等私有 Agent
             </div>
           </div>
         </div>
         <button
           type="button"
-          className="btn-primary"
+          className="btn-primary model-compute-banner-btn"
           onClick={() => {
             setIsModelModalOpen(false);
             setIsAddMachineModalOpen(true);
           }}
-          style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '8px', flexShrink: 0 }}
         >
           💻 添加计算节点
         </button>
@@ -214,78 +202,55 @@ export const ModelSettingsModal: React.FC = () => {
       </div>
 
       {/* 选中提供商配置表单 */}
-      <div
-        style={{
-          background: 'var(--om-surface-2)',
-          border: '1px solid var(--om-border)',
-          borderRadius: '12px',
-          padding: '18px',
-          marginBottom: '20px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="model-config-section">
+        <div className="model-config-header">
+          <div className="model-config-title-group">
             <ProviderIcon providerId={currentProvider.id} size={22} />
-            <span style={{ fontSize: '15px', fontWeight: 650 }}>{currentProvider.name}</span>
+            <span className="model-config-title">{currentProvider.name}</span>
           </div>
           <span
-            className={`pill-badge ${isCurrentReady ? 'pill-green' : 'pill-neutral'}`}
-            style={{ fontSize: '11px' }}
+            className={`pill-badge ${isCurrentReady ? 'pill-green' : 'pill-neutral'} model-config-badge`}
           >
             {isCurrentReady ? (isLocalAgent ? '✅ 本地环境就绪' : '✅ 环境就绪') : '待配置'}
           </span>
         </div>
 
-        <p style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '16px', lineHeight: 1.5 }}>
+        <p className="model-config-desc">
           {currentProvider.description || '企业级智能体推理服务，支持标准与本地模式交互'}
         </p>
 
         {isLocalAgent ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+          <div className="model-form-stack">
+            <div className="model-field">
+              <label className="model-field-label">
                 程序检测状态 (CLI Path / Mesh Node):
               </label>
               <div
-                style={{
-                  fontFamily: 'monospace',
-                  fontSize: '12px',
-                  background: 'var(--om-surface-3)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  color: isCurrentReady ? 'var(--om-fg)' : 'var(--accent-amber)',
-                }}
+                className={`model-probe-box ${isCurrentReady ? 'is-ready' : 'is-missing'}`}
               >
                 {currentProvider.executablePath || currentProvider.cliPath || (isCurrentReady ? '通过远程在线计算节点连接就绪' : '未在服务器或已连接节点中检测到')}
               </div>
             </div>
 
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+            <div className="model-field">
+              <label className="model-field-label">
                 探针响应版本 (Probe Version):
               </label>
               <div
-                style={{
-                  fontFamily: 'monospace',
-                  fontSize: '12px',
-                  color: isCurrentReady ? 'var(--accent-green)' : 'var(--text-dim)',
-                  paddingLeft: '2px',
-                }}
+                className={`model-probe-version ${isCurrentReady ? 'is-ready' : 'is-missing'}`}
               >
                 {currentProvider.version || currentProvider.detectedVersion || (isCurrentReady ? '在线就绪' : '探针未响应')}
               </div>
             </div>
 
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+            <div className="model-field">
+              <label className="model-field-label">
                 指定模型 (Model ID):
               </label>
               <select
-                className="form-control"
+                className="form-control model-select"
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
-                style={{ width: '100%' }}
               >
                 {candidateModels.map((m) => (
                   <option key={m} value={m}>
@@ -293,17 +258,12 @@ export const ModelSettingsModal: React.FC = () => {
                   </option>
                 ))}
               </select>
-              <div className="model-candidate-tags" style={{ marginTop: '8px' }}>
+              <div className="model-candidate-tags">
                 {candidateModels.map((m) => (
                   <span
                     key={m}
-                    className="model-candidate-tag"
+                    className={`model-candidate-tag ${m === modelId ? 'is-selected' : ''}`}
                     onClick={() => setModelId(m)}
-                    style={
-                      m === modelId
-                        ? { borderColor: 'var(--om-accent)', color: 'var(--om-accent)', fontWeight: 600 }
-                        : undefined
-                    }
                   >
                     {m}
                   </span>
@@ -313,100 +273,55 @@ export const ModelSettingsModal: React.FC = () => {
 
             {testResult ? (
               testResult.success ? (
-                <div
-                  style={{
-                    background: 'rgba(48, 209, 88, 0.08)',
-                    border: '1px solid var(--accent-green)',
-                    borderRadius: '8px',
-                    padding: '10px 14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginTop: '6px',
-                  }}
-                >
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-green)', flexShrink: 0 }} />
+                <div className="model-test-banner is-success">
+                  <span className="model-test-dot is-success" />
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--accent-green)', fontWeight: 600 }}>
+                    <div className="model-test-heading is-success">
                       🟢 本地 Agent 响应就绪 ({testResult.latency || 15}ms)
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                    <div className="model-test-detail">
                       检测到版本: {currentProvider.version || '在线就绪'}
                     </div>
                   </div>
                 </div>
               ) : (
-                <div
-                  style={{
-                    background: 'rgba(255, 69, 58, 0.08)',
-                    border: '1px solid var(--accent-red)',
-                    borderRadius: '8px',
-                    padding: '10px 14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginTop: '6px',
-                  }}
-                >
-                  <AlertCircle size={16} style={{ color: 'var(--accent-red)', flexShrink: 0 }} />
+                <div className="model-test-banner is-error">
+                  <AlertCircle size={16} className="model-test-icon is-error" />
                   <div>
-                    <div style={{ fontSize: '12px', color: 'var(--accent-red)', fontWeight: 600 }}>
+                    <div className="model-test-heading is-error">
                       连通性测试未通过
                     </div>
-                    <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                    <div className="model-test-detail">
                       {testResult.message || '远程节点响应超时'}
                     </div>
                   </div>
                 </div>
               )
             ) : isCurrentReady ? (
-              <div
-                style={{
-                  background: 'rgba(48, 209, 88, 0.06)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '8px',
-                  padding: '10px 14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  marginTop: '6px',
-                }}
-              >
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-green)', flexShrink: 0 }} />
+              <div className="model-test-banner is-ready">
+                <span className="model-test-dot is-success" />
                 <div>
-                  <div style={{ fontSize: '12px', color: 'var(--om-fg)', fontWeight: 600 }}>
+                  <div className="model-test-heading is-ready">
                     Agent 运行环境已就绪
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                  <div className="model-test-detail">
                     已关联可用计算节点，可点击下方“测试连通性”进行在线验证
                   </div>
                 </div>
               </div>
             ) : (
-              <div
-                style={{
-                  background: 'rgba(255, 149, 0, 0.08)',
-                  border: '1px solid var(--accent-amber)',
-                  borderRadius: '8px',
-                  padding: '10px 14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  marginTop: '6px',
-                }}
-              >
-                <AlertCircle size={16} style={{ color: 'var(--accent-amber)', flexShrink: 0 }} />
-                <div style={{ fontSize: '12px', color: 'var(--accent-amber)', fontWeight: 600 }}>
+              <div className="model-test-banner is-warning">
+                <AlertCircle size={16} className="model-test-icon is-warning" />
+                <div className="model-test-heading is-warning">
                   未检测到本地 {currentProvider.name} 程序。请在终端安装或连接个人电脑伴侣。
                 </div>
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="btn-secondary model-test-banner-btn"
                   onClick={() => {
                     setIsModelModalOpen(false);
                     setIsAddMachineModalOpen(true);
                   }}
-                  style={{ marginLeft: 'auto', fontSize: '11px', padding: '2px 8px', flexShrink: 0 }}
                 >
                   💻 接入个人电脑
                 </button>
@@ -414,30 +329,24 @@ export const ModelSettingsModal: React.FC = () => {
             )}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+          <div className="model-form-stack">
+            <div className="model-field">
+              <label className="model-field-label">
                 指定模型 (Model ID):
               </label>
               <input
                 type="text"
-                className="form-control"
+                className="form-control model-input"
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
-                style={{ width: '100%', marginBottom: '6px' }}
                 placeholder="例如 deepseek-flash 或 gpt-4o"
               />
               <div className="model-candidate-tags">
                 {candidateModels.map((m) => (
                   <span
                     key={m}
-                    className="model-candidate-tag"
+                    className={`model-candidate-tag ${m === modelId ? 'is-selected' : ''}`}
                     onClick={() => setModelId(m)}
-                    style={
-                      m === modelId
-                        ? { borderColor: 'var(--om-accent)', color: 'var(--om-accent)', fontWeight: 600 }
-                        : undefined
-                    }
                   >
                     {m}
                   </span>
@@ -445,38 +354,36 @@ export const ModelSettingsModal: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+            <div className="model-field">
+              <label className="model-field-label">
                 API Key:
               </label>
               <input
                 type="password"
-                className="form-control"
+                className="form-control model-input"
                 placeholder={currentProvider.hasKey ? (currentProvider.maskedKey || '已配置密钥 (留空保持不变)') : 'sk-...'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                style={{ width: '100%' }}
               />
             </div>
 
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+            <div className="model-field">
+              <label className="model-field-label">
                 Base URL / Endpoint (选填):
               </label>
               <input
                 type="text"
-                className="form-control"
+                className="form-control model-input"
                 placeholder={currentProvider.baseUrl || 'https://api.openai.com/v1'}
                 value={endpoint}
                 onChange={(e) => setEndpoint(e.target.value)}
-                style={{ width: '100%' }}
               />
             </div>
           </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="model-actions-bar">
         <button
           type="button"
           className="btn-secondary"
@@ -486,7 +393,7 @@ export const ModelSettingsModal: React.FC = () => {
           {isTesting ? '正在测试连通性...' : '测试连通性'}
         </button>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="model-actions-right">
           <button
             type="button"
             className="btn-secondary"
