@@ -35,9 +35,5 @@ apps/web/uploads/*
 !apps/web/uploads/.gitkeep
 apps/gateway/data/*
 
-# Graphify knowledge graph caches
-graphify-out/.graphify_*
-graphify-out/cache/
-graphify-out/202*
-graphify-out/cost.json
-graphify-out/manifest.json
+# Graphify knowledge graph outputs (generated, not source)
+graphify-out/
