@@ -6,6 +6,17 @@ import { cadenceToCron, computeNextCheckIn } from './cadence.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export function formatBeijingTimestamp(date: Date = new Date()): string {
+  const d = new Date(date.getTime() + (8 * 60 + date.getTimezoneOffset()) * 60000);
+  const YYYY = d.getFullYear();
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const DD = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}`;
+}
+
 export class GoalStore {
   private filePath: string;
   private goals = new Map<string, Goal>();
@@ -184,7 +195,7 @@ export class GoalStore {
   public appendNote(id: string, note: string): Goal | undefined {
     const goal = this.goals.get(id);
     if (!goal) return undefined;
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const timestamp = formatBeijingTimestamp();
     const line = `[${timestamp}] ${note.trim()}`;
     const nextNotes = goal.notes ? `${goal.notes}\n${line}` : line;
     return this.update(id, { notes: nextNotes });
