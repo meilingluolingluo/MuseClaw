@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ProviderIcon } from '../../utils/icons';
+import { BotAvatar } from '../common/BotAvatar';
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   Package,
   Brain,
+  User as UserIcon,
 } from 'lucide-react';
 
 export const TopBar: React.FC = () => {
@@ -54,19 +56,19 @@ export const TopBar: React.FC = () => {
 
   const tabTitles: Record<string, { title: string; icon: React.ReactNode }> = {
     chat: { title: '对话工作台', icon: null },
-    feed: { title: '智能体动态 (Feed)', icon: <Rss size={16} style={{ color: 'var(--om-accent)' }} /> },
-    goals: { title: '长周期目标 (Goals)', icon: <Target size={16} style={{ color: 'var(--om-accent)' }} /> },
-    routines: { title: '定时任务 (Routines)', icon: <Clock size={16} style={{ color: 'var(--om-accent)' }} /> },
-    memory: { title: '受控长期记忆 (Memory)', icon: <Brain size={16} style={{ color: 'var(--om-accent)' }} /> },
-    skills: { title: '技能规程库 (Skills)', icon: <Boxes size={16} style={{ color: 'var(--om-accent)' }} /> },
-    audit: { title: '安全策略与合规审计', icon: <ShieldCheck size={16} style={{ color: 'var(--om-accent)' }} /> },
-    artifacts: { title: '交付工件 (Artifacts)', icon: <Package size={16} style={{ color: 'var(--om-accent)' }} /> },
+    feed: { title: '态势流与审批', icon: <Rss size={16} className="top-bar-tab-icon" /> },
+    goals: { title: '长周期目标推进', icon: <Target size={16} className="top-bar-tab-icon" /> },
+    routines: { title: '例行自动化调度', icon: <Clock size={16} className="top-bar-tab-icon" /> },
+    memory: { title: '员工受控记忆中枢', icon: <Brain size={16} className="top-bar-tab-icon" /> },
+    skills: { title: '技能与工具规程库', icon: <Boxes size={16} className="top-bar-tab-icon" /> },
+    audit: { title: '安全策略与合规审计', icon: <ShieldCheck size={16} className="top-bar-tab-icon" /> },
+    artifacts: { title: '交付物与成果抽屉', icon: <Package size={16} className="top-bar-tab-icon" /> },
   };
 
   const isBotScopedTab = tab === 'chat' || tab === 'memory';
 
   return (
-    <header className="top-bar">
+    <header className="top-bar" role="banner">
       <div className="top-bar-left">
         {isBotScopedTab && (
           <button
@@ -76,7 +78,8 @@ export const TopBar: React.FC = () => {
               if (isMobile) setIsMobileDrawerOpen((prev) => !prev);
               else setIsDrawerCollapsed((prev) => !prev);
             }}
-            title={isMobile ? '打开数字员工与会话' : isDrawerCollapsed ? '展开侧边栏' : '收起侧边栏'}
+            title={isMobile ? '打开数字员工与会话列表' : isDrawerCollapsed ? '展开抽屉' : '收起抽屉'}
+            aria-label={isDrawerCollapsed ? '展开抽屉' : '收起抽屉'}
           >
             {isMobile ? <Menu size={16} /> : isDrawerCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -88,13 +91,19 @@ export const TopBar: React.FC = () => {
             <div
               className="bot-title-badge"
               onClick={() => setIsBotModalOpen(true)}
-              title="点击查看/配置该数字员工与形象"
-              style={{ cursor: 'pointer' }}
+              title="点击查看/配置该数字员工与形象 Prompt"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setIsBotModalOpen(true);
+              }}
             >
-              <span style={{ fontSize: '18px' }}>{activeBot?.avatar || '🤖'}</span>
-              <span style={{ fontWeight: 600 }}>{activeBot?.name || '数字员工'}</span>
-              <span className="pill-badge pill-blue" style={{ fontSize: '11px' }}>
-                {activeBot?.role || 'Coordinator'}
+              <div className="top-bar-bot-avatar">
+                <BotAvatar bot={activeBot} size={28} still />
+              </div>
+              <span className="top-bar-bot-name">{activeBot?.name || '数字员工'}</span>
+              <span className="pill-badge pill-blue top-bar-role-pill">
+                {activeBot?.role || '智能协同'}
               </span>
             </div>
 
@@ -102,35 +111,33 @@ export const TopBar: React.FC = () => {
             <div id="taint-badge-container">
               {isTainted ? (
                 <span
-                  className="pill-badge pill-red"
+                  className="pill-badge pill-red taint-alert-badge"
                   title={`敏感数据受限模式: ${taintReasons.join('; ')}`}
                 >
-                  <ShieldAlert size={12} /> 污染态 (Tainted)
+                  <ShieldAlert size={12} /> 污染态受限
                 </span>
               ) : (
-                <span className="pill-badge pill-green" title="出网策略正常，未触及私密数据">
-                  <Shield size={12} /> 纯净态 (Untainted)
+                <span className="pill-badge pill-green" title="安全策略正常，未触及敏感数据">
+                  <Shield size={12} /> 安全纯净态
                 </span>
               )}
             </div>
 
-            {/* 沙箱隔离 */}
-            <span className="pill-badge pill-blue" title="Linux Bubblewrap 内核级安全沙箱隔离">
+            {/* 内核沙箱隔离 */}
+            <span className="pill-badge pill-neutral top-bar-sandbox-pill" title="Linux Bubblewrap 内核级安全沙箱隔离">
               <Box size={12} /> bwrap 隔离
             </span>
 
             {tab === 'memory' && (
-              <span className="pill-badge pill-blue" style={{ marginLeft: '6px' }}>
-                受控长期记忆 (Memory)
+              <span className="pill-badge pill-blue">
+                长期记忆上下文
               </span>
             )}
           </>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '4px' }}>
-            <span style={{ fontWeight: 600, fontSize: '15px', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {tabTitles[tab]?.icon}
-              {tabTitles[tab]?.title || tab}
-            </span>
+          <div className="top-bar-view-heading">
+            {tabTitles[tab]?.icon}
+            <h1 className="top-bar-view-title">{tabTitles[tab]?.title || tab}</h1>
           </div>
         )}
       </div>
@@ -142,12 +149,13 @@ export const TopBar: React.FC = () => {
           type="button"
           onClick={() => setIsModelModalOpen(true)}
           title="点击配置 AI 大模型服务 (DeepSeek / OpenAI / Ollama 等)"
+          aria-label="AI 大模型服务配置"
         >
           <span className="model-status-icon">
-            <ProviderIcon providerId={activeProvider.id} size={16} />
+            <ProviderIcon providerId={activeProvider.id} size={15} />
           </span>
           <span className="model-status-name">{activeProvider.name}</span>
-          <span className="model-status-dot" />
+          <span className="model-status-dot online" aria-hidden="true" />
         </button>
 
         {/* 员工身份胶囊 */}
@@ -155,23 +163,27 @@ export const TopBar: React.FC = () => {
           className="user-profile-capsule"
           type="button"
           onClick={() => setIsAuthModalOpen(true)}
-          title="员工身份与账号配置"
+          title="员工身份与鉴权配置"
+          aria-label="员工身份与鉴权配置"
         >
-          <span className="user-avatar" style={{ fontSize: '15px' }}>👤</span>
+          <span className="user-avatar-icon">
+            <UserIcon size={14} />
+          </span>
           <span className="user-name">{user ? user.displayName || user.username : '未登录'}</span>
         </button>
 
         {/* 门禁审批模式切换器 */}
-        <div
+        <button
           className="approval-selector"
+          type="button"
           onClick={cycleApprovalMode}
-          title="点击切换门禁审批模式 (ASK / AUTO_EDITS / FULL)"
-          style={{ cursor: 'pointer' }}
+          title="点击循环切换门禁审批模式 (ASK 逐项确认 / AUTO_EDITS 自动编辑 / FULL 完全自主)"
+          aria-label="切换门禁审批模式"
         >
-          <Lock size={13} />
-          <span>{(activeBot?.approvalMode || 'ASK').toUpperCase()} 门禁</span>
-          <ChevronDown size={13} />
-        </div>
+          <Lock size={12} className="approval-lock-icon" />
+          <span className="approval-mode-text">{(activeBot?.approvalMode || 'ASK').toUpperCase()} 门禁</span>
+          <ChevronDown size={12} className="approval-chevron-icon" />
+        </button>
 
         {/* 审计模式切换胶囊 */}
         <button
@@ -182,6 +194,8 @@ export const TopBar: React.FC = () => {
             setIsAuditDrawerOpen((prev) => !prev);
           }}
           title={isAuditDrawerOpen ? '收起安全策略与审计抽屉' : '展开安全策略与审计抽屉'}
+          aria-expanded={isAuditDrawerOpen}
+          aria-label="切换安全合规审计面板"
         >
           <ShieldCheck size={14} className="audit-capsule-icon" />
           <span className="audit-capsule-text">审计模式</span>
