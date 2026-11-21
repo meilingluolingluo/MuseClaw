@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from './loop.js';
-import { MicroSandbox, getSanitizedEnv } from './micro-sandbox.ts';
+import { BaseEnvironment, MicroSandbox, getSanitizedEnv } from './micro-sandbox.ts';
 
 export { getSanitizedEnv };
 
@@ -60,6 +60,7 @@ export function createDefaultTools(options?: {
   browserWorkerUrl?: string;
   artifactsDir?: string;
   workspaceDir?: string;
+  environment?: BaseEnvironment;
   microSandbox?: MicroSandbox;
   skillsProvider?: SkillsProvider;
   memoryProvider?: MemoryProvider;
@@ -73,8 +74,9 @@ export function createDefaultTools(options?: {
   const goalProvider = options?.goalProvider;
   const feishuProvider = options?.feishuProvider;
 
-  // 初始化微沙箱引擎（若外部未传入，则根据工作区自动创建）
-  const sandbox = options?.microSandbox || new MicroSandbox({ workspaceDir });
+  // 初始化统一执行环境（若外部未传入，则根据工作区自动创建）
+  const environment: BaseEnvironment = options?.environment || options?.microSandbox || new MicroSandbox({ workspaceDir });
+  const sandbox = environment;
 
   return [
     // Agent Skills 规程库加载、执行与自学习沉淀
@@ -467,6 +469,49 @@ export function createDefaultTools(options?: {
       }
     },
 
+    // 阶梯 2 (CLI): 离线代码执行 (强制 allow_network=false 阻断外网出逃)
+    {
+      name: 'execute_code',
+      description: '在严格离线微沙箱环境中执行 Python、Node.js 或 Bash 脚本代码（按能力分级隔离网络，保障代码执行安全）',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: '待执行的代码文本' },
+          language: { type: 'string', enum: ['python', 'node', 'bash', 'sh'], description: '代码运行环境，默认为 python' },
+          timeout_ms: { type: 'number', description: '执行超时时间（毫秒），默认为 30000ms' }
+        },
+        required: ['code']
+      },
+      execute: async (args) => {
+        const code = String(args.code || '');
+        const lang = String(args.language || 'python').toLowerCase();
+        const timeoutMs = typeof args.timeout_ms === 'number' ? args.timeout_ms : 30000;
+        console.log(`[Tool:execute_code] 离线沙箱执行 ${lang} 代码 (${code.length} 字符)`);
+
+        let cmd = '';
+        if (lang === 'python' || lang === 'py') {
+          cmd = `python3 -c ${JSON.stringify(code)}`;
+        } else if (lang === 'node' || lang === 'javascript' || lang === 'js') {
+          cmd = `node -e ${JSON.stringify(code)}`;
+        } else {
+          cmd = code;
+        }
+
+        const result = await sandbox.execute(cmd, { cwd: workspaceDir, allowNetwork: false, timeoutMs });
+        return {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exitCode: result.exitCode,
+          sandbox: {
+            isSandboxed: result.isSandboxed,
+            engine: result.engine,
+            networkBlocked: result.networkBlocked,
+            durationMs: result.durationMs
+          }
+        };
+      }
+    },
+
     // 阶梯 3 (Web): 轻量 HTTP 页面/接口抓取（无需拉起完整 Chromium 内核）
     {
       name: 'web_fetch',
@@ -664,14 +709,14 @@ export function createDefaultTools(options?: {
       }
     },
 
-    // 阶梯 1 (API/Local): 文件读取
+    // 阶梯 1 (API/Local): 文件安全读取
     {
       name: 'read_file',
-      description: '读取沙箱或工作区中的指定文件内容（敏感文件读取后将标记会话为 Tainted 污点状态）',
+      description: '读取沙箱或工作区中的指定文件内容（具备安全路径保护，敏感文件读取后将标记会话为 Tainted 污点状态）',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: '文件相对或绝对路径' }
+          path: { type: 'string', description: '文件相对路径或绝对路径' }
         },
         required: ['path']
       },
@@ -679,13 +724,39 @@ export function createDefaultTools(options?: {
         const filePath = String(args.path || '');
         console.log(`[Tool:read_file] 读取文件: ${filePath}`);
         try {
-          if (!fs.existsSync(filePath)) {
-            return { error: `File not found: ${filePath}` };
-          }
-          const content = fs.readFileSync(filePath, 'utf-8');
+          const content = await environment.readFile(filePath);
           return { content, sizeBytes: Buffer.byteLength(content, 'utf-8') };
         } catch (error: any) {
           return { error: error.message };
+        }
+      }
+    },
+
+    // 阶梯 1 (API/Local): 文件安全写入 (带应用层安全根路径校验与敏感文件黑名单拦截)
+    {
+      name: 'write_file',
+      description: '在工作区安全根目录下创建或覆写文件（具备应用层安全根路径校验与敏感文件黑名单拦截防护）',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '文件相对路径或 /workspace 内部绝对路径' },
+          content: { type: 'string', description: '待写入的文件文本内容' }
+        },
+        required: ['path', 'content']
+      },
+      execute: async (args) => {
+        const targetPath = String(args.path || '');
+        const content = String(args.content ?? '');
+        console.log(`[Tool:write_file] 写入文件: ${targetPath}`);
+        try {
+          await environment.writeFile(targetPath, content);
+          return {
+            success: true,
+            path: targetPath,
+            sizeBytes: Buffer.byteLength(content, 'utf-8')
+          };
+        } catch (error: any) {
+          return { success: false, error: error.message || String(error) };
         }
       }
     },

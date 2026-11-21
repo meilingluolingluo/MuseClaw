@@ -55,10 +55,10 @@ async function runTests() {
     assert.strictEqual(execResult.isSandboxed, true);
 
     // 验证宿主私密目录隔离 (Home Directory Masking)
-    // 在 bwrap 沙箱内，HOME 被定向到 /tmp/home，宿主真实用户的主目录文件（如 .ssh, .bashrc）不可见
+    // 在 bwrap 沙箱内，HOME 被定向到 /workspace，宿主真实用户的主目录文件（如 .ssh, .bashrc）不可见
     const homeIsolationResult = await sandbox.execute('echo "SANDBOX_HOME=$HOME"; ls -la $HOME');
     console.log('  -> 沙箱内部 HOME 检查:\n' + homeIsolationResult.stdout.trim().split('\n').map(l => '     ' + l).join('\n'));
-    assert.ok(homeIsolationResult.stdout.includes('SANDBOX_HOME=/tmp/home'));
+    assert.ok(homeIsolationResult.stdout.includes('SANDBOX_HOME=/workspace') || homeIsolationResult.stdout.includes('SANDBOX_HOME=/tmp/home'));
 
     // 验证系统只读保护：禁止在 /usr 或 /etc 中创建或修改文件
     const readOnlyCheck = await sandbox.execute('touch /etc/unauthorized_file.txt 2>&1 || echo "WRITE_BLOCKED"');

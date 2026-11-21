@@ -1,5 +1,6 @@
 import type { AgentProfile, TrajectoryStep } from '@museclaw/protocol';
 
+export * from './environment.ts';
 export * from './micro-sandbox.ts';
 export * from './channel-ladder.ts';
 export * from './vault.ts';
