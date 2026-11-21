@@ -713,12 +713,13 @@ html[data-theme="dark"] .pill-red {
   flex-direction: column;
   overflow: hidden;
   background-color: var(--om-bg);
+  position: relative;
 }
 
 .chat-history {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 86px 24px 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -4003,7 +4004,7 @@ details[open] .thought-toggle::after {
   .approval-selector span { display: none; }
 
   .view-stage { padding: 20px 16px; }
-  .chat-history { padding: 16px 12px; }
+  .chat-history { padding: 76px 12px 16px 12px; }
   .chat-composer-wrap { padding: 10px 12px 12px; }
 }
 
@@ -5769,4 +5770,182 @@ details[open] .thought-toggle::after {
   .goal-modal-actions button { flex: 1; justify-content: center; }
   .goal-filter-bar { padding: 10px 12px; }
   .goal-complete-hint .btn-primary { width: 100%; }
+}
+
+
+/* ============================================================================
+   对话区悬浮居中智能体头像与下颌胶囊 (Floating Scrim Header)
+============================================================================ */
+.chat-floating-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 15;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  padding-bottom: 24px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--om-bg) 85%, transparent) 0%,
+    color-mix(in srgb, var(--om-bg) 40%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+.chat-floating-header :is(button, a, [role="button"]) {
+  pointer-events: auto;
+}
+
+.agent-floating-capsule {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  user-select: none;
+}
+
+.agent-floating-avatar-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-floating-avatar-btn:hover {
+  transform: translateY(-1px) scale(1.04);
+}
+
+.agent-floating-avatar-btn .nanomuse-avatar-circle {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 2px solid var(--om-surface);
+}
+
+.agent-floating-name-pill {
+  position: relative;
+  z-index: 2;
+  margin-top: -10px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 14px;
+  padding: 2.5px 12px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 24px;
+  max-width: 220px;
+}
+
+.agent-floating-name-pill:hover {
+  border-color: var(--om-accent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--om-accent) 20%, transparent);
+  transform: translateY(-1px);
+}
+
+.agent-floating-name-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--om-fg);
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.agent-floating-status-line {
+  display: flex;
+  align-items: center;
+  gap: 4.5px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--om-accent);
+  margin-top: 1px;
+}
+
+.agent-floating-spinner {
+  width: 9.5px;
+  height: 9.5px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.agent-floating-status-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+/* 对话空状态展示 */
+.chat-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: auto;
+  padding: 32px 20px;
+  max-width: 580px;
+}
+
+.chat-empty-greeting {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--om-fg);
+  letter-spacing: -0.01em;
+  margin-bottom: 8px;
+}
+
+.chat-empty-desc {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.chat-empty-starters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.chat-starter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  color: var(--om-fg);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.15s ease;
+}
+
+.chat-starter-btn:hover {
+  background: var(--om-surface-2);
+  border-color: var(--om-accent);
+  color: var(--om-accent);
+  transform: translateY(-1px);
 }

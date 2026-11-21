@@ -6,61 +6,63 @@ interface AgentCapsuleProps {
   bot?: Bot | null;
   variant?: 'hero' | 'header';
   isStreaming?: boolean;
+  streamingReasoning?: string;
+  streamingToolsCount?: number;
+  size?: number;
   onClick?: () => void;
 }
 
 export const AgentCapsule: React.FC<AgentCapsuleProps> = ({
   bot,
-  variant = 'hero',
+  variant = 'header',
   isStreaming = false,
+  streamingReasoning = '',
+  streamingToolsCount = 0,
+  size = 50,
   onClick,
 }) => {
   const botName = bot?.name || '小哀';
   const mood = isStreaming ? 'working' : 'idle';
 
-  if (variant === 'header') {
-    return (
-      <div
-        className="agent-capsule-inline"
-        onClick={onClick}
-        title={`点击打开 ${botName} 的设定与档案`}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onClick?.();
-          }
-        }}
-      >
-        <div className="agent-inline-logo">
-          <BotAvatar bot={bot} size={36} mood={mood} motion="avatar-idle" />
-        </div>
-        <span className="agent-inline-name">{botName}</span>
-      </div>
-    );
+  let statusLine: string | null = null;
+  if (isStreaming) {
+    if (streamingReasoning) {
+      statusLine = '深度思考中…';
+    } else if (streamingToolsCount > 0) {
+      statusLine = "正在调用工具 (" + streamingToolsCount + ")…";
+    } else {
+      statusLine = '正在回答…';
+    }
   }
 
-  // 空会话时同样只展示大 Logo 与名称，保持与顶部悬浮标识一致
   return (
-    <div
-      className="agent-capsule-inline is-hero"
-      onClick={onClick}
-      title={`点击打开 ${botName} 的设定与档案`}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick?.();
-        }
-      }}
-    >
-      <div className="agent-inline-logo">
-        <BotAvatar bot={bot} size={60} mood={mood} motion="avatar-idle" />
-      </div>
-      <span className="agent-inline-name">{botName}</span>
-    </div>
+    <div className="agent-floating-capsule">
+      {/* 居中悬浮圆盘头像 */}
+      <button
+        type="button"
+        className="agent-floating-avatar-btn"
+        onClick={onClick}
+        aria-label={botName + ' 的设定与档案'}
+        title={'点击查看/配置 ' + botName + ' 的设定与档案'}
+      >
+        <BotAvatar bot={bot} size={size} mood={mood} motion="avatar-idle" />
+      </button>
 
+      {/* 叠挂在下颌处的悬浮身份与状态胶囊 */}
+      <button
+        type="button"
+        className="agent-floating-name-pill"
+        onClick={onClick}
+        title={'点击查看/配置 ' + botName + ' 的设定与档案'}
+      >
+        <span className="agent-floating-name-text">{botName}</span>
+        {statusLine && (
+          <span className="agent-floating-status-line">
+            <span className="agent-floating-spinner" />
+            <span className="agent-floating-status-text">{statusLine}</span>
+          </span>
+        )}
+      </button>
+    </div>
   );
 };

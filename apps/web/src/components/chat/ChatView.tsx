@@ -86,7 +86,7 @@ export const ChatView: React.FC = () => {
     scrollToBottom();
   }, [messages, streamingContent, streamingReasoning]);
 
-  const handleSendMessage = async (text: string, attachments: MessageAttachment[]) => {
+  const handleSendMessage = async (text: string, attachments: MessageAttachment[] = []) => {
     // 第一条消息不该先让用户「去新建会话」：没有会话就静默开一个
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -325,26 +325,17 @@ export const ChatView: React.FC = () => {
   return (
     <div className="chat-stage-wrapper">
       <section className="chat-container">
-        {/* 会话顶部常驻智能体活动胶囊 */}
-        {messages.length > 0 && (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              padding: '6px 16px',
-              borderBottom: '1px solid var(--om-border)',
-              background: 'var(--om-surface)',
-            }}
-          >
-            <AgentCapsule
-              bot={activeBot}
-              variant="header"
-              isStreaming={isStreaming}
-              onClick={() => setIsBotModalOpen(true)}
-            />
-          </div>
-        )}
+        {/* 顶部悬浮居中智能体头像与渐变遮罩 (Scrim) */}
+        <div className="chat-floating-header">
+          <AgentCapsule
+            bot={activeBot}
+            variant="header"
+            isStreaming={isStreaming}
+            streamingReasoning={streamingReasoning}
+            streamingToolsCount={streamingTools.length}
+            onClick={() => setIsBotModalOpen(true)}
+          />
+        </div>
 
         <div className="chat-history">
           {loadingSession ? (
@@ -353,19 +344,42 @@ export const ChatView: React.FC = () => {
               正在载入会话记录…
             </div>
           ) : messages.length === 0 && !isStreaming ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-dim)', margin: 'auto', padding: '40px 20px' }}>
-              {/* 对话框正中间的活体动态 Logo 与名字胶囊 */}
-              <AgentCapsule
-                bot={activeBot}
-                variant="hero"
-                isStreaming={isStreaming}
-                onClick={() => setIsBotModalOpen(true)}
-              />
-              <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-muted)', marginTop: '12px' }}>
-                随时为您效劳
+            <div className="chat-empty-state">
+              <div className="chat-empty-greeting">
+                你好，我是 {activeBot?.name || '数字员工'}
               </div>
-              <div style={{ fontSize: '12.5px', marginTop: '4px', color: 'var(--text-dim)' }}>
-                输入指令即可调遣数字员工执行任务、自动分析或沉淀工件
+              <div className="chat-empty-desc">
+                我具备长期记忆、多维度目标自主推进及安全沙箱工具执行能力，随时为您效劳。
+              </div>
+              <div className="chat-empty-starters">
+                <button
+                  type="button"
+                  className="chat-starter-btn"
+                  onClick={() => handleSendMessage('帮我梳理并规划长周期目标')}
+                >
+                  🎯 帮我梳理并规划长周期目标
+                </button>
+                <button
+                  type="button"
+                  className="chat-starter-btn"
+                  onClick={() => handleSendMessage('查询并记录我常用的工作习惯与偏好')}
+                >
+                  🧠 记录我的长期工作偏好
+                </button>
+                <button
+                  type="button"
+                  className="chat-starter-btn"
+                  onClick={() => handleSendMessage('查询明天从北京到上海的高铁车次与票价')}
+                >
+                  🚄 查询高铁车次与票价
+                </button>
+                <button
+                  type="button"
+                  className="chat-starter-btn"
+                  onClick={() => handleSendMessage('在 Bubblewrap 原生安全沙箱中执行系统自检')}
+                >
+                  🛡️ 沙箱环境系统健康检查
+                </button>
               </div>
             </div>
           ) : (
