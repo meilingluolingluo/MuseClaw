@@ -55,6 +55,8 @@ export interface Session {
     content?: string;
     tool_calls?: unknown[];
     tool_call_id?: string;
+    /** 用户上传的附件，历史回放时用于还原图片与文件 */
+    attachments?: Array<{ name?: string; type?: string; url: string; size?: number }>;
   }>;
 }
 
