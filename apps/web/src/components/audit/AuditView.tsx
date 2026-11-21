@@ -45,66 +45,62 @@ export const AuditView: React.FC = () => {
   };
 
   return (
-    <section className="view-stage">
-      <div className="view-header">
+    <section className="view-stage audit-stage" aria-label="安全策略与合规审计">
+      <div className="view-header audit-header-wrap">
         <div>
-          <div className="view-heading">
-            <ShieldCheck size={18} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '6px' }} />
-            安全策略与合规审计 (Security & Audit)
+          <div className="view-heading audit-heading">
+            <ShieldCheck size={20} className="audit-heading-icon" />
+            <span>安全策略与合规审计</span>
           </div>
-          <div className="view-sub">声明式策略配置、已授予的复用权限 (Grants) 以及全生命周期追加式审计追踪流 (AuditLog)</div>
+          <div className="view-sub audit-sub">
+            声明式策略配置、已授予的复用权限 (Grants) 以及全生命周期追加式审计追踪流 (AuditLog)。
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
-          <button type="button" className="btn-secondary" onClick={loadData} disabled={loading} style={{ whiteSpace: 'nowrap' }}>
-            <RefreshCw size={14} /> 刷新审计流
+        <div className="audit-header-actions">
+          <button type="button" className="btn-secondary audit-refresh-btn" onClick={loadData} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            <span>刷新审计流</span>
           </button>
         </div>
       </div>
 
       <div className="audit-top-grid">
         {/* Declarative policy card */}
-        <div style={{ background: 'var(--om-surface)', border: '1px solid var(--om-border)', borderRadius: '12px', padding: '18px' }}>
-          <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px' }}>
+        <div className="audit-card">
+          <div className="audit-card-title">
             🛡️ 声明式安全策略 (sentinel-policy.json)
           </div>
-          <pre style={{ margin: 0, fontSize: '12px', color: 'var(--text-dim)', maxHeight: '180px', overflow: 'auto' }}>
+          <pre className="audit-policy-pre">
             {JSON.stringify(policy, null, 2)}
           </pre>
         </div>
 
         {/* Grants store */}
-        <div style={{ background: 'var(--om-surface)', border: '1px solid var(--om-border)', borderRadius: '12px', padding: '18px' }}>
-          <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between' }}>
+        <div className="audit-card">
+          <div className="audit-card-title audit-grants-header">
             <span>📜 活跃复用授权 (Grants)</span>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{grants.length} 个授权</span>
+            <span className="audit-grants-count">{grants.length} 个授权</span>
           </div>
-          <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="audit-grants-list">
             {grants.length === 0 ? (
-              <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>暂无活跃授权</div>
+              <div className="audit-grants-empty">暂无活跃授权</div>
             ) : (
               grants.map((grant: any, idx: number) => {
                 const permText = typeof grant.permission === 'object' ? JSON.stringify(grant.permission) : String(grant.permission || '');
                 return (
                   <div
                     key={grant.id || idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 10px',
-                      borderRadius: '6px',
-                      background: 'var(--om-surface-2)',
-                      fontSize: '12px',
-                    }}
+                    className="audit-grant-row"
                   >
-                    <div>
-                      <span style={{ fontWeight: 600 }}>{grant.scope}</span>: {permText}
+                    <div className="audit-grant-desc">
+                      <span className="audit-grant-scope">{grant.scope}</span>: {permText}
                     </div>
                     <button
                       type="button"
                       onClick={() => handleRevokeGrant(grant.id)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-red)' }}
-                      title="撤销"
+                      className="audit-grant-revoke-btn"
+                      title="撤销授权"
+                      aria-label="撤销授权"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -117,24 +113,24 @@ export const AuditView: React.FC = () => {
       </div>
 
       {/* Audit trail table */}
-      <div style={{ background: 'var(--om-surface)', border: '1px solid var(--om-border)', borderRadius: '12px', padding: '18px' }}>
-        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px' }}>
+      <div className="audit-card audit-table-card">
+        <div className="audit-card-title">
           📋 结构化操作审计流水 (Audit Trail)
         </div>
-        <div style={{ maxHeight: '380px', overflow: 'auto' }}>
-          <table style={{ width: '100%', minWidth: '640px', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+        <div className="audit-table-wrap">
+          <table className="audit-table">
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--om-border)', color: 'var(--text-dim)' }}>
-                <th style={{ padding: '8px' }}>时间戳</th>
-                <th style={{ padding: '8px' }}>事件类型</th>
-                <th style={{ padding: '8px' }}>涉及目标</th>
-                <th style={{ padding: '8px' }}>裁决 / 详情</th>
+              <tr className="audit-table-head-row">
+                <th className="audit-th">时间戳</th>
+                <th className="audit-th">事件类型</th>
+                <th className="audit-th">涉及目标</th>
+                <th className="audit-th">裁决 / 详情</th>
               </tr>
             </thead>
             <tbody>
               {auditLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-dim)' }}>
+                  <td colSpan={4} className="audit-empty-td">
                     暂无审计记录
                   </td>
                 </tr>
@@ -149,13 +145,13 @@ export const AuditView: React.FC = () => {
                   const decisionDisplay = typeof decisionRaw === 'object' ? JSON.stringify(decisionRaw) : String(decisionRaw);
 
                   return (
-                    <tr key={log.id || `${eventType}_${idx}`} style={{ borderBottom: '1px solid var(--om-border)' }}>
-                      <td style={{ padding: '8px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{formatTime(time)}</td>
-                      <td style={{ padding: '8px', whiteSpace: 'nowrap' }}>
-                        <span className="pill-badge pill-blue" style={{ fontSize: '10px' }}>{eventType}</span>
+                    <tr key={log.id || `${eventType}_${idx}`} className="audit-tr">
+                      <td className="audit-td audit-time-cell">{formatTime(time)}</td>
+                      <td className="audit-td audit-type-cell">
+                        <span className="pill-badge pill-blue">{eventType}</span>
                       </td>
-                      <td style={{ padding: '8px' }}>{log.target || log.tool || '-'}</td>
-                      <td style={{ padding: '8px', maxWidth: '360px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={decisionDisplay}>
+                      <td className="audit-td audit-target-cell">{log.target || log.tool || '-'}</td>
+                      <td className="audit-td audit-decision-cell" title={decisionDisplay}>
                         {decisionDisplay}
                       </td>
                     </tr>

@@ -8331,3 +8331,1088 @@ details[open] .thought-toggle::after {
   cursor: pointer;
   color: var(--om-fg);
 }
+
+/* ============================================================================
+   Phase 4: 记忆系统 (MemoryView) 现代打磨规范样式
+============================================================================ */
+.memory-stage {
+  padding: 24px 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.memory-header-wrap {
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.memory-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--om-fg);
+  letter-spacing: -0.015em;
+}
+
+.memory-heading-icon {
+  color: var(--om-accent);
+}
+
+.memory-sub {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--om-muted);
+  line-height: 1.5;
+}
+
+.memory-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.memory-hdr-btn {
+  padding: 6px 12px;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 预算与仪表盘 */
+.memory-stats-card {
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.memory-stats-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.memory-quota-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-quota-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.memory-quota-sub {
+  font-size: 12px;
+  color: var(--om-muted);
+  font-weight: 400;
+}
+
+.memory-budget-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.memory-budget-badge.is-critical {
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-red) 30%, transparent);
+}
+
+.memory-budget-badge.is-warning {
+  color: var(--accent-amber);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 30%, transparent);
+}
+
+.memory-budget-badge.is-healthy {
+  color: var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-green) 30%, transparent);
+}
+
+.memory-progress-track {
+  width: 100%;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--om-border);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.memory-progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.memory-progress-bar.is-healthy {
+  background: linear-gradient(90deg, #0284c7, #10b981);
+}
+
+.memory-progress-bar.is-warning {
+  background: linear-gradient(90deg, #10b981, #f59e0b);
+}
+
+.memory-progress-bar.is-critical {
+  background: linear-gradient(90deg, #f59e0b, #ef4444);
+}
+
+.memory-stats-3col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 12px;
+  font-size: 12px;
+}
+
+.memory-stat-box {
+  background: var(--om-bg);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+}
+
+.memory-stat-box-label {
+  color: var(--om-muted);
+  margin-bottom: 4px;
+}
+
+.memory-stat-box-val {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--om-fg);
+}
+
+.memory-stat-unit {
+  font-size: 11px;
+  color: var(--om-muted);
+  font-weight: 400;
+}
+
+.memory-stat-source-dist {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-source-user-tag {
+  color: var(--accent-green);
+}
+
+.memory-source-divider {
+  color: var(--om-border);
+}
+
+.memory-source-agent-tag {
+  color: var(--om-accent);
+}
+
+/* 沉淀输入卡片 */
+.memory-create-card {
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.memory-create-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--om-fg);
+}
+
+.memory-icon-accent {
+  color: var(--om-accent);
+}
+
+.memory-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.memory-input-field {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
+.memory-create-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.memory-create-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.memory-category-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.memory-meta-label {
+  color: var(--om-muted);
+  white-space: nowrap;
+}
+
+.memory-cat-select {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.memory-protected-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--om-muted);
+  transition: color 0.15s ease;
+}
+
+.memory-protected-checkbox-label.is-checked {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.memory-protect-checkbox {
+  accent-color: var(--accent-green);
+}
+
+.memory-submit-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+}
+
+/* 过滤工具栏 */
+.memory-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.memory-count {
+  font-size: 12px;
+  color: var(--om-muted);
+  white-space: nowrap;
+}
+
+.memory-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cat-pill-count {
+  opacity: 0.8;
+  font-size: 11px;
+}
+
+.memory-search-box {
+  flex: 1;
+  min-width: min(240px, 100%);
+  max-width: 320px;
+}
+
+/* 记忆卡片列表 */
+.memory-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-loading-indicator {
+  padding: 24px 0;
+}
+
+.memory-empty-state {
+  background: var(--om-surface);
+  border: 1px dashed var(--om-border);
+  border-radius: 12px;
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--om-muted);
+  font-size: 13px;
+}
+
+.memory-empty-text {
+  line-height: 1.5;
+}
+
+.memory-empty-clear-btn {
+  margin-top: 12px;
+}
+
+.memory-item-card {
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.memory-item-card:hover {
+  border-color: color-mix(in srgb, var(--om-accent) 35%, var(--om-border));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+}
+
+.memory-item-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.memory-item-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-cat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-width: 1px;
+  border-style: solid;
+}
+
+.memory-protect-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.memory-protect-badge.is-protected {
+  color: var(--accent-green);
+  background: color-mix(in srgb, var(--accent-green) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-green) 25%, transparent);
+}
+
+.memory-protect-badge.is-auto {
+  color: var(--om-accent);
+  background: color-mix(in srgb, var(--om-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--om-accent) 25%, transparent);
+}
+
+.memory-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.memory-action-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.memory-action-btn.is-danger {
+  color: var(--accent-red);
+}
+
+.memory-action-btn.is-danger:hover {
+  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+}
+
+.memory-edit-box {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-edit-textarea {
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.memory-edit-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.memory-edit-cat-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.memory-edit-cat-label {
+  color: var(--om-muted);
+}
+
+.memory-edit-cat-select {
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+.memory-edit-btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+.memory-edit-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.memory-item-content {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--om-fg);
+  word-break: break-word;
+}
+
+/* 整理审计折叠记录 */
+.memory-reports-card {
+  margin-top: 24px;
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.memory-reports-header {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--om-fg);
+}
+
+.memory-reports-icon {
+  color: var(--om-muted);
+}
+
+.memory-reports-count {
+  font-size: 11px;
+  color: var(--om-muted);
+  font-weight: 400;
+}
+
+.memory-reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-report-item {
+  font-size: 12px;
+  padding: 8px 12px;
+  background: var(--om-bg);
+  border-radius: 6px;
+  border: 1px solid var(--om-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.memory-report-text {
+  line-height: 1.5;
+}
+
+.memory-report-timestamp {
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.memory-report-sep {
+  margin: 0 6px;
+  color: var(--om-muted);
+}
+
+.memory-report-summary {
+  color: var(--om-muted);
+}
+
+/* 模态框内部 */
+.memory-markdown-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-markdown-hint {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.memory-markdown-textarea {
+  width: 100%;
+  font-family: monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.memory-markdown-meta {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.memory-dry-run-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-dry-run-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.memory-dry-run-summary-box {
+  background: var(--om-bg);
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+  font-size: 13px;
+}
+
+.memory-dry-run-summary-title {
+  font-weight: 600;
+  color: var(--om-fg);
+  margin-bottom: 4px;
+}
+
+.memory-dry-run-summary-sub {
+  font-size: 12px;
+  color: var(--om-muted);
+}
+
+.memory-dry-run-clean {
+  text-align: center;
+  color: var(--om-muted);
+  padding: 24px 0;
+  font-size: 13px;
+}
+
+.memory-dry-run-section-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.memory-dry-run-section-title.is-merged {
+  color: #8b5cf6;
+}
+
+.memory-dry-run-section-title.is-dropped {
+  color: var(--accent-red);
+}
+
+.memory-dry-run-group-list,
+.memory-dry-run-dropped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-dry-run-card {
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.memory-dry-run-card.is-merged {
+  background: rgba(139, 92, 246, 0.05);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.memory-dry-run-card.is-dropped {
+  background: color-mix(in srgb, var(--accent-red) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-red) 25%, transparent);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.memory-dry-run-before-label {
+  color: var(--om-muted);
+  margin-bottom: 4px;
+}
+
+.memory-dry-run-before-list {
+  margin: 0 0 6px 16px;
+  padding: 0;
+  color: var(--om-muted);
+}
+
+.memory-dry-run-after-text {
+  color: #8b5cf6;
+  font-weight: 600;
+}
+
+.memory-dry-run-dropped-text {
+  color: var(--om-fg);
+  text-decoration: line-through;
+}
+
+.memory-dry-run-dropped-reason {
+  color: var(--om-muted);
+  font-size: 11px;
+}
+
+.memory-dry-run-guarantee {
+  font-size: 12px;
+  color: var(--accent-green);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ============================================================================
+   Phase 4: 安全审计与授权 (AuditView) 现代打磨规范样式
+============================================================================ */
+.audit-stage {
+  padding: 24px 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.audit-header-wrap {
+  margin-bottom: 20px;
+}
+
+.audit-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--om-fg);
+  letter-spacing: -0.015em;
+}
+
+.audit-heading-icon {
+  color: var(--om-accent);
+}
+
+.audit-sub {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--om-muted);
+  line-height: 1.5;
+}
+
+.audit-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.audit-refresh-btn {
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.audit-top-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.audit-card {
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.audit-card-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--om-fg);
+  margin-bottom: 12px;
+}
+
+.audit-policy-pre {
+  margin: 0;
+  font-size: 12px;
+  color: var(--om-muted);
+  max-height: 180px;
+  overflow: auto;
+  font-family: monospace;
+  background: var(--om-surface-2);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+}
+
+.audit-grants-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.audit-grants-count {
+  font-size: 12px;
+  color: var(--om-muted);
+  font-weight: 400;
+}
+
+.audit-grants-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audit-grants-empty {
+  font-size: 12.5px;
+  color: var(--om-muted);
+  padding: 12px 0;
+}
+
+.audit-grant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  font-size: 12px;
+}
+
+.audit-grant-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-grant-scope {
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.audit-grant-revoke-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--accent-red);
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.audit-grant-revoke-btn:hover {
+  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+}
+
+/* 审计流水表格 */
+.audit-table-card {
+  padding: 20px;
+}
+
+.audit-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--om-border);
+}
+
+.audit-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.audit-table-head-row {
+  border-bottom: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+}
+
+.audit-th {
+  padding: 10px 14px;
+  font-weight: 600;
+  color: var(--om-muted);
+}
+
+.audit-tr {
+  border-bottom: 1px solid var(--om-border);
+  transition: background 0.15s ease;
+}
+
+.audit-tr:hover {
+  background: var(--om-surface-2);
+}
+
+.audit-td {
+  padding: 10px 14px;
+}
+
+.audit-empty-td {
+  padding: 32px;
+  text-align: center;
+  color: var(--om-muted);
+}
+
+.audit-time-cell {
+  color: var(--om-muted);
+  white-space: nowrap;
+}
+
+.audit-type-cell {
+  white-space: nowrap;
+}
+
+.audit-target-cell {
+  color: var(--om-fg);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.audit-decision-cell {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--om-fg);
+}
+
+/* ============================================================================
+   Phase 4: 交付工件与产出物 (ArtifactsView) 现代打磨规范样式
+============================================================================ */
+.artifacts-stage {
+  padding: 24px 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.artifacts-header-wrap {
+  margin-bottom: 20px;
+}
+
+.artifacts-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--om-fg);
+  letter-spacing: -0.015em;
+}
+
+.artifacts-heading-icon {
+  color: var(--om-accent);
+}
+
+.artifacts-sub {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--om-muted);
+  line-height: 1.5;
+}
+
+.artifacts-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.artifacts-refresh-btn {
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.artifacts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.artifacts-empty-panel {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 56px 20px;
+  background: var(--om-surface);
+  border-radius: 14px;
+  border: 1px solid var(--om-border);
+}
+
+.artifacts-empty-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.artifacts-empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--om-fg);
+}
+
+.artifacts-empty-sub {
+  font-size: 13px;
+  margin-top: 6px;
+  color: var(--om-muted);
+}
+
+.artifact-card {
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+}
+
+.artifact-card:hover {
+  border-color: color-mix(in srgb, var(--om-accent) 40%, var(--om-border));
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
+}
+
+.artifact-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.artifact-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--om-surface-2);
+  color: var(--om-accent);
+  border: 1px solid var(--om-border);
+  flex-shrink: 0;
+}
+
+.artifact-meta-wrap {
+  overflow: hidden;
+  flex: 1;
+}
+
+.artifact-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--om-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.artifact-meta-info {
+  font-size: 11.5px;
+  color: var(--om-muted);
+  margin-top: 4px;
+}
+
+.artifact-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.artifact-action-btn {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.artifact-modal-body {
+  font-size: 13px;
+  color: var(--om-fg);
+  line-height: 1.6;
+}
+
+.artifact-path-line {
+  margin-bottom: 12px;
+  color: var(--om-muted);
+  font-size: 12px;
+}
+
+.artifact-path-line code {
+  font-family: monospace;
+  background: var(--om-surface-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}

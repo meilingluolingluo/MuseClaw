@@ -355,144 +355,92 @@ export const MemoryView: React.FC = () => {
     if (!stats) return null;
     if (stats.status === 'critical') {
       return (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '3px 8px',
-            borderRadius: '999px',
-            fontSize: '11.5px',
-            fontWeight: 600,
-            color: '#ef4444',
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.3)'
-          }}
-        >
+        <span className="memory-budget-badge is-critical">
           <AlertTriangle size={13} /> 记忆快满了 ({stats.usagePercent}%) · 建议整理
         </span>
       );
     }
     if (stats.status === 'warning') {
       return (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '3px 8px',
-            borderRadius: '999px',
-            fontSize: '11.5px',
-            fontWeight: 600,
-            color: '#f59e0b',
-            background: 'rgba(245, 158, 11, 0.1)',
-            border: '1px solid rgba(245, 158, 11, 0.3)'
-          }}
-        >
+        <span className="memory-budget-badge is-warning">
           <Clock size={13} /> 容量偏高 ({stats.usagePercent}%) · 建议关注
         </span>
       );
     }
     return (
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '4px',
-          padding: '3px 8px',
-          borderRadius: '999px',
-          fontSize: '11.5px',
-          fontWeight: 600,
-          color: '#10b981',
-          background: 'rgba(16, 185, 129, 0.1)',
-          border: '1px solid rgba(16, 185, 129, 0.3)'
-        }}
-      >
+      <span className="memory-budget-badge is-healthy">
         <ShieldCheck size={13} /> 存储健康 ({stats.usagePercent}%)
       </span>
     );
   }, [stats]);
 
   return (
-    <section className="view-stage">
+    <section className="view-stage memory-stage" aria-label="受控长期记忆库">
       {/* 顶部标题与多 Bot 切换栏 */}
-      <div className="view-header" style={{ alignItems: 'flex-start' }}>
+      <div className="view-header memory-header-wrap">
         <div>
-          <div className="view-heading" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <Brain size={20} style={{ color: 'var(--om-accent)' }} />
-            受控长期记忆库 (Memory System)
-
+          <div className="view-heading memory-heading">
+            <Brain size={20} className="memory-heading-icon" />
+            <span>受控长期记忆库</span>
           </div>
-          <div className="view-sub" style={{ marginTop: '4px' }}>
+          <div className="view-sub memory-sub">
             为每位员工保存长期记忆，按类别整理与检索；重要内容可设为受保护，不会被自动整理或删除。
           </div>
         </div>
 
         {/* 顶部操作快捷栏 */}
-        <div style={{ display: 'flex', gap: '8px', flexShrink: 0, flexWrap: 'wrap' }}>
+        <div className="memory-header-actions">
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary memory-hdr-btn"
             onClick={() => loadMemory(selectedBotId)}
             disabled={isLoading}
             title="刷新记忆事实"
-            style={{ padding: '6px 12px' }}
           >
             <RefreshCw size={13} className={isLoading ? 'spin' : ''} />
-            刷新
+            <span>刷新</span>
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary memory-hdr-btn"
             onClick={() => {
               setMarkdownBuffer(content);
               setIsMarkdownModalOpen(true);
             }}
-            style={{ padding: '6px 12px' }}
           >
             <Code size={13} />
-            编辑记忆全文
+            <span>编辑记忆全文</span>
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary memory-hdr-btn"
             onClick={handleStartDryRun}
             disabled={isConsolidating || items.length < 2}
             title={items.length < 2 ? '记忆少于 2 条，暂时不需要整理' : '检查重复和过时的内容，预览整理建议'}
-            style={{ padding: '6px 12px' }}
           >
             <Sparkles size={13} className={isConsolidating ? 'spin' : ''} />
-            预览整理
+            <span>预览整理</span>
           </button>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary memory-hdr-btn"
             onClick={handleUndo}
             disabled={reports.length === 0}
             title={reports.length === 0 ? '还没有整理记录' : '还原到上次整理前的内容'}
-            style={{ padding: '6px 12px' }}
           >
             <Undo2 size={13} />
-            撤销上次整理
+            <span>撤销上次整理</span>
           </button>
         </div>
       </div>
 
       {/* 记忆库配额与容量健康仪表盘 */}
       {stats && (
-        <div
-          style={{
-            background: 'var(--om-surface)',
-            border: '1px solid var(--om-border)',
-            borderRadius: '12px',
-            padding: '16px 20px',
-            marginBottom: '16px'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>记忆容量</span>
-              <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontWeight: 400 }}>
+        <div className="memory-stats-card">
+          <div className="memory-stats-top-row">
+            <div className="memory-quota-title-wrap">
+              <span className="memory-quota-title">记忆容量</span>
+              <span className="memory-quota-sub">
                 上限 24KB / 200 行，超出时提示整理
               </span>
             </div>
@@ -500,56 +448,43 @@ export const MemoryView: React.FC = () => {
           </div>
 
           {/* 进度条 */}
-          <div
-            style={{
-              width: '100%',
-              height: '7px',
-              borderRadius: '999px',
-              background: 'var(--om-border)',
-              overflow: 'hidden',
-              marginBottom: '12px'
-            }}
-          >
+          <div className="memory-progress-track">
             <div
-              style={{
-                width: `${Math.min(100, stats.usagePercent)}%`,
-                height: '100%',
-                borderRadius: '999px',
-                background:
-                  stats.usagePercent >= 85
-                    ? 'linear-gradient(90deg, #f59e0b, #ef4444)'
-                    : stats.usagePercent >= 60
-                    ? 'linear-gradient(90deg, #10b981, #f59e0b)'
-                    : 'linear-gradient(90deg, #0284c7, #10b981)',
-                transition: 'width 0.3s ease'
-              }}
+              className={`memory-progress-bar ${
+                stats.usagePercent >= 85
+                  ? 'is-critical'
+                  : stats.usagePercent >= 60
+                  ? 'is-warning'
+                  : 'is-healthy'
+              }`}
+              style={{ width: `${Math.min(100, stats.usagePercent)}%` }}
             />
           </div>
 
           {/* 三列关键指标 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px', fontSize: '12px' }}>
-            <div style={{ background: 'var(--om-bg)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--om-border)' }}>
-              <div style={{ color: 'var(--text-dim)', marginBottom: '4px' }}>已用空间</div>
-              <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-main)' }}>
-                {stats.totalBytes} <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>/ {stats.maxBytes} 字节</span>
+          <div className="memory-stats-3col">
+            <div className="memory-stat-box">
+              <div className="memory-stat-box-label">已用空间</div>
+              <div className="memory-stat-box-val">
+                {stats.totalBytes} <span className="memory-stat-unit">/ {stats.maxBytes} 字节</span>
               </div>
             </div>
 
-            <div style={{ background: 'var(--om-bg)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--om-border)' }}>
-              <div style={{ color: 'var(--text-dim)', marginBottom: '4px' }}>事实行数</div>
-              <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-main)' }}>
-                {stats.lineCount} <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>/ {stats.maxLines} 行</span>
+            <div className="memory-stat-box">
+              <div className="memory-stat-box-label">事实行数</div>
+              <div className="memory-stat-box-val">
+                {stats.lineCount} <span className="memory-stat-unit">/ {stats.maxLines} 行</span>
               </div>
             </div>
 
-            <div style={{ background: 'var(--om-bg)', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--om-border)' }}>
-              <div style={{ color: 'var(--text-dim)', marginBottom: '4px' }}>来源分布</div>
-              <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-main)', display: 'flex', gap: '8px' }}>
-                <span title="用户核心声明，受保护不可被大模型自动删除" style={{ color: '#10b981' }}>
+            <div className="memory-stat-box">
+              <div className="memory-stat-box-label">来源分布</div>
+              <div className="memory-stat-source-dist">
+                <span title="用户核心声明，受保护不可被大模型自动删除" className="memory-source-user-tag">
                   🛡️ {stats.userAnchorCount} 用户声明
                 </span>
-                <span style={{ color: 'var(--text-dim)' }}>|</span>
-                <span title="智能体自主沉淀的事实" style={{ color: '#0284c7' }}>
+                <span className="memory-source-divider">|</span>
+                <span title="智能体自主沉淀的事实" className="memory-source-agent-tag">
                   🤖 {stats.agentItemCount} 自动沉淀
                 </span>
               </div>
@@ -559,42 +494,32 @@ export const MemoryView: React.FC = () => {
       )}
 
       {/* 快速沉淀新记忆事实输入卡片 */}
-      <div
-        style={{
-          background: 'var(--om-surface)',
-          border: '1px solid var(--om-border)',
-          borderRadius: '12px',
-          padding: '16px 20px',
-          marginBottom: '20px'
-        }}
-      >
-        <div style={{ fontSize: '13.5px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Plus size={15} style={{ color: 'var(--om-accent)' }} />
-          记录一条记忆
+      <div className="memory-create-card">
+        <div className="memory-create-title">
+          <Plus size={15} className="memory-icon-accent" />
+          <span>记录一条记忆</span>
         </div>
-        <form onSubmit={handleAddItem}>
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+        <form onSubmit={handleAddItem} className="memory-create-form">
+          <div className="memory-input-row">
             <input
               type="text"
               ref={newContentInputRef}
               aria-label="记忆事实内容"
-              className="form-control"
+              className="form-control memory-input-field"
               placeholder={`告诉 ${currentBot?.name || '当前员工'} 记住一条事实，例如：我习惯用中文沟通，项目文档统一用 Markdown`}
               value={newContent}
               onChange={(e) => setNewContent(e.target.value)}
-              style={{ flex: 1, fontSize: '13px', padding: '8px 12px' }}
             />
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px' }}>
-                <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>归属分类:</span>
+          <div className="memory-create-meta-row">
+            <div className="memory-create-meta-left">
+              <div className="memory-category-select-wrap">
+                <span className="memory-meta-label">归属分类:</span>
                 <select
-                  className="form-control"
+                  className="form-control memory-cat-select"
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value as MemoryCategory)}
-                  style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px' }}
                 >
                   {Object.entries(CATEGORY_CONFIG).map(([key, cfg]) => (
                     <option key={key} value={key}>
@@ -605,33 +530,23 @@ export const MemoryView: React.FC = () => {
               </div>
 
               <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '12.5px',
-                  cursor: 'pointer',
-                  color: isUserAnchor ? '#10b981' : 'var(--text-muted)',
-                  fontWeight: isUserAnchor ? 600 : 400
-                }}
+                className={`memory-protected-checkbox-label ${isUserAnchor ? 'is-checked' : ''}`}
                 title="受保护的内容不会被自动整理或删除"
-
               >
                 <input
                   type="checkbox"
                   checked={isUserAnchor}
                   onChange={(e) => setIsUserAnchor(e.target.checked)}
-                  style={{ accentColor: '#10b981' }}
+                  className="memory-protect-checkbox"
                 />
-                🛡️ 受保护（不会被自动删除）
+                <span>🛡️ 受保护（不会被自动删除）</span>
               </label>
             </div>
 
             <button
               type="submit"
-              className="btn-primary"
+              className="btn-primary memory-submit-btn"
               disabled={isAdding || !newContent.trim()}
-              style={{ padding: '6px 16px', fontSize: '13px' }}
             >
               {isAdding ? '沉淀中...' : '记录事实'}
             </button>
@@ -640,7 +555,7 @@ export const MemoryView: React.FC = () => {
       </div>
 
       {/* 搜索过滤与分类筛选栏 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+      <div className="memory-toolbar">
         {/* 数量固定在最前且占位恒定，切换分类时分类行不位移 */}
         <span className="memory-count" aria-live="polite">
           {selectedCategoryTab !== 'all' || searchQuery.trim()
@@ -648,7 +563,7 @@ export const MemoryView: React.FC = () => {
             : `共 ${items.length} 条`}
         </span>
         {/* 分类 Tab 栏 */}
-        <div className="memory-filters" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div className="memory-filters">
           <button
             type="button"
             className={`cat-pill${selectedCategoryTab === 'all' ? ' is-active' : ''}`}
@@ -672,15 +587,16 @@ export const MemoryView: React.FC = () => {
                 onClick={() => setSelectedCategoryTab(key as MemoryCategory)}
               >
                 {cfg.icon}
-                {cfg.label} ({count})
+                <span>{cfg.label}</span>
+                <span className="cat-pill-count">({count})</span>
               </button>
             );
           })}
         </div>
 
         {/* 关键字搜索框 */}
-        <div className="skills-search" style={{ flex: 1, minWidth: 'min(240px, 100%)', maxWidth: '320px' }}>
-          <Search size={14} />
+        <div className="skills-search memory-search-box">
+          <Search size={14} className="memory-search-icon" />
           <input
             type="text"
             aria-label="搜索记忆事实"
@@ -702,32 +618,23 @@ export const MemoryView: React.FC = () => {
       </div>
 
       {/* 事实卡片列表展示区 */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div className="memory-list-container">
         {isLoading && items.length === 0 ? (
-          <div className="chat-loading" role="status">
+          <div className="chat-loading memory-loading-indicator" role="status">
             <span className="chat-loading-dot" />
             正在加载记忆…
           </div>
         ) : filteredItems.length === 0 ? (
-          <div
-            style={{
-              background: 'var(--om-surface)',
-              border: '1px dashed var(--om-border)',
-              borderRadius: '12px',
-              padding: '40px 20px',
-              textAlign: 'center',
-              color: 'var(--text-dim)',
-              fontSize: '13px'
-            }}
-          >
-            {searchQuery
-              ? `没有找到与 “${searchQuery}” 相关的内容`
-              : '这个分类还没有记忆，在上方输入框记录一条即可'}
+          <div className="memory-empty-state">
+            <div className="memory-empty-text">
+              {searchQuery
+                ? `没有找到与 “${searchQuery}” 相关的内容`
+                : '这个分类还没有记忆，在上方输入框记录一条即可'}
+            </div>
             {(searchQuery || selectedCategoryTab !== 'all') && (
               <button
                 type="button"
-                className="om-btn-subtle"
-                style={{ marginTop: '12px' }}
+                className="om-btn-subtle memory-empty-clear-btn"
                 onClick={() => {
                   setSelectedCategoryTab('all');
                   setSearchQuery('');
@@ -746,94 +653,55 @@ export const MemoryView: React.FC = () => {
             return (
               <div
                 key={item.id}
-                style={{
-                  background: 'var(--om-surface)',
-                  border: '1px solid var(--om-border)',
-                  borderRadius: '10px',
-                  padding: '12px 16px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                  transition: 'border-color 0.2s ease',
-                  position: 'relative'
-                }}
+                className="memory-item-card"
                 title={`条目 ID: ${item.id}`}
               >
                 {/* 顶部标签行 */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="memory-item-top-row">
+                  <div className="memory-item-badges">
                     {/* 分类标签 */}
                     <span
+                      className="memory-cat-badge"
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        padding: '2px 8px',
-                        borderRadius: '6px',
-                        fontSize: '11px',
-                        fontWeight: 600,
                         color: cfg.color,
                         background: cfg.bg,
-                        border: `1px solid ${cfg.border}`
+                        borderColor: cfg.border
                       }}
                     >
                       {cfg.icon}
-                      {cfg.label}
+                      <span>{cfg.label}</span>
                     </span>
 
                     {/* 来源保护标签 */}
                     {item.source === 'user' ? (
                       <span
                         title="这条记忆受保护，不会被自动整理或删除"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '3px',
-                          padding: '2px 7px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          color: '#10b981',
-                          background: 'rgba(16, 185, 129, 0.08)',
-                          border: '1px solid rgba(16, 185, 129, 0.25)'
-                        }}
+                        className="memory-protect-badge is-protected"
                       >
                         <ShieldCheck size={12} />
-                        受保护
+                        <span>受保护</span>
                       </span>
                     ) : (
                       <span
                         title="智能员工在对话与任务中自主沉淀"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '3px',
-                          padding: '2px 7px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          color: '#0284c7',
-                          background: 'rgba(2, 132, 199, 0.08)',
-                          border: '1px solid rgba(2, 132, 199, 0.25)'
-                        }}
+                        className="memory-protect-badge is-auto"
                       >
-                        自动沉淀
+                        <span>自动沉淀</span>
                       </span>
                     )}
-
                   </div>
 
                   {/* 右上角操作按钮 */}
                   {!isEditing && (
-                    <div className="memory-item-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div className="memory-item-actions">
                       <button
                         type="button"
                         onClick={() => handleCopyText(item.id, item.content)}
-                        className="btn-secondary"
-                        style={{ padding: '3px 8px', fontSize: '11px', height: '24px' }}
+                        className="btn-secondary memory-action-btn"
                         title="复制事实内容"
                       >
-                        {isCopied ? <Check size={11} style={{ color: '#10b981' }} /> : <Copy size={11} />}
-                        {isCopied ? '已复制' : '复制'}
+                        {isCopied ? <Check size={11} className="text-green" /> : <Copy size={11} />}
+                        <span>{isCopied ? '已复制' : '复制'}</span>
                       </button>
 
                       <button
@@ -843,23 +711,21 @@ export const MemoryView: React.FC = () => {
                           setEditContentBuffer(item.content);
                           setEditCategoryBuffer(item.category);
                         }}
-                        className="btn-secondary"
-                        style={{ padding: '3px 8px', fontSize: '11px', height: '24px' }}
+                        className="btn-secondary memory-action-btn"
                         title="编辑此条事实"
                       >
                         <Edit3 size={11} />
-                        编辑
+                        <span>编辑</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleDeleteItem(item.id, item.content)}
-                        className="btn-secondary"
-                        style={{ padding: '3px 8px', fontSize: '11px', height: '24px', color: '#ef4444' }}
+                        className="btn-secondary memory-action-btn is-danger"
                         title="从记忆库中遗忘/删除此条"
                       >
                         <Trash2 size={11} />
-                        删除
+                        <span>删除</span>
                       </button>
                     </div>
                   )}
@@ -867,9 +733,9 @@ export const MemoryView: React.FC = () => {
 
                 {/* 事实正文展示 / 行内编辑 */}
                 {isEditing ? (
-                  <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div className="memory-edit-box">
                     <textarea
-                      className="form-control"
+                      className="form-control memory-edit-textarea"
                       rows={3}
                       value={editContentBuffer}
                       onChange={(e) => setEditContentBuffer(e.target.value)}
@@ -879,16 +745,14 @@ export const MemoryView: React.FC = () => {
                           cancelItemEdit(item);
                         }
                       }}
-                      style={{ width: '100%', fontSize: '13px', lineHeight: 1.5 }}
                     />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-                        <span style={{ color: 'var(--text-muted)' }}>修改分类:</span>
+                    <div className="memory-edit-footer">
+                      <div className="memory-edit-cat-selector">
+                        <span className="memory-edit-cat-label">修改分类:</span>
                         <select
-                          className="form-control"
+                          className="form-control memory-edit-cat-select"
                           value={editCategoryBuffer}
                           onChange={(e) => setEditCategoryBuffer(e.target.value as MemoryCategory)}
-                          style={{ fontSize: '12px', padding: '3px 6px' }}
                         >
                           {Object.entries(CATEGORY_CONFIG).map(([key, c]) => (
                             <option key={key} value={key}>
@@ -897,20 +761,18 @@ export const MemoryView: React.FC = () => {
                           ))}
                         </select>
                       </div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
+                      <div className="memory-edit-btn-group">
                         <button
                           type="button"
-                          className="btn-secondary"
+                          className="btn-secondary memory-edit-btn"
                           onClick={() => cancelItemEdit(item)}
-                          style={{ padding: '4px 10px', fontSize: '12px' }}
                         >
                           取消
                         </button>
                         <button
                           type="button"
-                          className="btn-primary"
+                          className="btn-primary memory-edit-btn"
                           onClick={() => handleSaveItemEdit(item.id)}
-                          style={{ padding: '4px 12px', fontSize: '12px' }}
                         >
                           保存修改
                         </button>
@@ -918,7 +780,7 @@ export const MemoryView: React.FC = () => {
                     </div>
                   </div>
                 ) : (
-                  <div style={{ fontSize: '13.5px', lineHeight: 1.6, color: 'var(--text-main)', wordBreak: 'break-word' }}>
+                  <div className="memory-item-content">
                     {item.content}
                   </div>
                 )}
@@ -930,47 +792,27 @@ export const MemoryView: React.FC = () => {
 
       {/* 历史整理审计记录折叠展示 */}
       {reports.length > 0 && (
-        <div
-          style={{
-            marginTop: '24px',
-            background: 'var(--om-surface)',
-            border: '1px solid var(--om-border)',
-            borderRadius: '12px',
-            padding: '16px 20px'
-          }}
-        >
-          <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Clock size={14} style={{ color: 'var(--text-dim)' }} />
-            整理记录
+        <div className="memory-reports-card">
+          <div className="memory-reports-header">
+            <Clock size={14} className="memory-reports-icon" />
+            <span className="memory-reports-title">整理记录</span>
             {reports.length > 5 && (
-              <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontWeight: 400 }}>
+              <span className="memory-reports-count">
                 （共 {reports.length} 条，显示最近 5 条）
               </span>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="memory-reports-list">
             {reports.slice(0, 5).map((rep, idx) => (
-              <div
-                key={idx}
-                style={{
-                  fontSize: '12px',
-                  padding: '8px 12px',
-                  background: 'var(--om-bg)',
-                  borderRadius: '6px',
-                  border: '1px solid var(--om-border)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}
-              >
-                <div>
-                  <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+              <div key={idx} className="memory-report-item">
+                <div className="memory-report-text">
+                  <span className="memory-report-timestamp">
                     {rep.timestamp && !isNaN(new Date(rep.timestamp).getTime())
                       ? new Date(rep.timestamp).toLocaleString()
                       : '时间未知'}
                   </span>
-                  <span style={{ margin: '0 6px', color: 'var(--text-dim)' }}>·</span>
-                  <span style={{ color: 'var(--text-muted)' }}>{rep.summary}</span>
+                  <span className="memory-report-sep">·</span>
+                  <span className="memory-report-summary">{rep.summary}</span>
                 </div>
               </div>
             ))}
@@ -986,11 +828,11 @@ export const MemoryView: React.FC = () => {
         icon={<Code size={18} />}
         maxWidth="760px"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+          <div className="modal-actions-bar w-full">
+            <div className="memory-markdown-meta">
               字符数：{markdownBuffer.length} · 建议保留分类标题
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="modal-actions-right">
               <button type="button" className="btn-secondary" onClick={() => setIsMarkdownModalOpen(false)}>
                 取消
               </button>
@@ -1001,14 +843,13 @@ export const MemoryView: React.FC = () => {
           </div>
         }
       >
-        <div>
-          <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '8px' }}>
+        <div className="memory-markdown-body">
+          <div className="memory-markdown-hint">
             按分类标题组织内容即可；标记为受保护的内容不会被自动整理或删除。
           </div>
           <textarea
-            className="form-control"
+            className="form-control memory-markdown-textarea"
             rows={18}
-            style={{ width: '100%', fontFamily: 'monospace', fontSize: '12.5px', lineHeight: 1.6 }}
             value={markdownBuffer}
             onChange={(e) => setMarkdownBuffer(e.target.value)}
           />
@@ -1023,11 +864,11 @@ export const MemoryView: React.FC = () => {
         icon={<Sparkles size={18} />}
         maxWidth="720px"
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <div style={{ fontSize: '12px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <ShieldCheck size={14} /> 受保护的内容不会被删除
+          <div className="modal-actions-bar w-full">
+            <div className="memory-dry-run-guarantee">
+              <ShieldCheck size={14} /> <span>受保护的内容不会被删除</span>
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="modal-actions-right">
               <button type="button" className="btn-secondary" onClick={() => setIsDryRunModalOpen(false)}>
                 取消
               </button>
@@ -1043,59 +884,42 @@ export const MemoryView: React.FC = () => {
           </div>
         }
       >
-        <div>
+        <div className="memory-dry-run-body">
           {dryRunReport && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div
-                style={{
-                  background: 'var(--om-bg)',
-                  padding: '12px 14px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--om-border)',
-                  fontSize: '13px'
-                }}
-              >
-                <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
+            <div className="memory-dry-run-content">
+              <div className="memory-dry-run-summary-box">
+                <div className="memory-dry-run-summary-title">
                   {dryRunReport.summary}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-dim)' }}>
+                <div className="memory-dry-run-summary-sub">
                   整理只会合并重复内容和清理过时信息，不会改动受保护的内容。
                 </div>
               </div>
 
               {dryRunReport.changed === 0 ? (
-                <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '24px 0', fontSize: '13px' }}>
+                <div className="memory-dry-run-clean">
                   当前记忆很整齐，没有需要整理的内容。
                 </div>
               ) : (
                 <>
                   {/* 合并提案 */}
                   {dryRunReport.merged.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#8b5cf6', marginBottom: '6px' }}>
+                    <div className="memory-dry-run-section">
+                      <div className="memory-dry-run-section-title is-merged">
                         建议合并的内容 ({dryRunReport.merged.length} 组)
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div className="memory-dry-run-group-list">
                         {dryRunReport.merged.map((m, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              background: 'rgba(139, 92, 246, 0.05)',
-                              border: '1px solid rgba(139, 92, 246, 0.2)',
-                              borderRadius: '6px',
-                              padding: '8px 12px',
-                              fontSize: '12px'
-                            }}
-                          >
-                            <div style={{ color: 'var(--text-dim)', marginBottom: '4px' }}>
+                          <div key={idx} className="memory-dry-run-card is-merged">
+                            <div className="memory-dry-run-before-label">
                               合并前 ({m.before.length} 项):
                             </div>
-                            <ul style={{ margin: '0 0 6px 16px', padding: 0, color: 'var(--text-muted)' }}>
+                            <ul className="memory-dry-run-before-list">
                               {m.before.map((b, bIdx) => (
                                 <li key={bIdx}>{b}</li>
                               ))}
                             </ul>
-                            <div style={{ color: '#8b5cf6', fontWeight: 600 }}>
+                            <div className="memory-dry-run-after-text">
                               合并后: “{m.after}”
                             </div>
                           </div>
@@ -1106,29 +930,17 @@ export const MemoryView: React.FC = () => {
 
                   {/* 删除精简提案 */}
                   {dryRunReport.dropped.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#ef4444', marginBottom: '6px' }}>
+                    <div className="memory-dry-run-section">
+                      <div className="memory-dry-run-section-title is-dropped">
                         建议删除的内容 ({dryRunReport.dropped.length} 条)
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div className="memory-dry-run-dropped-list">
                         {dryRunReport.dropped.map((d, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              background: 'rgba(239, 68, 68, 0.05)',
-                              border: '1px solid rgba(239, 68, 68, 0.2)',
-                              borderRadius: '6px',
-                              padding: '8px 12px',
-                              fontSize: '12px',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center'
-                            }}
-                          >
-                            <span style={{ color: 'var(--text-main)', textDecoration: 'line-through' }}>
+                          <div key={idx} className="memory-dry-run-card is-dropped">
+                            <span className="memory-dry-run-dropped-text">
                               {d.before[0]}
                             </span>
-                            <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>
+                            <span className="memory-dry-run-dropped-reason">
                               原因: {d.reason || '过时碎片'}
                             </span>
                           </div>
