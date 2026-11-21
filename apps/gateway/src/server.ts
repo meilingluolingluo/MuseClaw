@@ -213,13 +213,19 @@ const infoflowChannel = createInfoflowChannel(
       memory: botMemory.getMemory(bot.id, userId)
     };
 
+    const session = getOrCreateSession(finalSessionId, bot.id, userId);
+    const historyMessages = (session.messages || [])
+      .slice(-20)
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content || '' }))
+      .filter((m) => m.content && m.content.trim().length > 0);
+
     const loop = runAgentLoop(
       bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
       resolveSkillPrompt(prompt),
       refreshTools(),
       sentinel,
       callLLM,
-      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id), historyMessages }
     );
 
     let output = '';
@@ -232,6 +238,10 @@ const infoflowChannel = createInfoflowChannel(
         await infoflowChannel.approvalBridge.pushApprovalNotice(userId, event.request);
       }
     }
+    if (!session.messages) session.messages = [];
+    session.messages.push({ role: 'user', content: prompt });
+    session.messages.push({ role: 'assistant', content: output || '任务已顺利完成。' });
+    sessionStore.save(session, userId);
     return output || '任务已顺利完成。';
   }
 );
@@ -265,13 +275,19 @@ const feishuChannel = createFeishuChannel(
       memory: botMemory.getMemory(bot.id, userId)
     };
 
+    const session = getOrCreateSession(finalSessionId, bot.id, userId);
+    const historyMessages = (session.messages || [])
+      .slice(-20)
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content || '' }))
+      .filter((m) => m.content && m.content.trim().length > 0);
+
     const loop = runAgentLoop(
       bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
       resolveSkillPrompt(prompt),
       refreshTools(),
       sentinel,
       callLLM,
-      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id), historyMessages }
     );
 
     let output = '';
@@ -284,6 +300,10 @@ const feishuChannel = createFeishuChannel(
         await feishuChannel.approvalBridge.pushApprovalCard(userId, event.request);
       }
     }
+    if (!session.messages) session.messages = [];
+    session.messages.push({ role: 'user', content: prompt });
+    session.messages.push({ role: 'assistant', content: output || '任务已顺利完成。' });
+    sessionStore.save(session, userId);
     return output || '任务已顺利完成。';
   }
 );
@@ -2376,13 +2396,36 @@ fi
         return caller(messages, tools, onChunk);
       };
 
+      // 提取本会话近期的多轮上下文历史，确保 Agent 具备持续记忆能力，避免转眼丢失对话上下文
+      const historyMessages = (session.messages || [])
+        .slice(-20)
+        .map((m) => {
+          let text = m.content || '';
+          if (text.length > 4000) {
+            text = text.slice(0, 2000) + '\n...[已省略部分过长历史]...\n' + text.slice(-2000);
+          }
+          return {
+            role: m.role as 'user' | 'assistant',
+            content: text
+          };
+        })
+        .filter((m) => m.content && m.content.trim().length > 0);
+
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
         resolveSkillPrompt(promptWithImages),
         refreshTools(),
         sentinel,
         userScopedCaller,
-        { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
+        {
+          sessionId: session.id,
+          userId,
+          botId: bot.id,
+          profile: botWithMemory,
+          maxSteps: 15,
+          skills: getBotSkills(bot.id),
+          historyMessages
+        }
       );
 
       let fullAssistantText = '';

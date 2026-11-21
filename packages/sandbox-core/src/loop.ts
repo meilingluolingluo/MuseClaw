@@ -67,6 +67,7 @@ export async function* runAgentLoop(
     profile?: AgentProfile;
     isTainted?: boolean;
     skills?: Array<{ name: string; description: string; category?: string; channel?: string }>;
+    historyMessages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
@@ -96,9 +97,22 @@ export async function* runAgentLoop(
   }
 
   const messages: LLMMessage[] = [
-    { role: 'system', content: effectivePrompt },
-    { role: 'user', content: userGoal }
+    { role: 'system', content: effectivePrompt }
   ];
+
+  // 2.1 注入多轮会话历史 (Multi-Turn History Messages)，保证上下文连贯与意图记忆
+  if (Array.isArray(context.historyMessages) && context.historyMessages.length > 0) {
+    for (const hm of context.historyMessages) {
+      if (!hm || !hm.content) continue;
+      messages.push({
+        role: hm.role === 'assistant' ? 'assistant' : 'user',
+        content: hm.content
+      });
+    }
+  }
+
+  // 注入本轮用户目标 / 最新指令
+  messages.push({ role: 'user', content: userGoal });
 
   const maxSteps = context.maxSteps ?? 10;
   let step = 0;
