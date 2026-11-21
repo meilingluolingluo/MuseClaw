@@ -4113,3 +4113,45 @@ details[open] .thought-toggle::after {
 @media (max-width: 640px) {
   .model-providers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* 非图片附件（历史回放） */
+.attachment-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 6px 10px;
+  border: 1px solid var(--om-border);
+  border-radius: 8px;
+  background: var(--om-surface);
+  color: var(--om-fg);
+  font-size: 12px;
+  text-decoration: none;
+}
+.attachment-file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-file-chip:hover { border-color: var(--om-accent); color: var(--om-accent); }
+
+/* 技能成本阶梯：窄屏折行 */
+.ladder-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+@media (max-width: 1100px) {
+  .ladder-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .ladder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 审计页顶部：策略与授权并排，窄屏堆叠 */
+.audit-top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+  .audit-top-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}

@@ -195,7 +195,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loadBots = useCallback(async () => {
     try {
       const b = await api.getBots();
-      const botList = Array.isArray(b) ? b : [];
+      const raw = Array.isArray(b) ? b : [];
+      // 统一成前端使用的形状：以服务端 snake_case 为准，兼容历史 camelCase 字段
+      const toApprovalMode = (value?: string) => {
+        const v = String(value || 'ask').toLowerCase();
+        if (v === 'full') return 'FULL';
+        if (v === 'auto_edits' || v === 'auto') return 'AUTO_EDITS';
+        return 'ASK';
+      };
+      const botList = raw.map((bot: any) => ({
+        ...bot,
+        systemPrompt: bot.system_prompt ?? bot.systemPrompt ?? '',
+        approvalMode: toApprovalMode(bot.approval_level ?? bot.approvalMode),
+        role: bot.role || '',
+      }));
       setBots(botList);
 
       if (botList.length > 0) {

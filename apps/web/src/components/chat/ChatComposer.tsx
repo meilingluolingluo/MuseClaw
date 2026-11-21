@@ -85,7 +85,8 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
           },
         ]);
       } catch (err: any) {
-        console.error('File upload error:', err);
+        // 失败已经用 toast 告诉用户了，控制台只留一条 warning 便于排查
+        console.warn('File upload failed:', err?.message || err);
         showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
       }
     }

@@ -483,17 +483,21 @@ export function startGatewayServer(defaultPort = 8799) {
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
-        const { image, file, name, ext: customExt } = JSON.parse(body || '{}');
+        const { image, file, name, type: declaredType, ext: customExt } = JSON.parse(body || '{}');
         const rawData = image || file;
-        if (!rawData) {
+        if (!rawData || typeof rawData !== 'string') {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'File data is required' }));
         }
 
         let buffer: Buffer;
-        let ext = customExt || '.png';
+        let ext = customExt || '.bin';
+        if (typeof declaredType === 'string' && declaredType.includes('/')) {
+          const sub = declaredType.split('/')[1]?.split('+')[0];
+          if (sub) ext = `.${sub === 'jpeg' ? 'jpg' : sub}`;
+        }
         if (rawData.startsWith('data:')) {
-          const matches = rawData.match(/^data:([a-zA-Z0-9\/-]+);base64,(.+)$/);
+          const matches = rawData.match(/^data:([a-zA-Z0-9+.\/-]+);base64,(.+)$/);
           if (matches) {
             const mime = matches[1].toLowerCase();
             if (mime.includes('png')) ext = '.png';
@@ -510,8 +514,19 @@ export function startGatewayServer(defaultPort = 8799) {
           ext = customExt || '.txt';
         }
 
+        const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+        if (buffer.length > MAX_UPLOAD_BYTES) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '文件超过 12 MB，请压缩后再上传' }));
+        }
+
         const safeName = (name || `upload_${Date.now()}`).replace(/[^\w.-]/g, '_');
-        const finalExt = path.extname(safeName) || ext;
+        const finalExt = (path.extname(safeName) || ext).toLowerCase();
+        // SVG 可内嵌脚本，作为独立页面打开时会执行，直接拒绝上传
+        if (finalExt === '.svg') {
+          res.writeHead(415, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: '出于安全考虑暂不支持 SVG，请导出为 PNG 后上传' }));
+        }
         const filename = `img_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${finalExt}`;
         const uploadDir = path.resolve(__dirname, '../data/uploads');
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -589,6 +604,16 @@ export function startGatewayServer(defaultPort = 8799) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const patch = JSON.parse(body || '{}');
+      // 兼容前端 camelCase，落库统一用 snake_case
+      if (patch.systemPrompt !== undefined && patch.system_prompt === undefined) {
+        patch.system_prompt = patch.systemPrompt;
+      }
+      if (patch.approvalMode !== undefined && patch.approval_level === undefined) {
+        const map: Record<string, string> = { ASK: 'ask', AUTO_EDITS: 'auto_edits', FULL: 'full' };
+        patch.approval_level = map[String(patch.approvalMode).toUpperCase()] || 'ask';
+      }
+      delete patch.systemPrompt;
+      delete patch.approvalMode;
       try {
         const updated = botRegistry.update(id, patch);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1430,6 +1455,30 @@ fi
       return res.end(JSON.stringify(result));
     }
 
+    // 更新目标（暂停/恢复、编辑标题与进度）
+    if (req.method === 'PATCH' && url.pathname.match(/^\/api\/goals\/[^/]+$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const patch = JSON.parse(body || '{}');
+        const allowed: Record<string, unknown> = {};
+        for (const key of ['title', 'description', 'status', 'progress', 'cadence', 'steps', 'botId']) {
+          if (patch[key] !== undefined) allowed[key] = patch[key];
+        }
+        const updated = goalStore.update(goalId, allowed as any);
+        if (!updated) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Goal not found' }));
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(updated));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
     // 删除目标 (DELETE /api/goals/:id)
     if (req.method === 'DELETE' && url.pathname.match(/^\/api\/goals\/[^/]+$/)) {
       const goalId = url.pathname.split('/')[3];
@@ -1545,14 +1594,32 @@ fi
       const userId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
       const requestedBotId = parsed.botId || parsed.bot_id;
+      const attachments: Array<{ name?: string; type?: string; url?: string; mime?: string }> = Array.isArray(
+        parsed.attachments
+      )
+        ? parsed.attachments.filter((a: any) => a && typeof a.url === 'string')
+        : [];
       const images: string[] = Array.isArray(parsed.images)
         ? parsed.images
-        : (parsed.image ? [parsed.image] : []);
+        : parsed.image
+          ? [parsed.image]
+          : attachments
+              .filter((a) => a.type === 'image' || String(a.mime || '').startsWith('image/'))
+              .map((a) => a.url as string);
 
       let promptWithImages = text;
       if (images.length > 0) {
         const imageMarkdown = images.map((img: string, i: number) => `![用户附图 ${i + 1}](${img})`).join('\n');
         promptWithImages = promptWithImages ? `${promptWithImages}\n\n${imageMarkdown}` : imageMarkdown;
+      }
+
+      // 非图片附件以链接形式交给 Agent，避免“上传了但模型看不到”
+      const otherFiles = attachments.filter((a) => !images.includes(a.url as string));
+      if (otherFiles.length > 0) {
+        const fileLines = otherFiles
+          .map((a) => `- [${a.name || '附件'}](${a.url})`)
+          .join('\n');
+        promptWithImages = `${promptWithImages}\n\n用户上传的附件：\n${fileLines}`.trim();
       }
 
       // 1. 先进行多 Bot 路由解析 (@Mention 优先，再考虑 session_id 与 bot_id)
@@ -1637,7 +1704,11 @@ fi
           (res as any).flush?.();
         }
 
-        session.messages.push({ role: 'user', content: promptWithImages });
+        session.messages.push({
+          role: 'user',
+          content: text || (attachments.length ? '（已上传附件）' : ''),
+          ...(attachments.length ? { attachments } : {})
+        });
         if (fullAssistantText || clientGone) {
           const content = clientGone
             ? `${fullAssistantText ? `${fullAssistantText}\n\n` : ''}（已停止）`

@@ -55,8 +55,20 @@ export const api = {
   // Bots
   getBots: () => request<Bot[]>('/api/bots'),
   createBot: (data: Partial<Bot>) => request<Bot>('/api/bots', { method: 'POST', body: JSON.stringify(data) }),
-  updateBot: (id: string, data: Partial<Bot>) =>
-    request<Bot>(`/api/bots/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  updateBot: (id: string, data: Partial<Bot>) => {
+    // 前端用 camelCase，服务端存的是 snake_case；这里做一次显式映射，避免“保存成功但没生效”
+    const payload: Record<string, unknown> = { ...data };
+    if ('systemPrompt' in data) {
+      payload.system_prompt = data.systemPrompt;
+      delete payload.systemPrompt;
+    }
+    if ('approvalMode' in data) {
+      const map: Record<string, string> = { ASK: 'ask', AUTO_EDITS: 'auto_edits', FULL: 'full' };
+      payload.approval_level = map[String(data.approvalMode || 'ASK').toUpperCase()] || 'ask';
+      delete payload.approvalMode;
+    }
+    return request<Bot>(`/api/bots/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  },
 
   // Sessions
   getSessions: (botId: string, userId?: string) =>
@@ -141,8 +153,25 @@ export const api = {
   getFeedActivities: () => request<FeedActivity[]>('/api/feed/activity'),
 
   // Sandbox & MCP
-  getSandboxStatus: () => request<SandboxStatus>('/api/sandbox/status'),
-  getMcpServers: () => request<McpServer[]>('/api/mcp/servers'),
+  getSandboxStatus: async (): Promise<SandboxStatus> => {
+    const res = await request<any>('/api/sandbox/status');
+    const micro = res?.microSandbox || res?.micro_sandbox || {};
+    return {
+      ...micro,
+      // 服务端字段是 active，页面用 available
+      available: Boolean(micro.active ?? micro.available),
+      engine: micro.engine,
+      blocksNetwork: micro.blocksNetwork,
+      workspaceDir: micro.workspaceDir,
+      reason: micro.reason,
+      ladder: res?.channelLadder || res?.channel_ladder,
+    } as SandboxStatus;
+  },
+  getMcpServers: async (): Promise<McpServer[]> => {
+    const res = await request<any>('/api/mcp/servers');
+    // 服务端返回 { servers, totalTools }
+    return Array.isArray(res) ? res : Array.isArray(res?.servers) ? res.servers : [];
+  },
 
   // Security & Audit
   getPolicy: () => request<any>('/api/policy'),
@@ -156,14 +185,24 @@ export const api = {
 
   // Upload
   uploadFile: async (file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
+    // 服务端只接受 JSON（data URL / base64），不是 multipart
+    const MAX_BYTES = 10 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      throw new Error(`文件超过 10 MB（当前 ${(file.size / 1024 / 1024).toFixed(1)} MB）`);
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('读取本地文件失败'));
+      reader.readAsDataURL(file);
     });
-    if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-    return res.json() as Promise<{ url: string; name: string; size: number }>;
+    if (!dataUrl.startsWith('data:')) throw new Error('无法读取文件内容');
+
+    const res = await request<{ success: boolean; url: string; filename: string }>('/api/upload', {
+      method: 'POST',
+      body: JSON.stringify({ image: dataUrl, name: file.name, type: file.type }),
+    });
+    if (!res?.url) throw new Error('服务端没有返回文件地址');
+    return { url: res.url, name: file.name, size: file.size };
   },
 };

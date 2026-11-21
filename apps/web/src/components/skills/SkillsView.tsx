@@ -71,7 +71,7 @@ export const SkillsView: React.FC = () => {
       <div style={{ fontWeight: 650, fontSize: '14px', marginBottom: '12px' }}>
         Channel Ladder 技能成本阶梯
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '24px' }}>
+      <div className="ladder-grid">
         {ladderRungs.map((r, idx) => (
           <div
             key={idx}

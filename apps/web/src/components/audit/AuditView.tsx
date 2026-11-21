@@ -61,7 +61,7 @@ export const AuditView: React.FC = () => {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+      <div className="audit-top-grid">
         {/* Declarative policy card */}
         <div style={{ background: 'var(--om-surface)', border: '1px solid var(--om-border)', borderRadius: '12px', padding: '18px' }}>
           <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '12px' }}>

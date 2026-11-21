@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { Message, Bot } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { renderMarkdown } from '../../utils/markdown';
-import { ChevronDown, ChevronRight, ShieldAlert, Check, X, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronRight, ShieldAlert, Check, X, Terminal, FileText } from 'lucide-react';
 import { api } from '../../services/api';
 
 interface MessageBubbleProps {
@@ -157,18 +157,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* User Attached Images */}
         {message.attachments && message.attachments.length > 0 && (
           <div className="user-message-images" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-            {message.attachments.map((att, idx) => (
-              att.url ? (
+            {message.attachments.map((att, idx) =>
+              !att.url ? null : att.type === 'image' ? (
                 <img
                   key={idx}
                   src={att.url}
                   alt={att.name}
+                  loading="lazy"
                   className="user-bubble-image"
                   style={{ maxWidth: '240px', maxHeight: '180px', borderRadius: '8px', cursor: 'pointer' }}
                   onClick={() => window.open(att.url, '_blank')}
                 />
-              ) : null
-            ))}
+              ) : (
+                <a
+                  key={idx}
+                  className="attachment-file-chip"
+                  href={att.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={att.name}
+                >
+                  <FileText size={14} />
+                  <span>{att.name}</span>
+                </a>
+              )
+            )}
           </div>
         )}
 
