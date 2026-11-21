@@ -1,5 +1,21 @@
 import React, { useState } from 'react';
-import { Check, ChevronRight, FileText, Globe, Terminal, Wrench, X } from 'lucide-react';
+import {
+  Check,
+  ChevronRight,
+  FileText,
+  Globe,
+  Terminal,
+  Wrench,
+  X,
+  Copy,
+  CheckCheck,
+  Code,
+  Database,
+  Search,
+  Cpu,
+  Brain,
+  Clock,
+} from 'lucide-react';
 
 export interface ToolTraceItem {
   tool: string;
@@ -13,11 +29,29 @@ export interface ToolTraceItem {
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   web_fetch: Globe,
+  fetch: Globe,
+  browse: Globe,
+  curl: Globe,
   execute_shell: Terminal,
+  bash: Terminal,
+  sh: Terminal,
+  terminal: Terminal,
   read_file: FileText,
   write_file: FileText,
   edit_file: FileText,
   list_dir: FileText,
+  search: Search,
+  grep: Search,
+  python: Code,
+  node: Code,
+  sql: Database,
+  database: Database,
+  db: Database,
+  cron: Clock,
+  schedule: Clock,
+  memory: Brain,
+  memory_search: Brain,
+  memory_save: Brain,
 };
 
 function isRunning(item: ToolTraceItem): boolean {
@@ -55,7 +89,7 @@ function formatDuration(item: ToolTraceItem): string {
   return '';
 }
 
-/** 从入参里挑一个最能说明“这次调用做了什么”的值（参考 OpenMausBot / nanoMuse 的 summary 提炼） */
+/** 从入参里挑一个最能说明“这次调用做了什么”的值 */
 function preview(input: any): string {
   if (!input) return '';
   if (typeof input === 'string') return input;
@@ -92,12 +126,23 @@ function outputText(value: any): string {
 
 const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
   const [open, setOpen] = useState(false);
+  const [copiedSection, setCopiedSection] = useState<'params' | 'result' | null>(null);
   const running = isRunning(item);
   const failed = isFailed(item);
   const Icon = ICONS[item.tool] || Wrench;
   const arg = preview(item.params);
   const result = outputText(item.result ?? item.output);
   const duration = formatDuration(item);
+  const isTerminal = ['execute_shell', 'bash', 'sh', 'terminal'].includes(item.tool);
+
+  const handleCopy = (text: string, section: 'params' | 'result', e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopiedSection(section);
+    setTimeout(() => setCopiedSection(null), 1800);
+  };
+
+  const paramsText = item.params == null ? arg || '—' : JSON.stringify(item.params, null, 2);
 
   return (
     <details
@@ -120,13 +165,40 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
         <ChevronRight size={12} className="tool-row-chevron" />
       </summary>
       <div className="tool-row-body">
-        <div className="tool-row-label">入参</div>
-        <pre>{item.params == null ? arg || '—' : JSON.stringify(item.params, null, 2)}</pre>
-        <div className="tool-row-label">执行结果</div>
+        <div className="tool-row-header-line">
+          <div className="tool-row-label">入参</div>
+          {paramsText && (
+            <button
+              type="button"
+              className="tool-copy-btn"
+              onClick={(e) => handleCopy(paramsText, 'params', e)}
+              title="复制入参"
+            >
+              {copiedSection === 'params' ? <CheckCheck size={11} className="copy-success" /> : <Copy size={11} />}
+              <span>{copiedSection === 'params' ? '已复制' : '复制'}</span>
+            </button>
+          )}
+        </div>
+        <pre className="tool-code-block">{paramsText}</pre>
+
+        <div className="tool-row-header-line">
+          <div className="tool-row-label">执行结果</div>
+          {result && (
+            <button
+              type="button"
+              className="tool-copy-btn"
+              onClick={(e) => handleCopy(result, 'result', e)}
+              title="复制执行结果"
+            >
+              {copiedSection === 'result' ? <CheckCheck size={11} className="copy-success" /> : <Copy size={11} />}
+              <span>{copiedSection === 'result' ? '已复制' : '复制'}</span>
+            </button>
+          )}
+        </div>
         {running ? (
           <p className="tool-row-hint">等待执行结果…</p>
         ) : result ? (
-          <pre>{result}</pre>
+          <pre className={`tool-code-block ${isTerminal ? 'is-terminal-output' : ''}`}>{result}</pre>
         ) : (
           <p className="tool-row-hint">无输出</p>
         )}

@@ -41,9 +41,10 @@ const KIND_CONFIG: Record<string, { icon: React.ReactNode; label: string }> = {
 const FeedPostCard = React.memo<{
   post: FeedPost;
   html: string;
+  isConfirmingDelete?: boolean;
   onDelete: (postId: string) => void;
   onDiscuss: (post: FeedPost) => void;
-}>(({ post, html, onDelete, onDiscuss }) => {
+}>(({ post, html, isConfirmingDelete, onDelete, onDiscuss }) => {
   const area = AREA_CONFIG[post.area || ''] || { emoji: '📝', label: '工作动态' };
   const postDate = formatRelativeTime(post.ts || post.date);
 
@@ -67,12 +68,13 @@ const FeedPostCard = React.memo<{
               <span className="feed-post-date">{postDate}</span>
               <button
                 type="button"
-                className="btn-icon feed-post-delete-btn"
-                title="删除此动态"
+                className={`btn-icon feed-post-delete-btn ${isConfirmingDelete ? 'is-confirming' : ''}`}
+                title={isConfirmingDelete ? '再次点击确认删除' : '删除此动态'}
                 aria-label={`删除动态 ${post.title}`}
                 onClick={() => onDelete(post.id)}
               >
                 <Trash2 size={13} />
+                {isConfirmingDelete && <span className="inline-confirm-text">确认？</span>}
               </button>
             </div>
           </div>
@@ -177,6 +179,8 @@ export const FeedView: React.FC = () => {
   const [isWriting, setIsWriting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
+  const deletePostTimerRef = useRef<any>(null);
   const loadSeq = useRef(0);
 
   const loadFeed = useCallback(async () => {
@@ -227,6 +231,15 @@ export const FeedView: React.FC = () => {
 
   const handleDeletePost = useCallback(
     async (postId: string) => {
+      if (deletingPostId !== postId) {
+        setDeletingPostId(postId);
+        if (deletePostTimerRef.current) clearTimeout(deletePostTimerRef.current);
+        deletePostTimerRef.current = setTimeout(() => setDeletingPostId(null), 3500);
+        return;
+      }
+      if (deletePostTimerRef.current) clearTimeout(deletePostTimerRef.current);
+      setDeletingPostId(null);
+
       try {
         await api.deleteFeedPost(postId);
         setPosts((prev) => prev.filter((p) => p.id !== postId));
@@ -235,7 +248,7 @@ export const FeedView: React.FC = () => {
         showToast(`删除失败: ${err.message}`, 'error');
       }
     },
-    [showToast]
+    [deletingPostId, showToast]
   );
 
   const handleDiscuss = useCallback(
@@ -319,6 +332,7 @@ export const FeedView: React.FC = () => {
                 key={post.id || `post-${idx}`}
                 post={post}
                 html={html}
+                isConfirmingDelete={deletingPostId === post.id}
                 onDelete={handleDeletePost}
                 onDiscuss={handleDiscuss}
               />

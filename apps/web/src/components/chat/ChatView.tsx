@@ -5,7 +5,7 @@ import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
 import { ClawLogo } from '../../utils/icons';
-import { ArrowDown, Clock } from 'lucide-react';
+import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck } from 'lucide-react';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
@@ -445,46 +445,81 @@ export const ChatView: React.FC = () => {
 
         <div className="chat-history" ref={chatContainerRef} onScroll={handleScroll}>
           {loadingSession ? (
-            <div className="chat-loading" role="status" aria-live="polite">
-              <span className="chat-loading-dot" />
-              正在载入会话记录…
+            <div className="chat-skeleton-container" role="status" aria-live="polite">
+              <div className="chat-skeleton-bubble is-user" />
+              <div className="chat-skeleton-bubble is-bot" />
+              <div className="chat-loading-notice">
+                <span className="chat-loading-dot" />
+                <span>正在载入会话记录…</span>
+              </div>
             </div>
           ) : messages.length === 0 && !isStreaming ? (
             <div className="chat-empty-state">
+              <div className="chat-empty-hero-wrap">
+                <AgentCapsule
+                  bot={activeBot}
+                  variant="hero"
+                  onClick={() => setIsBotModalOpen(true)}
+                />
+              </div>
               <div className="chat-empty-greeting">
                 你好，我是 {activeBot?.name || '数字员工'}
               </div>
               <div className="chat-empty-desc">
-                我具备长期记忆、多维度目标自主推进及安全沙箱工具执行能力，随时为您效劳。
+                已就绪受控长期记忆、长周期目标自驱推演与微沙箱安全执行能力，随时为您效劳。
               </div>
-              <div className="chat-empty-starters">
+              <div className="chat-starter-grid">
                 <button
                   type="button"
-                  className="chat-starter-btn"
+                  className="chat-starter-card"
                   onClick={() => handleSendMessage('帮我梳理并规划长周期目标')}
                 >
-                  🎯 帮我梳理并规划长周期目标
+                  <div className="chat-starter-icon is-goals">
+                    <Target size={18} />
+                  </div>
+                  <div className="chat-starter-content">
+                    <div className="chat-starter-title">长周期目标规划</div>
+                    <div className="chat-starter-sub">拆解阶段里程碑与多维度目标自驱推进</div>
+                  </div>
                 </button>
                 <button
                   type="button"
-                  className="chat-starter-btn"
+                  className="chat-starter-card"
                   onClick={() => handleSendMessage('查询并记录我常用的工作习惯与偏好')}
                 >
-                  🧠 记录我的长期工作偏好
+                  <div className="chat-starter-icon is-memory">
+                    <Brain size={18} />
+                  </div>
+                  <div className="chat-starter-content">
+                    <div className="chat-starter-title">长期记忆沉淀</div>
+                    <div className="chat-starter-sub">记录工程习惯、红线约束与工作偏好</div>
+                  </div>
                 </button>
                 <button
                   type="button"
-                  className="chat-starter-btn"
-                  onClick={() => handleSendMessage('查询明天从北京到上海的高铁车次与票价')}
+                  className="chat-starter-card"
+                  onClick={() => handleSendMessage('帮我配置一个工作日早上 09:30 的例行巡检任务')}
                 >
-                  🚄 查询高铁车次与票价
+                  <div className="chat-starter-icon is-routine">
+                    <Calendar size={18} />
+                  </div>
+                  <div className="chat-starter-content">
+                    <div className="chat-starter-title">定时巡检与例程</div>
+                    <div className="chat-starter-sub">建立自动化周期任务与状态提醒流程</div>
+                  </div>
                 </button>
                 <button
                   type="button"
-                  className="chat-starter-btn"
-                  onClick={() => handleSendMessage('在 Bubblewrap 原生安全沙箱中执行系统自检')}
+                  className="chat-starter-card"
+                  onClick={() => handleSendMessage('在原生安全沙箱中执行系统自检与环境连通性验证')}
                 >
-                  🛡️ 沙箱环境系统健康检查
+                  <div className="chat-starter-icon is-security">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <div className="chat-starter-content">
+                    <div className="chat-starter-title">微沙箱环境自检</div>
+                    <div className="chat-starter-sub">验证隔离子进程与命令行门禁安全状态</div>
+                  </div>
                 </button>
               </div>
             </div>

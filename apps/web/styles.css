@@ -5065,14 +5065,57 @@ details[open] .thought-toggle::after {
   background: var(--om-surface-2);
   border-top: 1px solid var(--om-border);
 }
-.tool-row-label {
+.tool-row-header-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin: 6px 0 4px;
+}
+.tool-row-header-line:first-child { margin-top: 0; }
+.tool-row-label {
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
 }
-.tool-row-label:first-child { margin-top: 0; }
-.tool-row-body pre {
+.tool-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: 1px solid var(--om-border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--om-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tool-copy-btn:hover {
+  border-color: var(--om-accent);
+  color: var(--om-accent);
+}
+.tool-code-block {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-main);
+  background: var(--om-surface-3);
+  border: 1px solid var(--om-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.tool-code-block.is-terminal-output {
+  background: #0d1117;
+  color: #58a6ff;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.tool-row-body pre:not(.tool-code-block) {
   margin: 0;
   max-height: 220px;
   overflow: auto;
@@ -5083,7 +5126,7 @@ details[open] .thought-toggle::after {
   word-break: break-word;
   color: var(--text-main);
 }
-.tool-row-hint { margin: 0; font-size: 11.5px; color: var(--text-dim); }
+.tool-row-hint { margin: 4px 0 0; font-size: 11.5px; color: var(--text-dim); }
 
 .tool-spin {
   display: inline-block;
@@ -6648,60 +6691,180 @@ details[open] .thought-toggle::after {
   max-width: 160px;
 }
 
-/* 对话空状态展示 */
+/* ── 对话空状态展示 (Hero Empty State) ─────────────────────────────── */
 .chat-empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   margin: auto;
-  padding: 32px 20px;
-  max-width: 580px;
+  padding: 40px 20px 24px;
+  max-width: 680px;
+  animation: fadeIn 0.25s ease forwards;
+}
+
+.chat-empty-hero-wrap {
+  margin-bottom: 14px;
+}
+
+.agent-floating-capsule.is-hero .agent-floating-avatar-btn {
+  transform: scale(1.08);
+}
+
+.agent-floating-role-text {
+  font-size: 11px;
+  color: var(--om-muted);
+  margin-top: 1px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-empty-greeting {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 750;
   color: var(--om-fg);
   letter-spacing: -0.01em;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .chat-empty-desc {
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--text-muted);
-  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--om-muted);
+  margin-bottom: 24px;
+  max-width: 520px;
 }
 
-.chat-empty-starters {
+.chat-starter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  .chat-starter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chat-starter-card {
   display: flex;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 15px;
+  border-radius: 14px;
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.chat-starter-card:hover {
+  background: var(--om-surface-3);
+  border-color: var(--om-accent);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.chat-starter-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.chat-starter-icon.is-goals {
+  background: rgba(2, 132, 199, 0.12);
+  color: var(--om-accent);
+}
+
+.chat-starter-icon.is-memory {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+.chat-starter-icon.is-routine {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+}
+
+.chat-starter-icon.is-security {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.chat-starter-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-starter-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--om-fg);
+  margin-bottom: 2px;
+}
+
+.chat-starter-sub {
+  font-size: 11.5px;
+  color: var(--om-muted);
+  line-height: 1.4;
+}
+
+/* ── 会话载入骨架屏动效 ─────────────────────────────── */
+.chat-skeleton-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px 24px;
+  max-width: 680px;
+  margin: auto;
+  width: 100%;
+}
+
+.chat-skeleton-bubble {
+  border-radius: 16px;
+  background: linear-gradient(90deg, var(--om-surface-2) 25%, var(--om-surface-3) 50%, var(--om-surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+}
+
+.chat-skeleton-bubble.is-user {
+  width: 50%;
+  height: 44px;
+  margin-left: auto;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-skeleton-bubble.is-bot {
+  width: 80%;
+  height: 90px;
+  margin-right: auto;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-loading-notice {
+  display: flex;
+  align-items: center;
   justify-content: center;
   gap: 8px;
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-top: 8px;
 }
 
-.chat-starter-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 9999px;
-  background: var(--om-surface);
-  border: 1px solid var(--om-border);
-  color: var(--om-fg);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition: all 0.15s ease;
-}
-
-.chat-starter-btn:hover {
-  background: var(--om-surface-2);
-  border-color: var(--om-accent);
-  color: var(--om-accent);
-  transform: translateY(-1px);
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ============================================================================
