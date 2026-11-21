@@ -82,6 +82,10 @@ export const SkillsView: React.FC = () => {
   const [savingFile, setSavingFile] = useState(false);
   const [newFileModalOpen, setNewFileModalOpen] = useState(false);
   const [newFilePath, setNewFilePath] = useState('');
+  const [deletingSkillName, setDeletingSkillName] = useState<string | null>(null);
+  const [deletingFileName, setDeletingFileName] = useState<string | null>(null);
+  const deleteSkillTimerRef = useRef<any>(null);
+  const deleteFileTimerRef = useRef<any>(null);
   const fileLoadSeq = useRef(0);
 
   // 新建技能
@@ -290,7 +294,14 @@ export const SkillsView: React.FC = () => {
       showToast('SKILL.md 是核心规程文件，不可删除', 'error');
       return;
     }
-    if (!confirm(`确定要从技能包中删除文件 "${filePath}" 吗？此操作不可逆。`)) return;
+    if (deletingFileName !== filePath) {
+      setDeletingFileName(filePath);
+      if (deleteFileTimerRef.current) clearTimeout(deleteFileTimerRef.current);
+      deleteFileTimerRef.current = setTimeout(() => setDeletingFileName(null), 3500);
+      return;
+    }
+    if (deleteFileTimerRef.current) clearTimeout(deleteFileTimerRef.current);
+    setDeletingFileName(null);
 
     try {
       const res = await api.deleteSkillFile(inspectSkill.name, filePath);
@@ -315,7 +326,14 @@ export const SkillsView: React.FC = () => {
       showToast('内置基座核心技能受系统保护，不可删除', 'error');
       return;
     }
-    if (!confirm(`确定要删除技能 "${skill.name}" 及其完整包目录吗？`)) return;
+    if (deletingSkillName !== skill.name) {
+      setDeletingSkillName(skill.name);
+      if (deleteSkillTimerRef.current) clearTimeout(deleteSkillTimerRef.current);
+      deleteSkillTimerRef.current = setTimeout(() => setDeletingSkillName(null), 3500);
+      return;
+    }
+    if (deleteSkillTimerRef.current) clearTimeout(deleteSkillTimerRef.current);
+    setDeletingSkillName(null);
 
     try {
       await api.deleteSkill(skill.name);
@@ -800,11 +818,12 @@ export const SkillsView: React.FC = () => {
                   {skill.source !== 'builtin' && (
                     <button
                       type="button"
-                      className="om-btn-subtle skill-action skill-action-icon is-danger"
+                      className={`om-btn-subtle skill-action skill-action-icon is-danger ${deletingSkillName === skill.name ? 'is-confirming' : ''}`}
                       onClick={() => handleDeleteSkill(skill)}
-                      title="删除此技能包"
+                      title={deletingSkillName === skill.name ? '再次点击确认删除' : '删除此技能包'}
                     >
                       <Trash2 size={13} />
+                      {deletingSkillName === skill.name && <span className="inline-confirm-text">确认？</span>}
                     </button>
                   )}
                 </div>
@@ -931,10 +950,10 @@ export const SkillsView: React.FC = () => {
                           {selectedFileRelPath !== 'SKILL.md' && (
                             <button
                               type="button"
-                              className="om-btn-subtle editor-delete"
+                              className={`om-btn-subtle editor-delete ${deletingFileName === selectedFileRelPath ? 'is-confirming' : ''}`}
                               onClick={() => handleDeleteFile(selectedFileRelPath)}
                             >
-                              <Trash2 size={12} /> 删除
+                              <Trash2 size={12} /> {deletingFileName === selectedFileRelPath ? '确认删除？' : '删除'}
                             </button>
                           )}
                         </>

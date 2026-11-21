@@ -136,6 +136,10 @@ export const MemoryView: React.FC = () => {
 
   // 复制反馈状态 (itemId -> boolean)
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const [confirmingUndo, setConfirmingUndo] = useState(false);
+  const deleteItemTimerRef = useRef<any>(null);
+  const undoTimerRef = useRef<any>(null);
 
 
   const memLoadSeq = useRef(0);
@@ -197,10 +201,7 @@ export const MemoryView: React.FC = () => {
   };
 
   // 取消行内编辑（有改动时确认，避免误触丢稿）
-  const cancelItemEdit = (item: MemoryItem) => {
-    if (editContentBuffer !== item.content || editCategoryBuffer !== item.category) {
-      if (!confirm('有未保存的修改，确定放弃吗？')) return;
-    }
+  const cancelItemEdit = (_item: MemoryItem) => {
     setEditingItemId(null);
   };
 
@@ -229,11 +230,16 @@ export const MemoryView: React.FC = () => {
   };
 
   // 删除单条事实
-  const handleDeleteItem = async (itemId: string, contentSnippet: string) => {
-    const snippet = contentSnippet.length > 80 ? `${contentSnippet.slice(0, 80)}…` : contentSnippet;
-    if (!confirm(`确定删除这条记忆吗？\n\n“${snippet}”`)) {
+  const handleDeleteItem = async (itemId: string) => {
+    if (deletingItemId !== itemId) {
+      setDeletingItemId(itemId);
+      if (deleteItemTimerRef.current) clearTimeout(deleteItemTimerRef.current);
+      deleteItemTimerRef.current = setTimeout(() => setDeletingItemId(null), 3500);
       return;
     }
+    if (deleteItemTimerRef.current) clearTimeout(deleteItemTimerRef.current);
+    setDeletingItemId(null);
+
     try {
       const res = await api.deleteMemoryItem(selectedBotId, itemId);
       if (res.success) {
@@ -312,7 +318,15 @@ export const MemoryView: React.FC = () => {
 
   // 撤销上次整理
   const handleUndo = async () => {
-    if (!confirm('确定撤销上一次整理，恢复到整理前的内容吗？')) return;
+    if (!confirmingUndo) {
+      setConfirmingUndo(true);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = setTimeout(() => setConfirmingUndo(false), 3500);
+      return;
+    }
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setConfirmingUndo(false);
+
     try {
       const res = await api.undoMemory(selectedBotId);
       if (res.success) {
@@ -423,13 +437,13 @@ export const MemoryView: React.FC = () => {
           </button>
           <button
             type="button"
-            className="btn-secondary memory-hdr-btn"
+            className={`btn-secondary memory-hdr-btn ${confirmingUndo ? 'is-confirming' : ''}`}
             onClick={handleUndo}
             disabled={reports.length === 0}
             title={reports.length === 0 ? '还没有整理记录' : '还原到上次整理前的内容'}
           >
             <Undo2 size={13} />
-            <span>撤销上次整理</span>
+            <span>{confirmingUndo ? '再次点击确认撤销？' : '撤销上次整理'}</span>
           </button>
         </div>
       </div>
@@ -720,12 +734,12 @@ export const MemoryView: React.FC = () => {
 
                       <button
                         type="button"
-                        onClick={() => handleDeleteItem(item.id, item.content)}
-                        className="btn-secondary memory-action-btn is-danger"
-                        title="从记忆库中遗忘/删除此条"
+                        onClick={() => handleDeleteItem(item.id)}
+                        className={`btn-secondary memory-action-btn is-danger ${deletingItemId === item.id ? 'is-confirming' : ''}`}
+                        title={deletingItemId === item.id ? '再次点击确认删除' : '从记忆库中遗忘/删除此条'}
                       >
                         <Trash2 size={11} />
-                        <span>删除</span>
+                        <span>{deletingItemId === item.id ? '确认删除？' : '删除'}</span>
                       </button>
                     </div>
                   )}

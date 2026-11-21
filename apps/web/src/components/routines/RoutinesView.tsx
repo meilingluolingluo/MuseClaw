@@ -61,6 +61,8 @@ export const RoutinesView: React.FC = () => {
   const [loadingList, setLoadingList] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<any>(null);
 
   // Modal State (Used for both Create & Edit)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -275,7 +277,15 @@ export const RoutinesView: React.FC = () => {
 
   // 删除任务
   const handleDelete = async (id: string) => {
-    if (!confirm('确定彻底删除该例行任务及配置吗？')) return;
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => setConfirmDeleteId(null), 3500);
+      return;
+    }
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    setConfirmDeleteId(null);
+
     try {
       await api.deleteRoutine(id);
       const remaining = routines.filter((r) => r.id !== id);
@@ -573,11 +583,12 @@ export const RoutinesView: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      className="btn-secondary routine-action-btn is-danger"
+                      className={`btn-secondary routine-action-btn is-danger ${confirmDeleteId === activeRoutine.id ? 'is-confirming' : ''}`}
                       onClick={() => handleDelete(activeRoutine.id)}
-                      title="删除任务"
+                      title={confirmDeleteId === activeRoutine.id ? '再次点击确认删除' : '删除任务'}
                     >
                       <Trash2 size={14} />
+                      {confirmDeleteId === activeRoutine.id && <span>确认删除？</span>}
                     </button>
                   </div>
                 </div>

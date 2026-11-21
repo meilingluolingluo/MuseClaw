@@ -10379,3 +10379,27 @@ details[open] .thought-toggle::after {
   width: 100%;
   font-size: 13px;
 }
+
+/* ── 非阻断式两步内联确认高亮微交互 ─────────────────────────────── */
+.is-confirming {
+  background: rgba(255, 69, 58, 0.15) !important;
+  border-color: var(--accent-red) !important;
+  color: var(--accent-red) !important;
+  animation: pulse-border 1.5s infinite ease-in-out;
+}
+
+.inline-confirm-text {
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 69, 58, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.15);
+  }
+}
+

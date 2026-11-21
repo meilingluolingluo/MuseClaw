@@ -84,6 +84,8 @@ export const GoalsView: React.FC = () => {
   const [editCategory, setEditCategory] = useState('');
   const [editDue, setEditDue] = useState('');
   const [editCadence, setEditCadence] = useState('');
+  const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
+  const deleteGoalTimerRef = useRef<any>(null);
 
   // 行内添加新步骤输入
   const [inlineStepInputs, setInlineStepInputs] = useState<Record<string, string>>({});
@@ -345,7 +347,15 @@ export const GoalsView: React.FC = () => {
 
   // 删除目标
   const handleDeleteGoal = async (goal: Goal) => {
-    if (!confirm(`确定删除目标 “${goal.title}” 吗？此操作不可撤销。`)) return;
+    if (deletingGoalId !== goal.id) {
+      setDeletingGoalId(goal.id);
+      if (deleteGoalTimerRef.current) clearTimeout(deleteGoalTimerRef.current);
+      deleteGoalTimerRef.current = setTimeout(() => setDeletingGoalId(null), 3500);
+      return;
+    }
+    if (deleteGoalTimerRef.current) clearTimeout(deleteGoalTimerRef.current);
+    setDeletingGoalId(null);
+
     try {
       await api.deleteGoal(goal.id);
       setGoals((prev) => prev.filter((g) => g.id !== goal.id));
@@ -510,13 +520,6 @@ export const GoalsView: React.FC = () => {
   // 关闭编辑弹窗时还原草稿，避免未保存内容残留
   const closeEditModal = () => {
     if (!editingGoal) return;
-    const dirty =
-      editTitle !== editingGoal.title ||
-      editDesc !== (editingGoal.description || '') ||
-      editCategory !== (editingGoal.category || 'other') ||
-      editDue !== (editingGoal.due || '') ||
-      editCadence !== (editingGoal.cadence || '');
-    if (dirty && !confirm('有未保存的修改，确定放弃吗？')) return;
     setEditError('');
     setEditingGoal(null);
   };
@@ -858,12 +861,13 @@ export const GoalsView: React.FC = () => {
                     {/* 删除 */}
                     <button
                       type="button"
-                      className="btn-secondary goal-action-icon-btn is-danger"
+                      className={`btn-secondary goal-action-icon-btn is-danger ${deletingGoalId === goal.id ? 'is-confirming' : ''}`}
                       onClick={() => handleDeleteGoal(goal)}
                       aria-label="删除目标"
-                      title="删除目标"
+                      title={deletingGoalId === goal.id ? '再次点击确认删除' : '删除目标'}
                     >
                       <Trash2 size={14} />
+                      {deletingGoalId === goal.id && <span className="inline-confirm-text">确认？</span>}
                     </button>
                   </div>
                 </div>
