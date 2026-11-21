@@ -389,8 +389,7 @@ export const RoutinesView: React.FC = () => {
           <div className="rt-stat">
             <span className="rt-stat-label">成功率</span>
             <span
-              className="rt-stat-value"
-              style={{ color: statsSummary.totalExecutions > 0 ? 'var(--accent-green)' : 'var(--om-muted)' }}
+              className={`rt-stat-value ${statsSummary.totalExecutions > 0 ? 'is-success' : 'is-muted'}`}
             >
               {statsSummary.totalExecutions > 0 ? `${statsSummary.successRate}%` : '—'}
             </span>
@@ -398,8 +397,7 @@ export const RoutinesView: React.FC = () => {
           <div className="rt-stat">
             <span className="rt-stat-label">失败次数</span>
             <span
-              className="rt-stat-value"
-              style={{ color: statsSummary.failedTotal > 0 ? 'var(--accent-amber)' : 'var(--om-fg)' }}
+              className={`rt-stat-value ${statsSummary.failedTotal > 0 ? 'is-warning' : ''}`}
             >
               {statsSummary.failedTotal}
             </span>
@@ -786,6 +784,18 @@ export const RoutinesView: React.FC = () => {
                             </div>
 
                             <div className="routine-run-actions">
+                              {run.status === 'failed' && (
+                                <button
+                                  type="button"
+                                  onClick={handleRunNow}
+                                  disabled={isRunningNow}
+                                  className="btn-secondary routine-run-retry-btn"
+                                  title="重新触发一次此例行任务"
+                                >
+                                  <RefreshCw size={11} className={isRunningNow ? 'spin' : ''} />
+                                  <span>重试</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => toggleRunExpand(run.id)}

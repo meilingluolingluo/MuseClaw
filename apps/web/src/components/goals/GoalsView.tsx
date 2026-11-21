@@ -718,8 +718,7 @@ export const GoalsView: React.FC = () => {
             {hasActiveFilter && (
               <button
                 type="button"
-                className="om-btn-subtle"
-                style={{ marginTop: '14px' }}
+                className="om-btn-subtle goal-clear-filter-btn"
                 onClick={resetFilters}
               >
                 清空筛选条件

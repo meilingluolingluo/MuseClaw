@@ -7120,6 +7120,10 @@ details[open] .thought-toggle::after {
   line-height: 1.6;
 }
 
+.goal-clear-filter-btn {
+  margin-top: 14px;
+}
+
 .goal-presets-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -7683,6 +7687,18 @@ details[open] .thought-toggle::after {
   font-size: 14px;
   font-weight: 700;
   color: var(--om-fg);
+}
+
+.rt-stat-value.is-success {
+  color: var(--accent-green);
+}
+
+.rt-stat-value.is-muted {
+  color: var(--om-muted);
+}
+
+.rt-stat-value.is-warning {
+  color: var(--accent-amber);
 }
 
 .routines-filter-box {
@@ -8308,6 +8324,16 @@ details[open] .thought-toggle::after {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.routine-run-retry-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  color: var(--accent-amber);
 }
 
 .routine-run-expand-btn {
