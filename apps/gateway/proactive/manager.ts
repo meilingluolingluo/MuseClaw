@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface ProactiveManagerOptions {
   sentinel: SentinelPolicyManager;
-  tools: ToolDefinition[];
+  tools: ToolDefinition[] | (() => ToolDefinition[]);
   callLLM: LLMCaller;
   botRegistry?: BotRegistry;
   sessionStore?: SessionStore;
@@ -29,18 +29,23 @@ export class ProactiveManager {
   private dataDir = path.resolve(__dirname, '../data');
 
   private sentinel: SentinelPolicyManager;
-  private tools: ToolDefinition[];
   private callLLM: LLMCaller;
   private options: ProactiveManagerOptions;
 
   constructor(options: ProactiveManagerOptions) {
     this.options = options;
     this.sentinel = options.sentinel;
-    this.tools = options.tools;
     this.callLLM = options.callLLM;
 
     this.ensureDataDir();
     this.loadData();
+  }
+
+  private getTools(): ToolDefinition[] {
+    if (typeof this.options.tools === 'function') {
+      return this.options.tools();
+    }
+    return Array.isArray(this.options.tools) ? this.options.tools : [];
   }
 
   private ensureDataDir() {
@@ -308,13 +313,18 @@ export class ProactiveManager {
 
       console.log(`🚀 [Proactive] 启动 Agent 任务 [${routine.name}] (归属 Bot: ${effectiveBotId}), 触发源: ${triggerSource}`);
 
+      const routineBotProfile: AgentProfile | undefined = bot
+        ? { ...bot, approval_level: (bot.approval_level || 'full') as any }
+        : undefined;
+
+      const currentTools = this.getTools();
       const loop = runAgentLoop(
-        bot?.system_prompt || `你是一个企业内部严谨、高效的自动化数字员工，负责执行企业例行巡检与事件响应任务。请按步骤执行。`,
+        routineBotProfile?.system_prompt || `你是一个企业内部严谨、高效的自动化数字员工，负责执行企业例行巡检与事件响应任务。请按步骤执行。`,
         fullPrompt,
-        this.tools,
+        currentTools,
         this.sentinel,
         this.callLLM,
-        { sessionId, userId: 'system_proactive', botId: effectiveBotId, profile: bot, maxSteps: 8 }
+        { sessionId, userId: 'system_proactive', botId: effectiveBotId, profile: routineBotProfile, maxSteps: 8 }
       );
 
       let output = '';

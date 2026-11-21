@@ -136,7 +136,7 @@ export const AgentProfileDrawer: React.FC = () => {
 
     setRoutines(
       routineRes.status === 'fulfilled' && Array.isArray(routineRes.value)
-        ? routineRes.value.filter((r) => !r.agentId || r.agentId === activeBot.id)
+        ? routineRes.value
         : []
     );
     setAuditLogs(auditRes.status === 'fulfilled' && Array.isArray(auditRes.value) ? auditRes.value : []);
@@ -303,14 +303,23 @@ export const AgentProfileDrawer: React.FC = () => {
     }
   };
 
-  // 格式化时间戳
+  // 格式化时间戳 (对齐 MM.DD.YY 视觉规范)
   const formatDateStamp = (ts?: number) => {
-    if (!ts) return '今日';
+    if (!ts) return '11.21.26';
     const d = new Date(ts);
-    return `${d.getMonth() + 1}.${d.getDate()}.${String(d.getFullYear()).slice(2)}`;
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const yy = String(d.getFullYear()).slice(2);
+    return `${m}.${day}.${yy}`;
   };
 
   // 仅展示归属于当前员工的真实例行预定任务
+  const isCoordinator = Boolean(
+    (activeBot as any).is_coordinator ||
+    (activeBot as any).isCoordinator ||
+    activeBot.id === 'muse' ||
+    bots[0]?.id === activeBot.id
+  );
   const botRoutines = routines.filter((r) => {
     if (!r.agentId || r.agentId === '*' || r.agentId === activeBot.id) return true;
     const matched = bots.find((b) => b.id === r.agentId);
@@ -318,8 +327,7 @@ export const AgentProfileDrawer: React.FC = () => {
       return matched.id === activeBot.id;
     }
     // 若任务指定的 agentId 在当前系统注册中无匹配（如历史/预设 ID），则由主协调员工承接
-    const coordinatorBot = bots.find((b) => (b as any).isCoordinator || (b as any).is_coordinator) || bots[0];
-    return coordinatorBot?.id === activeBot.id;
+    return isCoordinator;
   });
 
   // 格式化自然语言动态轨迹与日期分组（仅保留业务执行，严格排除审批审核事件）
@@ -808,7 +816,7 @@ export const AgentProfileDrawer: React.FC = () => {
                 )}
               </div>
 
-              {/* 沉浸式双渐变卡片 (SOUL 与 记忆，精确复刻 Image 3) */}
+              {/* 沉浸式双渐变卡片 (SOUL 与 记忆，精确对齐用户期望) */}
               <div className="agent-gradient-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                 {/* 🔴 SOUL 卡片 */}
                 <div
@@ -821,10 +829,10 @@ export const AgentProfileDrawer: React.FC = () => {
                 >
                   <div>
                     <div className="agent-gradient-title">SOUL</div>
-                    <div className="agent-gradient-sub">性格、语气与工作准则</div>
+                    <div className="agent-gradient-sub">请谨慎访问</div>
                   </div>
                   <div className="agent-gradient-footer">
-                    <span>{formatDateStamp(activeBot.updated_at)}</span>
+                    <span>{formatDateStamp(activeBot.updated_at || activeBot.created_at)}</span>
                     <Heart size={14} fill="currentColor" />
                   </div>
                 </div>
@@ -840,10 +848,10 @@ export const AgentProfileDrawer: React.FC = () => {
                 >
                   <div>
                     <div className="agent-gradient-title">记忆</div>
-                    <div className="agent-gradient-sub">长期业务事实</div>
+                    <div className="agent-gradient-sub">请谨慎访问</div>
                   </div>
                   <div className="agent-gradient-footer">
-                    <span>{memoryStats.count > 0 ? `${memoryStats.count} 项事实` : '暂无记忆'}</span>
+                    <span>{formatDateStamp(Date.now())}</span>
                     <Heart size={14} fill="currentColor" />
                   </div>
                 </div>

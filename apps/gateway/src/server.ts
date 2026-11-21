@@ -70,7 +70,21 @@ process.on('unhandledRejection', (reason) => {
 const sentinel = new SentinelPolicyManager();
 const botMemory = new BotMemoryManager();
 const goalStore = new GoalStore();
+
+function findWorkspaceRoot(startDir: string = process.cwd()): string {
+  let cur = path.resolve(startDir);
+  while (cur !== path.dirname(cur)) {
+    if (fs.existsSync(path.join(cur, 'pnpm-workspace.yaml')) || fs.existsSync(path.join(cur, '.git'))) {
+      return cur;
+    }
+    cur = path.dirname(cur);
+  }
+  return path.resolve(startDir);
+}
+const workspaceRoot = findWorkspaceRoot(__dirname);
+
 const baseTools = createDefaultTools({
+  workspaceDir: workspaceRoot,
   skillsProvider: globalSkillStore,
   memoryProvider: {
     getMemory: (botId, userId) => botMemory.getMemory(botId, userId || 'user_web'),
@@ -277,7 +291,7 @@ const feishuChannel = createFeishuChannel(
 // 4. 初始化例行自动化与主动任务调度器 (Proactive Automation Manager)
 const proactive = new ProactiveManager({
   sentinel,
-  tools: refreshTools(),
+  tools: refreshTools,
   callLLM,
   botRegistry,
   sessionStore,

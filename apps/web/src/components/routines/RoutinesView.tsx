@@ -520,7 +520,7 @@ export const RoutinesView: React.FC = () => {
             ) : (
               filteredRoutines.map((r) => {
                 const isActive = r.id === activeRoutineId;
-                const botObj = bots.find((b) => b.id === r.agentId);
+                const botObj = bots.find((b) => b.id === r.agentId) || (bots.length > 0 ? bots[0] : null);
                 const humanZh = r.scheduleHumanZh || formatCronZh(r.cronExpr);
 
                 return (

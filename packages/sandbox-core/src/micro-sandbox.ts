@@ -328,6 +328,7 @@ export class MicroSandbox {
     args.push('--setenv', 'SANDBOX_ENV', '1');
     args.push('--setenv', 'MUSECLAW_SANDBOX', 'true');
     args.push('--setenv', 'MUSECLAW_SANDBOX_ENGINE', 'bwrap');
+    args.push('--setenv', 'GIT_DISCOVERY_ACROSS_FILESYSTEM', '1');
 
     // 传递安全的 PATH
     const safePath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin';
