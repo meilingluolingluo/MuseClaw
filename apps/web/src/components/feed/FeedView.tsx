@@ -48,37 +48,28 @@ const FeedPostCard = React.memo<{
   const postDate = formatRelativeTime(post.ts || post.date);
 
   return (
-    <div className="feed-card feed-post-card">
+    <article className="feed-card feed-post-card">
       <div className="feed-post-top">
         <div className="feed-area-badge" title={area.label}>
           {area.emoji}
         </div>
         <div className="feed-post-content">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '8px',
-              marginBottom: '6px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', minWidth: 0 }}>
-              <h3 className="feed-post-title" style={{ margin: 0 }}>
+          <div className="feed-post-header">
+            <div className="feed-post-title-wrap">
+              <h3 className="feed-post-title">
                 {post.title}
               </h3>
-              <span className="pill-badge pill-blue" style={{ fontSize: '11px', padding: '2px 8px', flexShrink: 0 }}>
+              <span className="pill-badge pill-blue feed-post-area-pill">
                 {area.label}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>{postDate}</span>
+            <div className="feed-post-meta">
+              <span className="feed-post-date">{postDate}</span>
               <button
                 type="button"
-                className="btn-icon"
+                className="btn-icon feed-post-delete-btn"
                 title="删除此动态"
                 aria-label={`删除动态 ${post.title}`}
-                style={{ opacity: 0.6, padding: '4px' }}
                 onClick={() => onDelete(post.id)}
               >
                 <Trash2 size={13} />
@@ -89,9 +80,9 @@ const FeedPostCard = React.memo<{
           <div className="feed-post-body markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
 
           {post.tags && post.tags.length > 0 && (
-            <div style={{ display: 'flex', gap: '6px', marginTop: '10px', flexWrap: 'wrap' }}>
+            <div className="feed-post-tags">
               {post.tags.map((tag, idx) => (
-                <span key={idx} className="pill-badge pill-blue" style={{ fontSize: '11px' }}>
+                <span key={idx} className="pill-badge pill-blue feed-tag-pill">
                   #{tag}
                 </span>
               ))}
@@ -108,25 +99,14 @@ const FeedPostCard = React.memo<{
               >
                 <MessageSquare size={14} /> 一键跟进讨论
               </button>
-              <span
-                style={{
-                  fontSize: '12px',
-                  color: 'var(--text-dim)',
-                  fontStyle: 'italic',
-                  maxWidth: '420px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-                title={post.prompt}
-              >
+              <span className="feed-post-prompt-snippet" title={post.prompt}>
                 “{post.prompt}”
               </span>
             </div>
           )}
         </div>
       </div>
-    </div>
+    </article>
   );
 });
 
@@ -148,7 +128,7 @@ const FeedActivityRow = React.memo<{
 
   return (
     <div
-      className="feed-activity-row"
+      className={`feed-activity-row ${clickable ? 'is-clickable' : ''}`}
       onClick={() => clickable && onOpen(act)}
       onKeyDown={(e) => {
         if (clickable && (e.key === 'Enter' || e.key === ' ')) {
@@ -165,23 +145,17 @@ const FeedActivityRow = React.memo<{
       </div>
       <div className="feed-activity-body">
         <div className="feed-activity-title-bar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-            <span
-              className="feed-activity-title"
-              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-            >
+          <div className="feed-act-title-group">
+            <span className="feed-activity-title">
               {titleText}
             </span>
-            <span
-              className="pill-badge pill-blue"
-              style={{ fontSize: '10px', padding: '1px 6px', flexShrink: 0 }}
-            >
+            <span className="pill-badge pill-blue feed-act-badge">
               {kindCfg.label}
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          <div className="feed-act-time-group">
             <span className="feed-activity-time">{timeText}</span>
-            {act.sessionId && <ArrowRight size={12} style={{ color: 'var(--text-dim)' }} />}
+            {act.sessionId && <ArrowRight size={12} className="feed-act-arrow" />}
           </div>
         </div>
         {textSnippet && (
@@ -296,16 +270,16 @@ export const FeedView: React.FC = () => {
   );
 
   return (
-    <section className="view-stage">
+    <section className="view-stage feed-stage" aria-label="智能体动态简报">
       <div className="view-header">
         <div>
           <div className="view-heading">
-            <Rss size={18} style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: '6px' }} />
-            智能体动态 (Feed)
+            <Rss size={18} className="view-heading-icon" />
+            <span>智能体动态</span>
           </div>
-          <div className="view-sub">基于您的工作习惯、长期记忆、近期对话与目标自动提炼的每日动态简报</div>
+          <div className="view-sub">基于工作习惯、长期记忆、近期对话与目标自动提炼的态势简报</div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="view-header-actions">
           <button type="button" className="btn-secondary" onClick={() => setTab('routines')} title="配置与管理定时任务">
             <Clock size={14} /> 定时任务
           </button>
@@ -330,12 +304,14 @@ export const FeedView: React.FC = () => {
               正在获取动态…
             </div>
           ) : posts.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-dim)' }}>
-              <div style={{ fontSize: '32px', marginBottom: '12px' }}>📰</div>
-              <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-muted)' }}>暂无动态条目</div>
-              <div style={{ fontSize: '13px', marginTop: '4px' }}>
-                点击右上角“立即撰写”，智能体将基于近期活动与目标自动归纳动态。
+            <div className="feed-empty-card">
+              <div className="feed-empty-icon">
+                <Rss size={28} />
               </div>
+              <h3 className="feed-empty-title">暂无动态简报</h3>
+              <p className="feed-empty-desc">
+                点击右上角“立即撰写”，智能体将基于近期任务执行与目标推进自动总结生成动态。
+              </p>
             </div>
           ) : (
             postsWithHtml.map(({ post, html }, idx) => (
@@ -350,22 +326,21 @@ export const FeedView: React.FC = () => {
           )}
 
           {/* While you were away (在你离开时) */}
-          <div className="feed-activity-section" style={{ marginTop: '32px' }}>
+          <div className="feed-activity-section">
             <div className="feed-section-header">
               <span className="feed-section-title">
-                在你离开时 (WHILE YOU WERE AWAY)
+                在你离开时
                 {activities.length > 0 && (
-                  <span style={{ marginLeft: '8px', fontWeight: 'normal', opacity: 0.7 }}>
+                  <span className="feed-section-count">
                     ({activities.length})
                   </span>
                 )}
               </span>
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn-secondary feed-refresh-btn"
                 onClick={loadFeed}
                 disabled={loading}
-                style={{ padding: '3px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
               >
                 <RefreshCw size={11} className={loading ? 'tool-spin' : ''} /> 刷新
               </button>
@@ -373,7 +348,7 @@ export const FeedView: React.FC = () => {
 
             <div className="feed-activity-list">
               {activities.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'var(--text-dim)', padding: '16px 0', textAlign: 'center' }}>
+                <div className="feed-activity-empty">
                   {loaded ? '暂无后台执行动态' : '正在获取后台执行动态…'}
                 </div>
               ) : (

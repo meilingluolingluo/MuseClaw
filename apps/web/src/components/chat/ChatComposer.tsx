@@ -52,7 +52,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     return () => window.removeEventListener('museclaw:chat_draft' as any, handleDraftEvent);
   }, []);
 
-  // Handle outside clicks to close popovers
+  // Handle outside clicks and ESC key to close popovers
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (composerWrapRef.current && !composerWrapRef.current.contains(e.target as Node)) {
@@ -60,8 +60,18 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
         setIsCommandsPopoverOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAttachPopoverOpen(false);
+        setIsCommandsPopoverOpen(false);
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const handleSend = () => {
@@ -155,15 +165,15 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
 
       {/* Attachments Preview Bar */}
       {attachments.length > 0 && (
-        <div className="composer-attachments-bar" style={{ display: 'flex', gap: '8px', padding: '8px 12px' }}>
+        <div className="composer-attachments-bar">
           {attachments.map((att, idx) => (
-            <div key={idx} className="composer-attachment-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <div key={idx} className="composer-attachment-tag">
               <span className="attachment-tag-name">{att.name}</span>
               <button
                 type="button"
                 className="attachment-tag-remove"
                 onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                aria-label={`移除附件 ${att.name}`}
               >
                 <X size={12} />
               </button>
@@ -192,11 +202,14 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
         <div className="composer-actions">
           <div className="composer-tools">
             {/* Attachment Popover Trigger */}
-            <div className="composer-tool-group" style={{ position: 'relative' }}>
+            <div className="composer-tool-group">
               <button
                 type="button"
                 className={`composer-tool-btn ${isAttachPopoverOpen ? 'active' : ''}`}
                 title="添加图片或上下文附件"
+                aria-label="添加附件"
+                aria-haspopup="dialog"
+                aria-expanded={isAttachPopoverOpen}
                 onClick={() => {
                   setIsAttachPopoverOpen((prev) => !prev);
                   setIsCommandsPopoverOpen(false);
@@ -207,7 +220,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               </button>
 
               {isAttachPopoverOpen && (
-                <div className="composer-popover" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div className="composer-popover" role="dialog" aria-label="添加会话上下文">
                   <div className="composer-popover-header">添加会话上下文</div>
                   <button
                     type="button"
@@ -236,11 +249,14 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
             </div>
 
             {/* Quick Slash Commands Trigger */}
-            <div className="composer-tool-group" style={{ position: 'relative' }}>
+            <div className="composer-tool-group">
               <button
                 type="button"
                 className={`composer-tool-btn ${isCommandsPopoverOpen ? 'active' : ''}`}
                 title="智能体常用指令"
+                aria-label="智能体常用指令"
+                aria-haspopup="dialog"
+                aria-expanded={isCommandsPopoverOpen}
                 onClick={() => {
                   setIsCommandsPopoverOpen((prev) => !prev);
                   setIsAttachPopoverOpen(false);
@@ -251,24 +267,22 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               </button>
 
               {isCommandsPopoverOpen && (
-                <div className="composer-popover composer-commands-popover" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div className="composer-popover composer-commands-popover" role="dialog" aria-label="快捷指令列表">
                   <div className="composer-popover-header">智能体常用指令</div>
                   <div className="composer-commands-list">
                     {slashCommands.map((item) => (
-                      <div
+                      <button
                         key={item.cmd}
+                        type="button"
                         className="composer-command-item"
                         onClick={() => {
                           setIsCommandsPopoverOpen(false);
                           item.action();
                         }}
-                        style={{ cursor: 'pointer', padding: '6px 8px' }}
                       >
-                        <span style={{ fontWeight: 600, color: 'var(--om-accent)' }}>{item.cmd}</span>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
-                          {item.desc}
-                        </span>
-                      </div>
+                        <span className="composer-cmd-code">{item.cmd}</span>
+                        <span className="composer-cmd-desc">{item.desc}</span>
+                      </button>
                     ))}
                   </div>
                 </div>

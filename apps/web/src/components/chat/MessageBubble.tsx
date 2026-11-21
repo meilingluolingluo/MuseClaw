@@ -2,10 +2,21 @@
 import type { Message, Bot } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { renderMarkdown } from '../../utils/markdown';
-import { ChevronDown, ChevronRight, ShieldAlert, Check, X, FileText } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ShieldAlert,
+  Check,
+  X,
+  FileText,
+  Copy,
+  CheckCheck,
+  User as UserIcon,
+} from 'lucide-react';
 import { ToolTrace } from './ToolTrace';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
+import { formatRelativeTime } from '../../utils/format';
 
 interface MessageBubbleProps {
   message: Message;
@@ -23,11 +34,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onApprovalResolved,
   live,
 }) => {
-  const { setIsAuditDrawerOpen } = useApp();
+  const { setIsAuditDrawerOpen, showToast } = useApp();
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const isUser = message.role === 'user';
+
+  const handleCopy = () => {
+    const textToCopy = message.content || '';
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    showToast('内容已复制到剪贴板', 'info');
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const handleDecision = async (approved: boolean) => {
     if (!message.approvalRequest || !sessionId) return;
@@ -35,64 +56,68 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       await api.sendDecision(sessionId, message.approvalRequest.actionId, approved ? 'APPROVE' : 'REJECT');
       setApprovalStatus(approved ? '已批准' : '已拒绝');
       onApprovalResolved?.(message.approvalRequest.actionId, approved);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to submit decision:', err);
+      showToast(`审批提交失败: ${err?.message || err}`, 'error');
     }
   };
 
+  const formattedTime = message.timestamp ? formatRelativeTime(message.timestamp) : '';
+
   return (
     <div className={`message-row ${message.role}`}>
-      <div className="message-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="message-avatar">
         {isUser ? (
-          <div style={{ fontSize: '20px' }}>👤</div>
+          <div className="user-message-avatar" title="用户">
+            <UserIcon size={16} />
+          </div>
         ) : (
           <BotAvatar bot={bot} size={36} motion="avatar-idle" />
         )}
       </div>
 
       <div className="message-bubble">
+        {/* 气泡元信息栏（时间戳与快捷复制） */}
+        <div className="message-meta-bar">
+          <span className="message-sender-name">{isUser ? '我' : bot?.name || '数字员工'}</span>
+          {formattedTime && <span className="message-timestamp">{formattedTime}</span>}
+          {message.content && (
+            <button
+              type="button"
+              className="message-copy-btn"
+              onClick={handleCopy}
+              title={copied ? '已复制' : '复制内容'}
+              aria-label="复制消息内容"
+            >
+              {copied ? <CheckCheck size={12} className="copy-success" /> : <Copy size={12} />}
+            </button>
+          )}
+        </div>
+
         {/* Assistant Reasoning Collapsible Block */}
         {message.reasoning && (
-          <div className="thinking-card" style={{ marginBottom: '10px' }}>
+          <div className="thinking-card">
             <button
               type="button"
               className="think-toggle-btn"
               onClick={() => setIsReasoningOpen((prev) => !prev)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                fontSize: '12px',
-                cursor: 'pointer',
-                padding: '4px 0',
-              }}
+              aria-expanded={isReasoningOpen}
             >
               {isReasoningOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <span style={{ fontWeight: 500 }}>思考过程 (Reasoning)</span>
+              <span className="think-title">
+                {live ? '思考过程中…' : '思考过程 (Reasoning)'}
+              </span>
+              {live && <span className="think-pulse-dot" />}
             </button>
             {isReasoningOpen && (
-              <div
-                className="reasoning-content"
-                style={{
-                  fontSize: '12.5px',
-                  color: 'var(--text-dim)',
-                  borderLeft: '2px solid var(--border-color)',
-                  paddingLeft: '10px',
-                  marginTop: '4px',
-                  lineHeight: 1.5,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
+              <div className="reasoning-content">
                 {message.reasoning}
               </div>
             )}
           </div>
         )}
 
-        {/* 工具执行过程（实时与历史共用，对标 nanoMuse ToolChip / OpenMausBot ToolActivity） */}
+        {/* 工具执行过程 */}
         {(() => {
           const tools = message.toolCalls || (message as any).tools;
           if (!tools || tools.length === 0) return null;
@@ -101,48 +126,41 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* Human Gate Sentinel Approval Prompt */}
         {message.approvalRequest && (
-          <div className="approval-card-hazard" style={{ marginBottom: '12px' }}>
-            <div className="approval-card-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div className="approval-card-hazard">
+            <div className="approval-card-title">
+              <div className="approval-hazard-indicator">
                 <ShieldAlert size={16} />
-                <span>⚠️ Sentinel 门禁动作审批拦截</span>
+                <span>Sentinel 门禁安全拦截</span>
               </div>
               <button
                 type="button"
+                className="approval-details-link"
                 onClick={() => setIsAuditDrawerOpen(true)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '11px',
-                  color: 'var(--om-accent)',
-                  cursor: 'pointer',
-                  padding: '2px 4px',
-                }}
                 title="打开右侧审计抽屉查看完整策略判定"
               >
                 查看审计详情 →
               </button>
             </div>
-            <div className="approval-card-desc" style={{ margin: '6px 0', fontSize: '12px' }}>
+            <div className="approval-card-desc">
               {message.approvalRequest.description}
             </div>
             {message.approvalRequest.command && (
-              <div className="approval-details-box" style={{ fontSize: '12px', marginBottom: '8px' }}>
+              <div className="approval-details-box">
                 <code>{message.approvalRequest.command}</code>
               </div>
             )}
-            <div className="approval-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="approval-actions">
               {approvalStatus ? (
-                <span style={{ fontSize: '12px', fontWeight: 600, color: approvalStatus.includes('批准') ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                <span className={`approval-result-pill ${approvalStatus.includes('批准') ? 'approved' : 'rejected'}`}>
                   {approvalStatus}
                 </span>
               ) : (
                 <>
                   <button type="button" className="btn-reject" onClick={() => handleDecision(false)}>
-                    <X size={14} /> 驳回
+                    <X size={14} /> 驳回执行
                   </button>
                   <button type="button" className="btn-approve" onClick={() => handleDecision(true)}>
-                    <Check size={14} /> 批准执行
+                    <Check size={14} /> 授权执行
                   </button>
                 </>
               )}
@@ -150,9 +168,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
 
-        {/* User Attached Images */}
+        {/* User Attached Images / Files */}
         {message.attachments && message.attachments.length > 0 && (
-          <div className="user-message-images" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+          <div className="user-message-images">
             {message.attachments.map((att, idx) =>
               !att.url ? null : att.type === 'image' ? (
                 <img
@@ -161,8 +179,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   alt={att.name}
                   loading="lazy"
                   className="user-bubble-image"
-                  style={{ maxWidth: '240px', maxHeight: '180px', borderRadius: '8px', cursor: 'pointer' }}
                   onClick={() => window.open(att.url, '_blank')}
+                  title="点击查看原图"
                 />
               ) : (
                 <a
@@ -181,9 +199,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
 
-        {/* Markdown Rendered Content (脱敏过滤原生 DSML 标记块) */}
+        {/* Markdown Rendered Content */}
         {isUser ? (
-          <div className="user-text" style={{ whiteSpace: 'pre-wrap' }}>
+          <div className="user-text">
             {message.content}
           </div>
         ) : (
