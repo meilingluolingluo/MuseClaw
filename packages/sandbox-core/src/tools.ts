@@ -1,4 +1,4 @@
-import { promisify } from 'node:util';
+﻿import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from './loop.js';
@@ -386,10 +386,22 @@ export function createDefaultTools(options?: {
           }
 
           if (action === 'add_step') {
-            if (!args.title) return { error: 'add_step 需要提供 title 参数' };
-            const goal = goalProvider.addStep?.(goalId, String(args.title), args.description ? String(args.description) : undefined);
-            if (!goal) return { error: `增加步骤失败` };
-            return { success: true, message: `已增加步骤: ${args.title}`, output: goalProvider.render ? goalProvider.render(goal) : goal };
+            const stepsToAdd = Array.isArray(args.steps)
+              ? args.steps.map(String)
+              : args.title
+                ? [String(args.title)]
+                : [];
+            if (stepsToAdd.length === 0) return { error: 'add_step 需要提供 title 或 steps 数组' };
+            let updatedGoal: any;
+            for (const stepTitle of stepsToAdd) {
+              updatedGoal = goalProvider.addStep?.(goalId, stepTitle, args.description ? String(args.description) : undefined);
+            }
+            if (!updatedGoal) return { error: `增加步骤失败` };
+            return {
+              success: true,
+              message: `已增加 ${stepsToAdd.length} 个步骤`,
+              output: goalProvider.render ? goalProvider.render(updatedGoal) : updatedGoal
+            };
           }
 
           if (action === 'propose') {
@@ -425,18 +437,22 @@ export function createDefaultTools(options?: {
     // 阶梯 2 (CLI): 微沙箱隔离 Shell 执行
     {
       name: 'execute_shell',
-      description: '在 Bubblewrap 微沙箱环境中执行 Linux Shell 命令（文件系统只读、Home与外网默认阻断）',
+      description: '在受保护的微沙箱中执行 Linux Shell 与脚本命令（具备真实网络与 DNS 联通能力，支持 curl、python、node、git 等研发与数据抓取工具，保护系统目录与用户私密文件）',
       parameters: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: '要执行的 Bash 命令' }
+          command: { type: 'string', description: '要执行的 Bash 命令' },
+          allow_network: { type: 'boolean', description: '是否允许网络访问，默认为 true' },
+          timeout_ms: { type: 'number', description: '执行超时时间（毫秒），默认为 60000ms' }
         },
         required: ['command']
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         const cmd = String(args.command);
         console.log(`[Tool:execute_shell] ${cmd}`);
-        const result = await sandbox.execute(cmd, { cwd: workspaceDir });
+        const allowNetwork = typeof args.allow_network === 'boolean' ? args.allow_network : true;
+        const timeoutMs = typeof args.timeout_ms === 'number' ? args.timeout_ms : 60000;
+        const result = await sandbox.execute(cmd, { cwd: workspaceDir, allowNetwork, timeoutMs });
         return {
           stdout: result.stdout,
           stderr: result.stderr,

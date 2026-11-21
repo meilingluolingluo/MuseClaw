@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+﻿import { createServer } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -205,7 +205,7 @@ const infoflowChannel = createInfoflowChannel(
       refreshTools(),
       sentinel,
       callLLM,
-      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
     );
 
     let output = '';
@@ -257,7 +257,7 @@ const feishuChannel = createFeishuChannel(
       refreshTools(),
       sentinel,
       callLLM,
-      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
+      { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
     );
 
     let output = '';
@@ -1006,7 +1006,7 @@ export function startGatewayServer(defaultPort = 8799) {
         refreshTools(),
         sentinel,
         callLLM,
-        { sessionId: session.id, userId: apiUserId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
+        { sessionId: session.id, userId: apiUserId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
       );
 
       let output = '';
@@ -2368,7 +2368,7 @@ fi
         refreshTools(),
         sentinel,
         userScopedCaller,
-        { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 8, skills: getBotSkills(bot.id) }
+        { sessionId: session.id, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
       );
 
       let fullAssistantText = '';

@@ -66,6 +66,7 @@ export interface MicroSandboxConfig {
   extraRoDirs?: string[];
   extraRwDirs?: string[];
   probeOnStart?: boolean;
+  defaultAllowNetwork?: boolean;
 }
 
 export interface ExecutionOptions {
@@ -121,6 +122,7 @@ export class MicroSandbox {
   private workspaceDir: string;
   private extraRoDirs: string[];
   private extraRwDirs: string[];
+  private defaultAllowNetwork: boolean;
 
   private bwrapPath: string | null = null;
   private version = '';
@@ -133,6 +135,7 @@ export class MicroSandbox {
     this.workspaceDir = path.resolve(config.workspaceDir || process.cwd());
     this.extraRoDirs = (config.extraRoDirs || []).map((p) => path.resolve(p));
     this.extraRwDirs = (config.extraRwDirs || []).map((p) => path.resolve(p));
+    this.defaultAllowNetwork = config.defaultAllowNetwork ?? true;
 
     if (config.probeOnStart !== false) {
       this.probe();
@@ -140,12 +143,32 @@ export class MicroSandbox {
   }
 
   private appendSystemMounts(args: string[]): void {
-    // 核心只读系统目录
-    const roDirs = ['/usr', '/opt', '/etc', '/var', '/snap', '/nix', '/run/systemd/resolve'];
+    // 核心只读系统目录与网络/DNS解析支撑目录
+    const roDirs = [
+      '/usr',
+      '/opt',
+      '/etc',
+      '/var',
+      '/snap',
+      '/nix',
+      '/run',
+      '/mnt/wsl'
+    ];
     for (const dir of roDirs) {
       if (fs.existsSync(dir)) {
         args.push('--ro-bind-try', dir, dir);
       }
+    }
+
+    // 动态追踪并挂载 /etc/resolv.conf 符号链接真实目标目录，确保各 Linux 发行版与 WSL 环境下 DNS 解析物理可达
+    if (fs.existsSync('/etc/resolv.conf')) {
+      try {
+        const realResolv = fs.realpathSync('/etc/resolv.conf');
+        const realDir = path.dirname(realResolv);
+        if (realDir && fs.existsSync(realDir) && !roDirs.includes(realDir)) {
+          args.push('--ro-bind-try', realDir, realDir);
+        }
+      } catch {}
     }
 
     // 兼容 Linux merged-/usr 体系（/bin, /lib, /lib64 为符号链接或目录）
@@ -277,7 +300,7 @@ export class MicroSandbox {
     } = {}
   ): string[] {
     const ws = path.resolve(options.workspaceDir || this.workspaceDir);
-    const allowNet = options.allowNetwork ?? commandNeedsNetwork(command);
+    const allowNet = options.allowNetwork ?? (this.defaultAllowNetwork || commandNeedsNetwork(command));
 
     const args: string[] = [
       '--die-with-parent',
@@ -343,7 +366,7 @@ export class MicroSandbox {
   public async execute(command: string, options: ExecutionOptions = {}): Promise<MicroSandboxExecutionResult> {
     const startTime = Date.now();
     const ws = path.resolve(options.cwd || this.workspaceDir);
-    const requiresNetwork = options.allowNetwork ?? commandNeedsNetwork(command);
+    const requiresNetwork = options.allowNetwork ?? (this.defaultAllowNetwork || commandNeedsNetwork(command));
     const timeoutMs = options.timeoutMs || 30000;
 
     // 1. 如果 bwrap 可用，使用内核级微沙箱执行

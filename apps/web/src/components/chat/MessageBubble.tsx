@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import type { Message, Bot } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { renderMarkdown } from '../../utils/markdown';
@@ -181,16 +181,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
 
-        {/* Markdown Rendered Content */}
+        {/* Markdown Rendered Content (脱敏过滤原生 DSML 标记块) */}
         {isUser ? (
           <div className="user-text" style={{ whiteSpace: 'pre-wrap' }}>
             {message.content}
           </div>
         ) : (
-          <div
-            className="assistant-text markdown-body"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
-          />
+          (() => {
+            const displayClean = (message.content || '')
+              .replace(/<[｜|]{2}DSML[｜|]{2}\s*calls>[\s\S]*?(?:<\/[｜|]{2}DSML[｜|]{2}\s*calls>|$)/gi, '')
+              .trim();
+            return displayClean ? (
+              <div
+                className="assistant-text markdown-body"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(displayClean) }}
+              />
+            ) : null;
+          })()
         )}
       </div>
     </div>

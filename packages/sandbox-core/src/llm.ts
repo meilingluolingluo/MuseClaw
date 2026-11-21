@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LLMCaller, LLMMessage, ToolDefinition } from './loop.js';
@@ -48,6 +48,76 @@ export function normalizeChatCompletionsUrl(url: string): string {
     return `${clean}/v1/chat/completions`;
   }
   return `${clean}/chat/completions`;
+}
+
+/**
+ * 解析模型原生 DSML (DeepSeek Markup Language) 标记块并提取为标准 ToolCall 结构
+ * 兼容全角管道符 <｜｜DSML｜｜ 与半角管道符 <||DSML||，支持闭合与未闭合容错
+ */
+export function parseDSML(text: string): {
+  cleanedContent: string;
+  toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+} {
+  const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = [];
+  if (!text) {
+    return { cleanedContent: '', toolCalls };
+  }
+
+  // 匹配闭合或未闭合的 <｜｜DSML｜｜ calls> ... </｜｜DSML｜｜ calls>
+  const dsmlBlockRegex = /<[｜|]{2}DSML[｜|]{2}\s*calls>([\s\S]*?)(?:<\/[｜|]{2}DSML[｜|]{2}\s*calls>|$)/gi;
+
+  const cleanedContent = text.replace(dsmlBlockRegex, (_, innerBlock: string) => {
+    // 匹配每个 invoke: <｜｜DSML｜｜ invoke name="..."> ... </｜｜DSML｜｜ invoke>
+    const invokeRegex = /<[｜|]{2}DSML[｜|]{2}\s*invoke\s+name=["']([^"']+)["']>([\s\S]*?)(?:<\/[｜|]{2}DSML[｜|]{2}\s*invoke>|$)/gi;
+    let invMatch: RegExpExecArray | null;
+
+    while ((invMatch = invokeRegex.exec(innerBlock)) !== null) {
+      const toolName = invMatch[1].trim();
+      const paramsInner = invMatch[2];
+      const args: Record<string, unknown> = {};
+
+      // 匹配每个 parameter: <｜｜DSML｜｜ parameter name="..." ...>value</｜｜DSML｜｜ parameter>
+      const paramRegex = /<[｜|]{2}DSML[｜|]{2}\s*parameter\s+name=["']([^"']+)["'](?:\s+[^>]*)?>([\s\S]*?)(?:<\/[｜|]{2}DSML[｜|]{2}\s*parameter>|$)/gi;
+      let pMatch: RegExpExecArray | null;
+
+      while ((pMatch = paramRegex.exec(paramsInner)) !== null) {
+        const paramName = pMatch[1].trim();
+        const rawVal = pMatch[2].trim();
+        let parsedVal: unknown = rawVal;
+
+        if (
+          (rawVal.startsWith('{') && rawVal.endsWith('}')) ||
+          (rawVal.startsWith('[') && rawVal.endsWith(']'))
+        ) {
+          try {
+            parsedVal = JSON.parse(rawVal);
+          } catch {
+            parsedVal = rawVal;
+          }
+        } else if (rawVal === 'true') {
+          parsedVal = true;
+        } else if (rawVal === 'false') {
+          parsedVal = false;
+        } else if (/^-?\d+(\.\d+)?$/.test(rawVal) && !isNaN(Number(rawVal))) {
+          if (!rawVal.startsWith('0') || rawVal === '0' || rawVal.startsWith('0.')) {
+            parsedVal = Number(rawVal);
+          }
+        }
+
+        args[paramName] = parsedVal;
+      }
+
+      toolCalls.push({
+        id: `call_dsml_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: toolName,
+        args
+      });
+    }
+
+    return '';
+  }).trim();
+
+  return { cleanedContent, toolCalls };
 }
 
 /**
@@ -198,7 +268,45 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
       let buffer = '';
       let accumulatedContent = '';
       let accumulatedReasoning = '';
+      let streamedLength = 0;
       const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
+
+      const flushChunks = () => {
+        // 判断 accumulatedContent 中是否有 DSML 标签
+        const dsmlStart = accumulatedContent.search(/<[｜|]{2}DSML/i);
+        if (dsmlStart === -1) {
+          // 没有检测到 DSML 标签，检查末尾是否含有未完成的 '<' 潜在标签前缀
+          const lastTagOpen = accumulatedContent.lastIndexOf('<');
+          let safeEnd = accumulatedContent.length;
+          if (lastTagOpen !== -1 && accumulatedContent.length - lastTagOpen < 15) {
+            safeEnd = lastTagOpen;
+          }
+          if (safeEnd > streamedLength) {
+            onChunk(accumulatedContent.slice(streamedLength, safeEnd));
+            streamedLength = safeEnd;
+          }
+        } else {
+          // 有 DSML，先将 DSML 之前的文本输出
+          if (dsmlStart > streamedLength) {
+            onChunk(accumulatedContent.slice(streamedLength, dsmlStart));
+            streamedLength = dsmlStart;
+          }
+          // 查找当前 DSML block 是否已闭合
+          const callsEndRegex = /<\/[｜|]{2}DSML[｜|]{2}\s*calls>/gi;
+          callsEndRegex.lastIndex = dsmlStart;
+          const endMatch = callsEndRegex.exec(accumulatedContent);
+          if (endMatch) {
+            const dsmlEnd = endMatch.index + endMatch[0].length;
+            if (dsmlEnd > streamedLength) {
+              streamedLength = dsmlEnd;
+            }
+            if (accumulatedContent.length > streamedLength) {
+              onChunk(accumulatedContent.slice(streamedLength));
+              streamedLength = accumulatedContent.length;
+            }
+          }
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -223,7 +331,7 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
               }
               if (delta?.content) {
                 accumulatedContent += delta.content;
-                onChunk(delta.content);
+                flushChunks();
               }
 
               if (delta?.tool_calls && Array.isArray(delta.tool_calls)) {
@@ -243,6 +351,16 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
         }
       }
 
+      // 流全部接收完毕后，解析 DSML 并剥除 DSML 标记块
+      const { cleanedContent, toolCalls: dsmlToolCalls } = parseDSML(accumulatedContent);
+      accumulatedContent = cleanedContent;
+
+      // 如果有遗留且非 DSML 的普通文本，输出兜底
+      if (accumulatedContent.length > streamedLength && dsmlToolCalls.length === 0) {
+        onChunk(accumulatedContent.slice(streamedLength));
+        streamedLength = accumulatedContent.length;
+      }
+
       const toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> = [];
       for (const item of toolCallMap.values()) {
         let parsedArgs: Record<string, unknown> = {};
@@ -256,6 +374,10 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
           name: item.name,
           args: parsedArgs
         });
+      }
+
+      for (const dsmlCall of dsmlToolCalls) {
+        toolCalls.push(dsmlCall);
       }
 
       return {
@@ -289,8 +411,15 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
       }
     }
 
+    let finalContent = choice.content || '';
+    const { cleanedContent, toolCalls: dsmlToolCalls } = parseDSML(finalContent);
+    finalContent = cleanedContent;
+    for (const dsmlCall of dsmlToolCalls) {
+      toolCalls.push(dsmlCall);
+    }
+
     return {
-      content: choice.content || '',
+      content: finalContent,
       reasoning_content: choice.reasoning_content,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined
     };
