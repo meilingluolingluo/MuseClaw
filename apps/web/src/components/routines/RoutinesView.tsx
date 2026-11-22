@@ -10,41 +10,20 @@ import {
   XCircle,
   RefreshCw,
   Calendar,
-  Copy,
-  Terminal,
-  Shield,
   ChevronDown,
   ChevronRight,
   Edit3,
   Bot as BotIcon,
   Loader2,
-  Check,
 } from 'lucide-react';
 import type { Routine, RoutineRun, ScheduleKind, DeliverTarget, OverlapPolicy } from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
 import { formatTime } from '../../utils/format';
-import { formatCronZh, previewNextRuns, SCHEDULE_PRESETS } from '../../utils/cronHelper';
+import { formatCronZh } from '../../utils/cronHelper';
 import { ToolTrace } from '../chat/ToolTrace';
 import { SchedulePicker } from './SchedulePicker';
-
-/** 剪贴板 API 不可用时的降级复制 */
-function fallbackCopy(text: string, done: () => void): void {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    done();
-  } catch {
-    console.warn('clipboard copy failed');
-  }
-}
 
 export const RoutinesView: React.FC = () => {
   const { bots, showToast } = useApp();
@@ -56,7 +35,6 @@ export const RoutinesView: React.FC = () => {
   const [isRunningNow, setIsRunningNow] = useState(false);
   const [isRefreshingRuns, setIsRefreshingRuns] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const deleteTimerRef = useRef<any>(null);
@@ -330,22 +308,6 @@ export const RoutinesView: React.FC = () => {
     return () => clearInterval(timer);
   }, [runs, activeRoutineId, isRunningNow]);
 
-  // 复制文本辅助（非安全上下文降级为 execCommand）
-  const copyToClipboard = (text: string, id: string) => {
-    const done = () => {
-      setCopiedId(id);
-      showToast('已复制到剪贴板', 'info');
-      setTimeout(() => {
-        setCopiedId((cur) => (cur === id ? null : cur));
-      }, 2000);
-    };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
-    } else {
-      fallbackCopy(text, done);
-    }
-  };
-
   // 展开折叠流水工具调用详情
   const toggleRunExpand = (runId: string) => {
     setExpandedRunIds((prev) => {
@@ -361,11 +323,6 @@ export const RoutinesView: React.FC = () => {
     if (!activeRoutine) return null;
     return bots.find((b) => b.id === activeRoutine.agentId) || bots[0] || null;
   }, [bots, activeRoutine]);
-
-  // 未来预测触发时间
-  const previewRuns = useMemo(() => {
-    return previewNextRuns(formCron, 3);
-  }, [formCron]);
 
   return (
     <section className="view-stage routines-view" aria-label="例行任务与自动化巡检">
@@ -536,7 +493,10 @@ export const RoutinesView: React.FC = () => {
                         <BotIcon size={14} /> 责任员工: <strong>{assignedBot?.name || activeRoutine.agentId}</strong>
                       </span>
                       <span className="routine-detail-meta-item">
-                        <Calendar size={14} /> 下次触发:{' '}
+                        <Calendar size={14} /> 调度周期: <strong>{activeRoutine.scheduleHumanZh || formatCronZh(activeRoutine.cronExpr)}</strong>
+                      </span>
+                      <span className="routine-detail-meta-item">
+                        <Clock size={14} /> 下次触发:{' '}
                         <strong>
                           {!activeRoutine.enabled
                             ? '已暂停调度'
@@ -587,124 +547,6 @@ export const RoutinesView: React.FC = () => {
                     </button>
                   </div>
                 </div>
-              </div>
-
-              {/* 调度详情与高级规则网格 */}
-              <div className="routine-grid-2col">
-                {/* 1. 调度周期与执行预测 */}
-                <div className="routine-card">
-                  <div className="routine-card-title">
-                    <Calendar size={15} className="routine-icon-accent" /> <span>调度规划与下步执行</span>
-                  </div>
-                  <div className="routine-cron-display">
-                    {activeRoutine.scheduleHumanZh || formatCronZh(activeRoutine.cronExpr)}
-                  </div>
-                  <div className="routine-cron-expr-line">
-                    表达式: <code>{activeRoutine.cronExpr}</code> ({activeRoutine.timezone || 'Asia/Shanghai'})
-                  </div>
-
-                  <div className="routine-preview-label">
-                    未来预估触发时间:
-                  </div>
-                  <div className="routine-preview-list">
-                    {(activeRoutine.nextRunTimes && activeRoutine.nextRunTimes.length > 0
-                      ? activeRoutine.nextRunTimes.map((t) => formatTime(t))
-                      : previewNextRuns(activeRoutine.cronExpr, 3)
-                    ).map((timeStr, idx) => (
-                      <div key={idx} className="routine-preview-item">
-                        <span className="routine-preview-idx">#{idx + 1}</span>
-                        <span>{timeStr}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 2. 交付策略与静默配置 */}
-                <div className="routine-card">
-                  <div className="routine-card-title">
-                    <Shield size={15} className="routine-icon-green" /> <span>交付与防扰策略</span>
-                  </div>
-                  <div className="routine-policy-list">
-                    <div className="routine-policy-row">
-                      <span className="routine-policy-label">结果交付目标</span>
-                      <span className="routine-policy-val">
-                        {activeRoutine.deliverTo === 'silent'
-                          ? '静默归档 (仅记日志)'
-                          : activeRoutine.deliverTo === 'im_webhook'
-                          ? 'IM 群机器人 Webhook'
-                          : '团队动态流 (Feed)'}
-                      </span>
-                    </div>
-                    <div className="routine-policy-row">
-                      <span className="routine-policy-label">并发防重叠策略</span>
-                      <span className="routine-policy-val">
-                        {activeRoutine.overlap === 'queue' ? '排队顺序执行' : '跳过本次执行 (Skip)'}
-                      </span>
-                    </div>
-                    <div className="routine-policy-row">
-                      <span className="routine-policy-label">静默抑制 (Quiet Green)</span>
-                      <span className="routine-policy-val">
-                        {activeRoutine.deliverTo === 'silent' ? '已开启 · 仅记日志' : '按目标渠道正常送达'}
-                      </span>
-                    </div>
-                    <div className="routine-policy-row">
-                      <span className="routine-policy-label">超时时间限制</span>
-                      <span className="routine-policy-val">{activeRoutine.timeoutSeconds || 300} 秒</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. 外部 Webhook 触发直连 */}
-                <div className="routine-card routine-card-full">
-                  <div className="routine-webhook-header">
-                    <div className="routine-card-title">
-                      <Terminal size={15} className="routine-icon-accent" /> <span>外部系统 Webhook 触发接口</span>
-                    </div>
-                    <span className="routine-webhook-hint">支持外部 CI/CD、Prometheus、或运维脚本随时回调</span>
-                  </div>
-
-                  <div className="routine-webhook-bar">
-                    <span className="routine-webhook-url">
-                      POST {window.location.origin}/api/routines/{activeRoutine.id}/trigger
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!activeRoutine.webhookSecret) {
-                          showToast('请先在上方配置或生成 Webhook 密钥后再复制调用指令', 'warning');
-                          return;
-                        }
-                        copyToClipboard(
-                          `curl -X POST "${window.location.origin}/api/routines/${activeRoutine.id}/trigger" -H "Authorization: Bearer ${activeRoutine.webhookSecret}" -H "Content-Type: application/json" -d '{"event":"external_trigger"}'`,
-                          'curl_cmd'
-                        );
-                      }}
-                      className="routine-webhook-copy-btn"
-                      title={!activeRoutine.webhookSecret ? '请先配置 Webhook 密钥' : '复制 Curl 指令'}
-                    >
-                      {copiedId === 'curl_cmd' ? <Check size={12} color="var(--accent-green)" /> : <Copy size={12} />}
-                      <span>{copiedId === 'curl_cmd' ? '已复制' : '复制 Curl 指令'}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 执行指令提示词 Prompt 卡片 */}
-              <div className="routine-instructions-card">
-                <div className="routine-instructions-header">
-                  <div className="routine-instructions-title">执行指令提示词 (Prompt 指引)</div>
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(activeRoutine.instructions || '', 'prompt_copy')}
-                    className="routine-instructions-copy-btn"
-                  >
-                    {copiedId === 'prompt_copy' ? <Check size={12} /> : <Copy size={12} />}
-                    <span>复制指令</span>
-                  </button>
-                </div>
-                <pre className="routine-instructions-body">
-                  {activeRoutine.instructions || '（未设置指令）'}
-                </pre>
               </div>
 
               {/* 历史执行流水与工具调用链 (Runs & Execution Traces) */}
