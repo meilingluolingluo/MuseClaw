@@ -53,6 +53,37 @@ const PROMPT_SUGGESTIONS = [
   '身穿航天服与小喷气背包的星际宇航员小兔子',
 ];
 
+const INSPIRATION_PRESETS = [
+  {
+    id: 'moss-courier',
+    name: '苔邮使',
+    desc: '戴叶子耳朵和信件包的迷你邮差',
+    style: 'muse' as AvatarStyle,
+    img: '/avatars/presets/moss-courier/idle.webp',
+  },
+  {
+    id: 'tide-tinker',
+    name: '潮汐巧匠',
+    desc: '海沫色带珊瑚边缘的蝾螈工匠，带有简易工具袋',
+    style: 'clay' as AvatarStyle,
+    img: '/avatars/presets/tide-tinker/idle.webp',
+  },
+  {
+    id: 'dusk-moth',
+    name: '暮光蛾',
+    desc: '戴圆眼镜与靛蓝水彩双翼的思考飞蛾，带浅米色领圈',
+    style: 'watercolor' as AvatarStyle,
+    img: '/avatars/presets/dusk-moth/idle.webp',
+  },
+  {
+    id: 'copper-acorn',
+    name: '铜果',
+    desc: '橡果形纯铜机器人与鼠尾草色面板，围着沉静蓝色围巾',
+    style: 'line' as AvatarStyle,
+    img: '/avatars/presets/copper-acorn/idle.webp',
+  },
+];
+
 const MOODS_LIST: AvatarMood[] = ['idle', 'working', 'waiting', 'happy', 'error'];
 const MOOD_NAMES: Record<AvatarMood, string> = {
   idle: '待机常态',
@@ -82,6 +113,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
   const [selectedStyle, setSelectedStyle] = useState<AvatarStyle>('muse');
   const [referenceUrl, setReferenceUrl] = useState('');
   const [session, setSession] = useState<AvatarSession | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   // 轮询检查会话进度
@@ -227,6 +259,26 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
     }
   };
 
+  // 恢复内置形象
+  const handleResetToBuiltin = async () => {
+    if (!currentBot) return;
+    setBusy('reset');
+    try {
+      const updated = await api.updateBot(currentBot.id, {
+        avatar: 'dragon',
+        avatarType: 'dragon',
+      });
+      showToast('已恢复为内置形象', 'info');
+      await loadBots();
+      onApplied?.(updated);
+      fetchStatus();
+    } catch (e: any) {
+      showToast(`恢复失败: ${e.message}`, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // 上传参考图
   const handleUploadReference = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -365,6 +417,30 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
               重新生成 4 种情绪姿态
             </button>
           )}
+
+          {/* 恢复内置形象 */}
+          {currentBot?.avatar !== 'dragon' && (
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={handleResetToBuiltin}
+              className="btn-secondary"
+              style={{
+                width: '100%',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '7px',
+                fontSize: '11.5px',
+                borderRadius: '8px',
+                marginTop: '6px',
+                color: 'var(--om-muted, #6b7280)',
+              }}
+            >
+              恢复内置形象
+            </button>
+          )}
         </div>
 
         {/* 右侧：创作工作区与形象馆 Tabs */}
@@ -420,6 +496,50 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
           {/* Tab 1: AI 智能创作 */}
           {activeTab === 'create' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 }}>
+              {/* AI 灵感预设卡片 (4 款代表性风格效果预览) */}
+              <div>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+                  AI 灵感卡片 (点击自动填充描述与风格):
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                  {INSPIRATION_PRESETS.map((p) => {
+                    const isSelected = description === p.desc && selectedStyle === p.style;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          setDescription(p.desc);
+                          setSelectedStyle(p.style);
+                        }}
+                        style={{
+                          overflow: 'hidden',
+                          borderRadius: '12px',
+                          border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'var(--om-surface, #ffffff)',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          padding: '0',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <div style={{ aspectRatio: '1/1', background: '#f1efeb', overflow: 'hidden' }}>
+                          <img src={p.img} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                        <div style={{ padding: '6px 8px' }}>
+                          <div style={{ fontSize: '11.5px', fontWeight: 650, color: 'var(--om-fg, #111827)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {p.name}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--om-muted, #6b7280)' }}>
+                            {STYLES_CATALOG.find((s) => s.id === p.style)?.label.split(' ')[0]}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* 描述输入框 */}
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
@@ -584,49 +704,102 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-                    {session.candidates.map((cand, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          position: 'relative',
-                          aspectRatio: '1/1',
-                          borderRadius: '10px',
-                          overflow: 'hidden',
-                          background: 'var(--om-surface, #ffffff)',
-                          border: session.chosen === idx ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                          cursor: session.stage === 'choose' && cand ? 'pointer' : 'default',
-                        }}
-                        onClick={() => {
-                          if (session.stage === 'choose' && cand && busy === null) {
-                            handleChooseCandidate(idx);
-                          }
-                        }}
-                      >
-                        {cand ? (
-                          <img src={cand} alt={`候选 ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Loader2 size={18} className="animate-spin text-muted" />
-                          </div>
-                        )}
-                        <span
+                    {session.candidates.map((cand, idx) => {
+                      const isChosen = selectedCandidate === idx || session.chosen === idx;
+                      return (
+                        <div
+                          key={idx}
                           style={{
-                            position: 'absolute',
-                            top: '4px',
-                            left: '4px',
-                            background: 'rgba(0,0,0,0.6)',
-                            color: '#ffffff',
-                            fontSize: '10px',
-                            fontWeight: 600,
-                            padding: '1px 5px',
-                            borderRadius: '4px',
+                            position: 'relative',
+                            aspectRatio: '1/1',
+                            borderRadius: '10px',
+                            overflow: 'hidden',
+                            background: 'var(--om-surface, #ffffff)',
+                            border: isChosen ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
+                            cursor: session.stage === 'choose' && cand ? 'pointer' : 'default',
+                            boxShadow: isChosen ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : 'none',
+                          }}
+                          onClick={() => {
+                            if (session.stage === 'choose' && cand && busy === null) {
+                              setSelectedCandidate(selectedCandidate === idx ? null : idx);
+                            }
                           }}
                         >
-                          #{idx + 1}
-                        </span>
-                      </div>
-                    ))}
+                          {cand ? (
+                            <img src={cand} alt={`候选 ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Loader2 size={18} className="animate-spin text-muted" />
+                            </div>
+                          )}
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              left: '4px',
+                              background: 'rgba(0,0,0,0.6)',
+                              color: '#ffffff',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            #{idx + 1}
+                          </span>
+                          {isChosen && (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                width: '20px',
+                                height: '20px',
+                                borderRadius: '50%',
+                                background: 'var(--om-accent, #3b82f6)',
+                                color: '#ffffff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                              }}
+                            >
+                              <Check size={12} />
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
+
+                  {/* 选定并开始生成姿态操作条 */}
+                  {selectedCandidate !== null && session.stage === 'choose' && (
+                    <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => handleChooseCandidate(selectedCandidate)}
+                        className="btn-primary"
+                        style={{
+                          width: '100%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          padding: '10px',
+                          fontSize: '13px',
+                          fontWeight: 650,
+                          borderRadius: '8px',
+                        }}
+                      >
+                        {busy === `choose-${selectedCandidate}` ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                        就用这张 (定型生成全套 5 态)
+                      </button>
+                      <p style={{ textAlign: 'center', fontSize: '11.5px', color: 'var(--om-muted, #6b7280)', margin: 0 }}>
+                        接下来，系统将以此为基准生成全套 5 种情绪姿态（待机、工作、思考、喜悦、纠错）。
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

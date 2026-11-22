@@ -78,6 +78,25 @@ export function createDefaultTools(options?: {
   const environment: BaseEnvironment = options?.environment || options?.microSandbox || new MicroSandbox({ workspaceDir });
   const sandbox = environment;
 
+  const resolveUploadOrWorkspacePath = (rawPath: string): string => {
+    const cleanPath = String(rawPath || '').trim();
+    if (cleanPath.startsWith('/uploads/') || cleanPath.startsWith('uploads/')) {
+      const filename = cleanPath.replace(/^\/?uploads\//, '');
+      const candidate1 = path.resolve(workspaceDir, 'apps/gateway/data/uploads', filename);
+      if (fs.existsSync(candidate1)) return candidate1;
+      const candidate2 = path.resolve(workspaceDir, 'data/uploads', filename);
+      if (fs.existsSync(candidate2)) return candidate2;
+      const candidate3 = path.resolve(workspaceDir, cleanPath.replace(/^\//, ''));
+      if (fs.existsSync(candidate3)) return candidate3;
+    }
+    if (path.isAbsolute(cleanPath) && fs.existsSync(cleanPath)) {
+      return cleanPath;
+    }
+    const inWorkspace = path.resolve(workspaceDir, cleanPath);
+    if (fs.existsSync(inWorkspace)) return inWorkspace;
+    return cleanPath;
+  };
+
   return [
     // Agent Skills 规程库加载、执行与自学习沉淀
     {
@@ -512,10 +531,10 @@ export function createDefaultTools(options?: {
       }
     },
 
-    // 阶梯 3 (Web): 轻量 HTTP 页面/接口抓取（无需拉起完整 Chromium 内核）
+    // 阶梯 3 (Web): 轻量 HTTP 页面/接口抓取（支持官方 Markdown 正文提取接口与直接 HTTP）
     {
       name: 'web_fetch',
-      description: '使用轻量 HTTP 协议直接抓取目标网页文本或 API JSON 数据（阶梯 3: 避免拉起重量级浏览器）',
+      description: '抓取目标网页文本与内容（优先通过云端 Fetch 接口提取纯净 Markdown 正文，亦支持普通 HTTP/HTTPS 网页与 API JSON 响应）',
       parameters: {
         type: 'object',
         properties: {
@@ -525,8 +544,34 @@ export function createDefaultTools(options?: {
         required: ['url']
       },
       execute: async (args) => {
-        const url = String(args.url);
+        const url = String(args.url || '').trim();
         console.log(`[Tool:web_fetch] 抓取: ${url}`);
+        const apiKey = process.env.DEEPSEEK_API_KEY;
+
+        // 若配置了 API Key，优先尝试官方高保真 Markdown 正文提取接口
+        if (apiKey && (url.startsWith('http://') || url.startsWith('https://'))) {
+          try {
+            const res = await fetch('https://api.deepseek.com/v1/tools/fetch', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey.replace(/[^\x00-\x7F]/g, '').trim()}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ url })
+            });
+            if (res.ok) {
+              const data: any = await res.json();
+              return {
+                title: data.title || '',
+                content: data.content || '',
+                engine: 'deepseek-fetch'
+              };
+            }
+          } catch {
+            // 降级使用基础 HTTP 抓取
+          }
+        }
+
         try {
           const rawHeaders = (args.headers as Record<string, unknown>) || {};
           const safeHeaders: Record<string, string> = { 'User-Agent': 'MuseClaw-WebFetch/1.0' };
@@ -548,6 +593,68 @@ export function createDefaultTools(options?: {
           };
         } catch (error: any) {
           return { error: error.message };
+        }
+      }
+    },
+
+    // 阶梯 3 (Web): 搜索引擎网页实时检索
+    {
+      name: 'web_search',
+      description: '基于自研搜索引擎实时搜索互联网最新网页与结构化结果，支持高级搜索语法 (site:, -, "精确短语", lang:zh,en)',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜索词（1～128 个字符，支持 site:, lang: 等操作符）' },
+          count: { type: 'number', description: '返回条数（1～50，默认为 5）' },
+          need_content: { type: 'boolean', description: '是否抓取并在正文中返回网页 Markdown 文本，默认为 true' },
+          ori_question: { type: 'string', description: '触发搜索的用户原始问题，有助于精准理解意图' }
+        },
+        required: ['query']
+      },
+      execute: async (args) => {
+        const query = String(args.query || '').trim();
+        if (!query) return { error: '搜索词 query 不能为空' };
+
+        const apiKey = process.env.DEEPSEEK_API_KEY;
+        if (!apiKey) {
+          return { error: '未配置 DEEPSEEK_API_KEY，无法使用网页搜索接口。' };
+        }
+
+        const count = typeof args.count === 'number' ? Math.min(Math.max(1, args.count), 50) : 5;
+        const needContent = typeof args.need_content === 'boolean' ? args.need_content : true;
+
+        try {
+          const bodyPayload: Record<string, unknown> = {
+            query,
+            count,
+            need_content: needContent
+          };
+          if (args.ori_question) {
+            bodyPayload.ori_question = String(args.ori_question);
+          }
+
+          const res = await fetch('https://api.deepseek.com/v1/tools/search', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey.replace(/[^\x00-\x7F]/g, '').trim()}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(bodyPayload)
+          });
+
+          if (!res.ok) {
+            const errText = await res.text();
+            return { error: `搜索服务异常 (HTTP ${res.status}): ${errText}` };
+          }
+
+          const data: any = await res.json();
+          return {
+            query,
+            count: data.results?.length || 0,
+            results: data.results || []
+          };
+        } catch (err: any) {
+          return { error: `搜索服务调用失败: ${err.message || String(err)}` };
         }
       }
     },

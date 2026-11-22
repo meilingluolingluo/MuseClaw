@@ -1,7 +1,8 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { LLMCaller, LLMMessage, ToolDefinition } from './loop.js';
+import type { LLMCaller, LLMMessage, ToolDefinition } from './loop.ts';
+import { saysNoImages, withoutImages } from './vision.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,20 +199,19 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
       }
     }));
 
-    const body: Record<string, unknown> = {
-      model: modelName,
-      messages: messages.map((m) => {
+    const formatMessageList = (msgList: LLMMessage[]) =>
+      msgList.map((m) => {
         if (m.role === 'tool') {
           return {
             role: 'tool',
             tool_call_id: m.tool_call_id,
-            content: m.content || ''
+            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')
           };
         }
         if (m.role === 'assistant' && m.tool_calls) {
           const item: Record<string, unknown> = {
             role: 'assistant',
-            content: m.content || '',
+            content: typeof m.content === 'string' ? m.content : (m.content ? JSON.stringify(m.content) : ''),
             tool_calls: m.tool_calls.map((c) => ({
               id: c.id,
               type: 'function',
@@ -225,9 +225,13 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
         }
         return {
           role: m.role,
-          content: m.content || ''
+          content: Array.isArray(m.content) ? m.content : (m.content || '')
         };
-      })
+      });
+
+    const body: Record<string, unknown> = {
+      model: modelName,
+      messages: formatMessageList(messages)
     };
 
     if (formattedTools.length > 0) {
@@ -249,15 +253,29 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
       }
     }
 
-    const res = await fetch(targetUrl, {
+    let res = await fetch(targetUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
     });
 
+    // 若端点因为接收到图片 content parts 而报错拒绝，自动降级为纯文本重试一次
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`[${config.name || config.id}] API 请求失败 (HTTP ${res.status}): ${errText}`);
+      const hadMultimodal = messages.some((m) => Array.isArray(m.content));
+      if (hadMultimodal && saysNoImages(errText)) {
+        const textOnlyMessages = withoutImages(messages);
+        body.messages = formatMessageList(textOnlyMessages);
+        res = await fetch(targetUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body)
+        });
+      }
+      if (!res.ok) {
+        const finalErr = res === undefined || res.bodyUsed ? errText : await res.text();
+        throw new Error(`[${config.name || config.id}] API 请求失败 (HTTP ${res.status}): ${finalErr}`);
+      }
     }
 
     if (onChunk && res.body) {

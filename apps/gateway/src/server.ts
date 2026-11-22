@@ -569,7 +569,10 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/runner/machines'
     ].includes(url.pathname) ||
     url.pathname.startsWith('/runner') ||
+    url.pathname === '/api/avatar' ||
     url.pathname.startsWith('/api/avatar/') ||
+    url.pathname.startsWith('/api/files/avatar/') ||
+    url.pathname.startsWith('/avatar-presets/') ||
     url.pathname === '/api/tasks' ||
     url.pathname === '/api/chat' ||
     url.pathname === '/api/channels/feishu/webhook' ||
@@ -733,18 +736,24 @@ export function startGatewayServer(defaultPort = 8799) {
     }
 
     // B1.2 形象工坊接口 (Avatar Studio)
-    if (req.method === 'GET' && url.pathname === '/api/avatar/status') {
+    if (req.method === 'GET' && (url.pathname === '/api/avatar' || url.pathname === '/api/avatar/status' || url.pathname === '/api/avatar/view')) {
       const botId = url.searchParams.get('botId') || undefined;
       const ep = avatarStudio.getImageEndpointConfig();
+      const face = avatarStudio.getFaceInfo(botId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         available: ep.available,
+        unavailable: ep.available ? '' : '当前未配置图像生成模型服务商',
+        unavailable_zh: ep.available ? '' : '当前未配置图像生成模型服务商',
         provider: ep.provider,
+        image_model: ep.model,
         imageModel: ep.model,
+        video_model: ep.videoModel,
         videoModel: ep.videoModel,
         cloud: ep.provider !== 'builtin-procedural',
+        host: ep.provider,
         current: avatarStudio.getCurrentSession(),
-        face: avatarStudio.getFaceInfo(botId),
+        face: face,
         presets: avatarStudio.getPresets()
       }));
     }
@@ -2840,6 +2849,8 @@ fi
 
     // B4. 运行时上传文件（工件、聊天图片、自定义头像）不在构建产物里，单独托管
     const uploadRoots: Array<[string, string]> = [
+      ['/api/files/avatar/', path.resolve(__dirname, '../data/avatars/custom')],
+      ['/avatar-presets/', path.resolve(__dirname, '../../web/public/avatars/presets')],
       ['/avatars/uploads/', path.resolve(__dirname, '../data/avatars/uploads')],
       ['/avatars/custom/', path.resolve(__dirname, '../data/avatars/custom')],
       ['/avatars/sessions/', path.resolve(__dirname, '../data/avatars/sessions')],

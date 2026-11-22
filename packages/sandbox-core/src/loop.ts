@@ -1,5 +1,6 @@
 import type { MuseEvent, TrajectoryStep, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 import { defaultVault } from './vault.ts';
+import { keepNewestImages } from './vision.ts';
 
 export interface ToolDefinition {
   name: string;
@@ -31,9 +32,15 @@ export interface SentinelHook {
   isEgressAction?: (name: string, args: Record<string, unknown>) => { isEgress: boolean; target?: string };
 }
 
+export type LLMContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
+
+export type LLMMessageContent = string | LLMContentPart[];
+
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content?: string;
+  content?: LLMMessageContent;
   reasoning_content?: string;
   tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
@@ -55,7 +62,7 @@ export type LLMCaller = (
  */
 export async function* runAgentLoop(
   systemPrompt: string,
-  userGoal: string,
+  userGoal: string | LLMMessageContent,
   tools: ToolDefinition[],
   sentinel: SentinelHook,
   callLLM: LLMCaller,
@@ -67,7 +74,7 @@ export async function* runAgentLoop(
     profile?: AgentProfile;
     isTainted?: boolean;
     skills?: Array<{ name: string; description: string; category?: string; channel?: string }>;
-    historyMessages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+    historyMessages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string | LLMMessageContent }>;
   }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
@@ -146,7 +153,7 @@ export async function* runAgentLoop(
       }
     };
 
-    const callPromise = callLLM(messages, effectiveTools, onDelta)
+    const callPromise = callLLM(keepNewestImages(messages, 2), effectiveTools, onDelta)
       .then((res) => {
         isFinished = true;
         if (notifyChunk) {
