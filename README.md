@@ -1,5 +1,7 @@
 # MuseClaw
 
+[中文](README.md) | [English](README_EN.md)
+
 > **企业常驻型多智能体数字员工工作站 (Enterprise Always-On Multi-Agent Workstation)**  
 > 具备专属常驻沙箱、通讯录式多智能体协同、确定性安全哨兵风控、主动自动化例程、长期目标规划与跨端闭环协同的企业级 Agent 平台。
 
