@@ -254,6 +254,10 @@ export class ModelProviderStore {
     this.remoteModelsCache.set(cacheKey, { models, timestamp: Date.now() });
   }
 
+  public getProviderConfig(providerId: string): ModelProviderConfig | undefined {
+    return this.providers.get(providerId);
+  }
+
   constructor(customPath?: string) {
     this.configPath = customPath || path.resolve(__dirname, '../../../config/models.json');
     this.initDefaultPresets();

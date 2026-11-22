@@ -154,6 +154,10 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                   pollTimerRef.current = null;
                 }
               }
+              if (res.current.stage === 'done') {
+                setStudioStatus(res);
+                loadBots();
+              }
             }
           } catch {}
         }, 800);
@@ -191,6 +195,8 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
       return;
     }
     setBusy('draw');
+    setSession(null);
+    setSelectedCandidate(null);
     try {
       const newSess = await api.avatarBegin({
         description: description.trim(),
@@ -217,6 +223,11 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
       const posingSess = await api.avatarChoose(session.id, index, currentBot?.id);
       setSession(posingSess);
       showToast('已选定候选，正在生成 5 种情绪全套姿态...', 'info');
+      if (posingSess.stage === 'done') {
+        const fresh = await api.avatarStatus(currentBot?.id);
+        setStudioStatus(fresh);
+        await loadBots();
+      }
     } catch (e: any) {
       showToast(`选定失败: ${e.message}`, 'error');
     } finally {
@@ -311,6 +322,10 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
             background: 'var(--om-surface-2, #f9fafb)',
             borderRadius: '16px',
             border: '1px solid var(--om-border, #e5e7eb)',
+            position: 'sticky',
+            top: 0,
+            alignSelf: 'flex-start',
+            zIndex: 10,
           }}
         >
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase', marginBottom: '14px' }}>
@@ -496,6 +511,33 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
           {/* Tab 1: AI 智能创作 */}
           {activeTab === 'create' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 }}>
+              {/* 绘图引擎状态提示栏 */}
+              <div
+                style={{
+                  padding: '9px 12px',
+                  borderRadius: '10px',
+                  background: studioStatus?.cloud ? 'rgba(59, 130, 246, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                  border: studioStatus?.cloud ? '1px solid rgba(59, 130, 246, 0.25)' : '1px solid rgba(245, 158, 11, 0.25)',
+                  fontSize: '11.5px',
+                  color: studioStatus?.cloud ? '#2563eb' : '#b45309',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <span>
+                  {studioStatus?.cloud
+                    ? `⚡ 绘图引擎: 云端大模型 (${studioStatus?.provider} · ${studioStatus?.imageModel})`
+                    : '🎨 绘图引擎: 智能自适应矢量引擎 (离线本地绘图模式)'}
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
+                  {studioStatus?.cloud
+                    ? '已接入商用图像大模型'
+                    : '提示：若需生成超逼真/照片级 AI 画面，可在「系统设置 → 模型」配置 DashScope / OpenAI / 硅基流动 Key'}
+                </span>
+              </div>
+
               {/* AI 灵感预设卡片 (4 款代表性风格效果预览) */}
               <div>
                 <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>

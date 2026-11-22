@@ -11,6 +11,7 @@ import type {
   AvatarCostEstimate,
 } from '@museclaw/protocol';
 import type { BotRegistry } from '../bots/registry.ts';
+import { globalModelStore } from '../bots/provider-store.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -205,9 +206,13 @@ export class AvatarStudio {
     apiKey: string;
     baseUrl: string;
   } {
-    const envOpenAiKey = process.env.OPENAI_API_KEY || '';
-    const envDashscopeKey = process.env.DASHSCOPE_API_KEY || '';
-    const envSiliconKey = process.env.SILICONFLOW_API_KEY || '';
+    const qwenProv = globalModelStore?.getProviderConfig?.('qwen');
+    const openAiProv = globalModelStore?.getProviderConfig?.('openai');
+    const siliconProv = globalModelStore?.getProviderConfig?.('siliconflow');
+
+    const envDashscopeKey = process.env.DASHSCOPE_API_KEY || qwenProv?.apiKey || '';
+    const envSiliconKey = process.env.SILICONFLOW_API_KEY || siliconProv?.apiKey || '';
+    const envOpenAiKey = process.env.OPENAI_API_KEY || openAiProv?.apiKey || '';
 
     if (envDashscopeKey) {
       return {
@@ -677,14 +682,184 @@ export class AvatarStudio {
    * 依据提示词与情绪（idle, working, waiting, happy, error）动态渲染具备鲜明角色特征的专属形象
    */
   private generateProceduralAvatar(prompt: string, mood: AvatarMood, variantIndex: number): Buffer {
-    // 依据描述与变体提取主基调色与装饰色
-    const colors = [
-      { primary: '#FF6B6B', secondary: '#FFE66D', accent: '#4ECDC4' },
-      { primary: '#4D96FF', secondary: '#6BCB77', accent: '#FFD93D' },
-      { primary: '#9B51E0', secondary: '#F2994A', accent: '#2D9CDB' },
-      { primary: '#F7B731', secondary: '#55E6C1', accent: '#FC5C65' },
-    ];
-    const palette = colors[variantIndex % colors.length];
+    const lowerPrompt = (prompt || '').toLowerCase();
+
+    // 意图与角色物种嗅探
+    const isDog = /(犬|狗|柴犬|柯基|金毛|哈士奇|dog|puppy|shiba|corgi)/i.test(lowerPrompt);
+    const isCat = /(猫|猫咪|波斯猫|小猫|cat|kitten)/i.test(lowerPrompt);
+    const isRabbit = /(兔|兔子|兔兔|rabbit|bunny)/i.test(lowerPrompt);
+    const isRobot = /(机甲|机器人|赛博|机械|智能体|robot|cyber|mech)/i.test(lowerPrompt);
+
+    // 配件嗅探 (围巾、眼镜、护目镜、帽子等)
+    const hasScarf = /(围巾|格子|红蓝格子|领巾|领结|scarf|tie)/i.test(lowerPrompt);
+    const hasGoggles = /(护目镜|眼镜|墨镜|霓虹护目镜|goggles|glasses)/i.test(lowerPrompt);
+    const hasHat = /(帽|巫师帽|帽子|hat|cap)/i.test(lowerPrompt);
+
+    // 依据描述意图与变体索引动态提取色板
+    let palette: { primary: string; secondary: string; accent: string; highlight: string };
+
+    if (isDog) {
+      // 柴犬与小狗的 4 款经典变体色
+      const dogColors = [
+        { primary: '#E67E22', secondary: '#FAD7A0', accent: '#D35400', highlight: '#FFF5E1' }, // 经典赤柴
+        { primary: '#2C3E50', secondary: '#F39C12', accent: '#E74C3C', highlight: '#FDFEFE' }, // 经典黑柴
+        { primary: '#F5B041', secondary: '#FEF9E7', accent: '#E67E22', highlight: '#FFFFFF' }, // 奶油黄白柴
+        { primary: '#7F8C8D', secondary: '#F4D03F', accent: '#34495E', highlight: '#EAEDED' }, // 胡麻柴
+      ];
+      palette = dogColors[variantIndex % dogColors.length];
+    } else if (isCat) {
+      // 猫咪 4 款变体色
+      const catColors = [
+        { primary: '#E67E22', secondary: '#FAD7A0', accent: '#FF7675', highlight: '#FFF9E6' }, // 橘猫
+        { primary: '#2C3E50', secondary: '#BDC3C7', accent: '#3498DB', highlight: '#FFFFFF' }, // 蓝猫/奶牛猫
+        { primary: '#F39C12', secondary: '#2C3E50', accent: '#E74C3C', highlight: '#FFFFFF' }, // 三花
+        { primary: '#BDC3C7', secondary: '#ECF0F1', accent: '#FF7675', highlight: '#FFFFFF' }, // 银渐层
+      ];
+      palette = catColors[variantIndex % catColors.length];
+    } else if (isRobot) {
+      // 赛博朋克 4 款变体色
+      const robotColors = [
+        { primary: '#2C3E50', secondary: '#00CEC9', accent: '#FD79A8', highlight: '#81ECEC' }, // 霓虹黑曜
+        { primary: '#6C5CE7', secondary: '#A29BFE', accent: '#00B894', highlight: '#DFE6E9' }, // 赛博紫
+        { primary: '#0984E3', secondary: '#74B9FF', accent: '#F1C40F', highlight: '#FFFFFF' }, // 钛金属蓝
+        { primary: '#636E72', secondary: '#FFEAA7', accent: '#E17055', highlight: '#F5F6FA' }, // 工业灰
+      ];
+      palette = robotColors[variantIndex % robotColors.length];
+    } else {
+      // 潮玩默认 4 款变体色
+      const defaultColors = [
+        { primary: '#FF6B6B', secondary: '#FFE66D', accent: '#4ECDC4', highlight: '#FFFFFF' },
+        { primary: '#4D96FF', secondary: '#6BCB77', accent: '#FFD93D', highlight: '#FFFFFF' },
+        { primary: '#9B51E0', secondary: '#F2994A', accent: '#2D9CDB', highlight: '#FFFFFF' },
+        { primary: '#F7B731', secondary: '#55E6C1', accent: '#FC5C65', highlight: '#FFFFFF' },
+      ];
+      palette = defaultColors[variantIndex % defaultColors.length];
+    }
+
+    // 耳朵/角矢量造型
+    let earsSvg = '';
+    if (isDog) {
+      earsSvg = `
+        <!-- 柴犬萌萌三角耳朵 (带浅色耳绒) -->
+        <polygon points="156,175 186,102 216,160" fill="${palette.primary}"/>
+        <polygon points="166,166 186,118 206,156" fill="${palette.secondary}"/>
+        <polygon points="356,175 326,102 296,160" fill="${palette.primary}"/>
+        <polygon points="346,166 326,118 306,156" fill="${palette.secondary}"/>
+      `;
+    } else if (isCat) {
+      earsSvg = `
+        <!-- 猫咪尖尖耳朵 -->
+        <polygon points="165,170 185,110 220,155" fill="${palette.primary}"/>
+        <polygon points="172,165 185,122 210,155" fill="#FFB8B8"/>
+        <polygon points="347,170 327,110 292,155" fill="${palette.primary}"/>
+        <polygon points="340,165 327,122 302,155" fill="#FFB8B8"/>
+      `;
+    } else if (isRabbit) {
+      earsSvg = `
+        <!-- 长长兔耳朵 -->
+        <ellipse cx="205" cy="115" rx="18" ry="50" transform="rotate(-8 205 115)" fill="${palette.primary}"/>
+        <ellipse cx="205" cy="115" rx="10" ry="36" transform="rotate(-8 205 115)" fill="#FFB8B8"/>
+        <ellipse cx="307" cy="115" rx="18" ry="50" transform="rotate(8 307 115)" fill="${palette.primary}"/>
+        <ellipse cx="307" cy="115" rx="10" ry="36" transform="rotate(8 307 115)" fill="#FFB8B8"/>
+      `;
+    } else if (isRobot) {
+      earsSvg = `
+        <!-- 赛博天线与传感器 -->
+        <line x1="190" y1="160" x2="160" y2="105" stroke="${palette.primary}" stroke-width="8" stroke-linecap="round"/>
+        <circle cx="160" cy="105" r="14" fill="${palette.accent}"/>
+        <circle cx="160" cy="105" r="7" fill="#FFFFFF"/>
+        <line x1="322" y1="160" x2="352" y2="105" stroke="${palette.primary}" stroke-width="8" stroke-linecap="round"/>
+        <circle cx="352" cy="105" r="14" fill="${palette.accent}"/>
+        <circle cx="352" cy="105" r="7" fill="#FFFFFF"/>
+      `;
+    } else {
+      earsSvg = `
+        <!-- 潮玩圆润萌宠小耳朵 -->
+        <ellipse cx="178" cy="148" rx="22" ry="32" transform="rotate(-20 178 148)" fill="${palette.accent}"/>
+        <ellipse cx="178" cy="148" rx="12" ry="20" transform="rotate(-20 178 148)" fill="#FFFFFF" opacity="0.4"/>
+        <ellipse cx="334" cy="148" rx="22" ry="32" transform="rotate(20 334 148)" fill="${palette.accent}"/>
+        <ellipse cx="334" cy="148" rx="12" ry="20" transform="rotate(20 334 148)" fill="#FFFFFF" opacity="0.4"/>
+      `;
+    }
+
+    // 口鼻腮肉面部特征
+    let faceDetailsSvg = '';
+    if (isDog) {
+      faceDetailsSvg = `
+        <!-- 柴犬浅色脸颊腮肉与口鼻区 -->
+        <ellipse cx="256" cy="254" rx="46" ry="32" fill="${palette.highlight}"/>
+        <ellipse cx="196" cy="242" rx="20" ry="16" fill="${palette.highlight}" opacity="0.8"/>
+        <ellipse cx="316" cy="242" rx="20" ry="16" fill="${palette.highlight}" opacity="0.8"/>
+        <!-- 经典柴犬浅色小圆眉毛 (麻薯眉) -->
+        <ellipse cx="214" cy="196" rx="9" ry="6" fill="${palette.secondary}"/>
+        <ellipse cx="298" cy="196" rx="9" ry="6" fill="${palette.secondary}"/>
+        <!-- 小狗黑色圆润鼻头 -->
+        <path d="M 248 238 Q 256 235 264 238 Q 268 245 256 250 Q 244 245 248 238 Z" fill="#2C3E50"/>
+        <ellipse cx="254" cy="239" rx="3" ry="1.5" fill="#FFFFFF" opacity="0.7"/>
+        <!-- 萌萌小狗嘴巴 -->
+        <path d="M 248 254 Q 252 258 256 254 Q 260 258 264 254" stroke="#2C3E50" stroke-width="3" stroke-linecap="round" fill="none"/>
+      `;
+    } else if (isCat) {
+      faceDetailsSvg = `
+        <!-- 猫咪胡须 -->
+        <line x1="160" y1="245" x2="195" y2="248" stroke="#7F8C8D" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="160" y1="256" x2="195" y2="254" stroke="#7F8C8D" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="352" y1="245" x2="317" y2="248" stroke="#7F8C8D" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="352" y1="256" x2="317" y2="254" stroke="#7F8C8D" stroke-width="2.5" stroke-linecap="round"/>
+        <!-- 小巧粉色猫鼻 -->
+        <polygon points="252,242 260,242 256,247" fill="#FF7675"/>
+      `;
+    }
+
+    // 配件 (围巾、眼镜、帽子等)
+    let accessorySvg = '';
+    if (hasScarf) {
+      accessorySvg = `
+        <!-- 红蓝格子保暖围巾 -->
+        <g id="plaidScarf">
+          <!-- 围巾主体项圈 -->
+          <path d="M 195 288 Q 256 312 317 288 Q 325 310 312 320 Q 256 338 200 320 Z" fill="#C0392B"/>
+          <!-- 格子横向条纹 -->
+          <path d="M 197 296 Q 256 318 315 296" stroke="#2980B9" stroke-width="4.5" fill="none" opacity="0.85"/>
+          <path d="M 199 306 Q 256 326 313 306" stroke="#F1C40F" stroke-width="2" fill="none" opacity="0.75"/>
+          <!-- 格子纵向条纹 -->
+          <line x1="225" y1="294" x2="223" y2="322" stroke="#2980B9" stroke-width="4" opacity="0.85"/>
+          <line x1="256" y1="300" x2="256" y2="330" stroke="#2980B9" stroke-width="4" opacity="0.85"/>
+          <line x1="287" y1="294" x2="289" y2="322" stroke="#2980B9" stroke-width="4" opacity="0.85"/>
+          <!-- 飘逸垂坠的围巾尾部与流苏 -->
+          <polygon points="282,312 308,312 316,368 288,370" fill="#C0392B"/>
+          <line x1="285" y1="330" x2="312" y2="330" stroke="#2980B9" stroke-width="4" opacity="0.85"/>
+          <line x1="287" y1="350" x2="314" y2="350" stroke="#2980B9" stroke-width="4" opacity="0.85"/>
+          <line x1="298" y1="312" x2="302" y2="368" stroke="#F1C40F" stroke-width="2.5" opacity="0.75"/>
+          <!-- 流苏穗子 -->
+          <line x1="290" y1="370" x2="290" y2="378" stroke="#F1C40F" stroke-width="2"/>
+          <line x1="296" y1="370" x2="296" y2="378" stroke="#F1C40F" stroke-width="2"/>
+          <line x1="302" y1="370" x2="302" y2="378" stroke="#F1C40F" stroke-width="2"/>
+          <line x1="308" y1="370" x2="308" y2="378" stroke="#F1C40F" stroke-width="2"/>
+          <line x1="314" y1="368" x2="314" y2="376" stroke="#F1C40F" stroke-width="2"/>
+        </g>
+      `;
+    }
+
+    if (hasGoggles) {
+      accessorySvg += `
+        <!-- 赛博霓虹护目镜 -->
+        <rect x="180" y="196" width="152" height="42" rx="18" fill="#1E272E" stroke="${palette.secondary}" stroke-width="3"/>
+        <rect x="186" y="202" width="65" height="30" rx="12" fill="${palette.secondary}" opacity="0.6"/>
+        <rect x="261" y="202" width="65" height="30" rx="12" fill="${palette.secondary}" opacity="0.6"/>
+        <line x1="192" y1="210" x2="242" y2="210" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+        <line x1="267" y1="210" x2="317" y2="210" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" opacity="0.8"/>
+      `;
+    }
+
+    if (hasHat) {
+      accessorySvg += `
+        <!-- 俏皮小巫师帽 -->
+        <polygon points="256,90 220,150 292,150" fill="#2C3A47"/>
+        <ellipse cx="256" cy="150" rx="44" ry="12" fill="#3B3B98"/>
+        <polygon points="256,140 262,148 250,148" fill="#F1C40F"/>
+      `;
+    }
 
     // 情绪道具与神态
     let moodAddon = '';
@@ -693,7 +868,6 @@ export class AvatarStudio {
 
     switch (mood) {
       case 'working':
-        // 头戴式耳机 + 面前笔记本电脑 + 屏幕荧光
         moodAddon = `
           <!-- 耳机 -->
           <path d="M 160 220 A 100 100 0 0 1 352 220" fill="none" stroke="#2C3A47" stroke-width="18" stroke-linecap="round"/>
@@ -717,7 +891,6 @@ export class AvatarStudio {
         break;
 
       case 'waiting':
-        // 手捧发光水晶球 + 好奇大眼睛
         moodAddon = `
           <!-- 发光魔法水晶球 -->
           <circle cx="256" cy="350" r="42" fill="url(#crystalGrad)" opacity="0.85"/>
@@ -740,7 +913,6 @@ export class AvatarStudio {
         break;
 
       case 'happy':
-        // 怀抱金色五角星 + 弯弯眯眼笑脸 + 腮红
         moodAddon = `
           <!-- 怀抱闪耀大金星 -->
           <polygon points="256,300 270,332 305,334 278,356 287,390 256,370 225,390 234,356 207,334 242,332" fill="#FEE140" stroke="#FFA502" stroke-width="3"/>
@@ -764,7 +936,6 @@ export class AvatarStudio {
         break;
 
       case 'error':
-        // 尴尬冒汗 + 抓后脑勺小手臂 + 窘迫小表情
         moodAddon = `
           <!-- 额头大冷汗水滴 -->
           <path d="M 326 170 Q 320 185 320 192 A 8 8 0 1 0 336 192 Q 336 185 326 170 Z" fill="#74B9FF" stroke="#0984E3" stroke-width="1.5"/>
@@ -783,7 +954,6 @@ export class AvatarStudio {
 
       case 'idle':
       default:
-        // 常态待机：清澈纯真的大眼睛与恬静微笑
         eyesSvg = `
           <ellipse cx="214" cy="224" rx="11" ry="15" fill="#2F3542"/>
           <ellipse cx="298" cy="224" rx="11" ry="15" fill="#2F3542"/>
@@ -794,14 +964,13 @@ export class AvatarStudio {
           <ellipse cx="196" cy="240" rx="12" ry="6" fill="#FFB8B8" opacity="0.4"/>
           <ellipse cx="316" cy="240" rx="12" ry="6" fill="#FFB8B8" opacity="0.4"/>
         `;
-        mouthSvg = `<path d="M 246 250 Q 256 258 266 250" stroke="#2F3542" stroke-width="4" stroke-linecap="round" fill="none"/>`;
+        mouthSvg = !isDog ? `<path d="M 246 250 Q 256 258 266 250" stroke="#2F3542" stroke-width="4" stroke-linecap="round" fill="none"/>` : '';
         break;
     }
 
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
         <defs>
-          <!-- 渐变光照定义 -->
           <radialGradient id="bodyGrad" cx="35%" cy="35%" r="65%">
             <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.5"/>
             <stop offset="40%" stop-color="${palette.primary}"/>
@@ -823,39 +992,41 @@ export class AvatarStudio {
           </radialGradient>
         </defs>
 
-        <!-- 纯白摄影棚背景与底部投影 -->
+        <!-- 摄影棚白底与阴影 -->
         <rect width="512" height="512" fill="#FAF9F6"/>
         <ellipse cx="256" cy="450" rx="130" ry="24" fill="url(#shadowGrad)"/>
 
-        <!-- 角色身体 (Q 版小身体) -->
+        <!-- 角色身体 -->
         <ellipse cx="256" cy="340" rx="72" ry="68" fill="url(#bodyGrad)"/>
-        <!-- 小肚皮浅色高光区 -->
-        <ellipse cx="256" cy="346" rx="42" ry="46" fill="#FFFFFF" opacity="0.35"/>
+        <ellipse cx="256" cy="346" rx="42" ry="46" fill="${palette.highlight}" opacity="0.45"/>
 
-        <!-- 双脚/基座 -->
+        <!-- 双脚/脚掌 -->
         <ellipse cx="218" cy="405" rx="26" ry="18" fill="${palette.secondary}"/>
         <ellipse cx="294" cy="405" rx="26" ry="18" fill="${palette.secondary}"/>
 
-        <!-- 双手 (默认待机或被 moodAddon 覆盖) -->
+        <!-- 双手 (待机状态展示) -->
         ${mood === 'idle' ? `
           <ellipse cx="180" cy="336" rx="18" ry="16" fill="${palette.primary}"/>
           <ellipse cx="332" cy="336" rx="18" ry="16" fill="${palette.primary}"/>
         ` : ''}
 
-        <!-- 角色大头 (Q 版大头大眼潮玩造型) -->
+        <!-- 头部造型 -->
         <ellipse cx="256" cy="226" rx="98" ry="92" fill="url(#headGrad)"/>
 
-        <!-- 萌宠小耳朵 / 犄角 -->
-        <ellipse cx="178" cy="148" rx="22" ry="32" transform="rotate(-20 178 148)" fill="${palette.accent}"/>
-        <ellipse cx="178" cy="148" rx="12" ry="20" transform="rotate(-20 178 148)" fill="#FFFFFF" opacity="0.4"/>
-        <ellipse cx="334" cy="148" rx="22" ry="32" transform="rotate(20 334 148)" fill="${palette.accent}"/>
-        <ellipse cx="334" cy="148" rx="12" ry="20" transform="rotate(20 334 148)" fill="#FFFFFF" opacity="0.4"/>
+        <!-- 角色特定耳朵/犄角 -->
+        ${earsSvg}
 
-        <!-- 面部五官 -->
+        <!-- 角色面部腮肉与口鼻细节 -->
+        ${faceDetailsSvg}
+
+        <!-- 情绪眼神与嘴形 -->
         ${eyesSvg}
         ${mouthSvg}
 
-        <!-- 情绪姿态特定道具或动作 -->
+        <!-- 围巾/眼镜等饰品 -->
+        ${accessorySvg}
+
+        <!-- 情绪动态道具 -->
         ${moodAddon}
       </svg>
     `.trim();
