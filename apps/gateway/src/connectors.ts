@@ -485,6 +485,27 @@ export const CATALOGUE_CONNECTORS: ConnectorItem[] = [
       { name: 'figma_export_component', description: '将设计图层导出为高清图片或矢量 SVG', enabled: true }
     ]
   },
+  {
+    id: 'boardui',
+    name: 'BoardUI',
+    category: 'design',
+    description: 'React + Tailwind CSS v4 仪表盘设计系统组件库与代码生成 MCP',
+    status: 'disconnected',
+    authType: 'stdio',
+    command: 'npx',
+    args: ['-y', 'boardui@latest', 'mcp'],
+    docs: 'https://www.boardui.com',
+    color: '#3B82F6',
+    tools: [
+      { name: 'get_started', description: 'BoardUI 概览、典型流程与设计规范说明', enabled: true },
+      { name: 'list_components', description: '获取全部可安装的组件列表（免费与 Pro）', enabled: true },
+      { name: 'get_component', description: '读取组件源代码、依赖项与使用示例', enabled: true },
+      { name: 'get_usage_examples', description: '读取组件官方实战调用代码片段', enabled: true },
+      { name: 'install_components', description: '自动将组件源码写入项目并安装 npm 依赖', enabled: true },
+      { name: 'init_boardui', description: '一次性初始化 BoardUI 设计规范与主题样式', enabled: true },
+      { name: 'get_theme', description: '获取 BoardUI 设计 Token 变量与排版规格', enabled: true }
+    ]
+  },
 
   // 资产财务 (money)
   {
