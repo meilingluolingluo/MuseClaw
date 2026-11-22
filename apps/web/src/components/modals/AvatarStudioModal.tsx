@@ -534,7 +534,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
                   {studioStatus?.cloud
                     ? '已接入商用图像大模型'
-                    : '提示：若需生成超逼真/照片级 AI 画面，可在「系统设置 → 模型」配置 DashScope / OpenAI / 硅基流动 Key'}
+                    : '提示：若需生成超逼真/照片级 AI 画面，可在「系统设置 → 模型」或 .env 配置 Google (Gemini/Imagen 3) / DashScope / 硅基流动 / OpenAI Key'}
                 </span>
               </div>
 

@@ -209,10 +209,23 @@ export class AvatarStudio {
     const qwenProv = globalModelStore?.getProviderConfig?.('qwen');
     const openAiProv = globalModelStore?.getProviderConfig?.('openai');
     const siliconProv = globalModelStore?.getProviderConfig?.('siliconflow');
+    const googleProv = globalModelStore?.getProviderConfig?.('google');
 
     const envDashscopeKey = process.env.DASHSCOPE_API_KEY || qwenProv?.apiKey || '';
     const envSiliconKey = process.env.SILICONFLOW_API_KEY || siliconProv?.apiKey || '';
     const envOpenAiKey = process.env.OPENAI_API_KEY || openAiProv?.apiKey || '';
+    const envGoogleKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || googleProv?.apiKey || '';
+
+    if (envGoogleKey) {
+      return {
+        available: true,
+        provider: 'google',
+        model: googleProv?.model || 'imagen-3.0-generate-002',
+        videoModel: '',
+        apiKey: envGoogleKey,
+        baseUrl: googleProv?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta',
+      };
+    }
 
     if (envDashscopeKey) {
       return {
@@ -596,6 +609,38 @@ export class AvatarStudio {
     referencePath: string,
     index: number
   ): Promise<Buffer> {
+    if (ep.provider === 'google' && ep.apiKey) {
+      try {
+        const model = ep.model || 'imagen-3.0-generate-002';
+        const url = `${ep.baseUrl}/models/${model}:predict?key=${ep.apiKey}`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': ep.apiKey,
+          },
+          body: JSON.stringify({
+            instances: [{ prompt }],
+            parameters: {
+              sampleCount: 1,
+              aspectRatio: '1:1',
+              outputMimeType: 'image/jpeg',
+            },
+          }),
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as any;
+          const b64 = data.predictions?.[0]?.bytesBase64Encoded;
+          if (b64) return Buffer.from(b64, 'base64');
+        } else {
+          const errText = await resp.text();
+          console.warn(`[AvatarStudio] Google Imagen 3 接口响应异常 (${resp.status}):`, errText);
+        }
+      } catch (e) {
+        console.warn('[AvatarStudio] Google Imagen 3 图像接口调用失败，降级至内置生成器:', e);
+      }
+    }
+
     if ((ep.provider === 'openai' || ep.provider === 'siliconflow') && ep.apiKey) {
       try {
         const resp = await fetch(`${ep.baseUrl}/images/generations`, {
@@ -670,10 +715,13 @@ export class AvatarStudio {
     style: string,
     variantIndex = 0
   ): Promise<Buffer> {
-    // 若配置了远程图片编辑接口 (OpenAI /images/edits 或 DashScope 多模态)
-    if (ep.provider === 'openai' && ep.apiKey && fs.existsSync(baseIdlePath)) {
+    if (
+      (ep.provider === 'google' || ep.provider === 'openai' || ep.provider === 'siliconflow' || ep.provider === 'dashscope') &&
+      ep.apiKey
+    ) {
       try {
-        // 调用 OpenAI edits 或多模态指令
+        const buf = await this.renderImage(ep, prompt, baseIdlePath, variantIndex);
+        if (buf && buf.length > 0) return buf;
       } catch (e) {
         console.warn(`[AvatarStudio] 姿态 ${mood} 远程生成失败，回退内置:`, e);
       }

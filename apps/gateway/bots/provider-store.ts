@@ -32,6 +32,14 @@ export interface ModelsConfigFile {
 
 const DEFAULT_PRESETS: ModelProviderConfig[] = [
   {
+    id: 'google',
+    name: 'Google Gemini & Imagen 3',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'imagen-3.0-generate-002',
+    candidateModels: ['imagen-3.0-generate-002', 'gemini-2.0-flash', 'gemini-1.5-pro'],
+    description: 'Google 官方 Imagen 3 高清画图引擎与 Gemini 多模态旗舰'
+  },
+  {
     id: 'deepseek',
     name: 'DeepSeek 官方',
     baseUrl: 'https://api.deepseek.com/chat/completions',

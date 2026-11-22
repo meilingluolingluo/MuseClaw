@@ -139,6 +139,9 @@ export function resolveApiKey(explicitKey?: string, providerId?: string): string
   if (providerId === 'siliconflow' && process.env.SILICONFLOW_API_KEY) {
     return process.env.SILICONFLOW_API_KEY.trim();
   }
+  if ((providerId === 'google' || providerId === 'gemini') && (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)) {
+    return (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)!.trim();
+  }
   if (providerId === 'moonshot' && process.env.MOONSHOT_API_KEY) {
     return process.env.MOONSHOT_API_KEY.trim();
   }
@@ -168,6 +171,14 @@ export function resolveApiKey(explicitKey?: string, providerId?: string): string
         }
         if (providerId === 'openai') {
           const match = raw.match(/OPENAI_API_KEY\s*=\s*["']?([^"'\r\n]+)["']?/);
+          if (match && match[1]) return match[1].trim();
+        }
+        if (providerId === 'google' || providerId === 'gemini') {
+          const match = raw.match(/(?:GEMINI_API_KEY|GOOGLE_API_KEY)\s*=\s*["']?([^"'\r\n]+)["']?/);
+          if (match && match[1]) return match[1].trim();
+        }
+        if (providerId === 'siliconflow') {
+          const match = raw.match(/SILICONFLOW_API_KEY\s*=\s*["']?([^"'\r\n]+)["']?/);
           if (match && match[1]) return match[1].trim();
         }
       }
@@ -468,6 +479,35 @@ export async function testProviderConnection(config: ModelProviderConfig & { use
         ok: false,
         latencyMs: 0,
         error: probe.error || '未检测到本地正在运行的 Ollama 服务 (端口 11434 未响应)'
+      };
+    }
+  }
+
+  if (config.id === 'google') {
+    const start = Date.now();
+    const effectiveKey = resolveApiKey(config.apiKey, config.id);
+    try {
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${effectiveKey}`);
+      const latencyMs = Date.now() - start;
+      if (resp.ok) {
+        return {
+          ok: true,
+          latencyMs,
+          model: config.model || 'imagen-3.0-generate-002'
+        };
+      } else {
+        const text = await resp.text();
+        return {
+          ok: false,
+          latencyMs,
+          error: `Google API 认证或请求失败 (${resp.status}): ${text.slice(0, 160)}`
+        };
+      }
+    } catch (err: any) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        error: `连接 Google 服务异常: ${err.message}`
       };
     }
   }
