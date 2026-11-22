@@ -141,7 +141,11 @@ const connectorManager = new ConnectorManager(undefined, mcpManager);
 let tools = [...baseTools];
 
 function refreshTools() {
-  const allTools = [...baseTools, ...mcpManager.getToolDefinitions()];
+  const allTools = [
+    ...baseTools,
+    ...mcpManager.getToolDefinitions(),
+    ...connectorManager.getToolDefinitions()
+  ];
   tools = allTools.filter(t => connectorManager.isToolEnabled(t.name));
   return tools;
 }

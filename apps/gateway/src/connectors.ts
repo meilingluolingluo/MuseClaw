@@ -1089,4 +1089,238 @@ export class ConnectorManager {
     }
     return true;
   }
+
+  /**
+   * 获取所有已接入生态连接器的真实可执行 ToolDefinition 列表
+   */
+  public getToolDefinitions(): ToolDefinition[] {
+    const defs: ToolDefinition[] = [];
+
+    // 1. Discord 连接器真实执行器
+    const discordRecord = this.records.get('discord');
+    if (discordRecord && discordRecord.status === 'connected') {
+      defs.push({
+        name: 'discord_send_channel_message',
+        description: '向已连接的 Discord 频道或 Webhook 发送消息通知与嵌入卡片',
+        parameters: {
+          type: 'object',
+          properties: {
+            content: { type: 'string', description: '消息正文文本（支持 Markdown 语法与 @ 用户标签）' },
+            channel_id: { type: 'string', description: '目标频道 ID（若使用 Webhook 则可省略）' },
+            embed_title: { type: 'string', description: '可选的富文本嵌入卡片标题' },
+            embed_description: { type: 'string', description: '可选的卡片正文说明' }
+          },
+          required: ['content']
+        },
+        execute: async (args: Record<string, unknown>) => {
+          const cred = discordRecord.key || discordRecord.token || discordRecord.url;
+          if (!cred) {
+            throw new Error('未配置 Discord 凭据，请在「设置 -> 连接器 -> Discord」填入 Bot Token 或频道 Webhook URL');
+          }
+
+          const content = String(args.content || '').trim();
+          if (!content) throw new Error('消息正文 content 不能为空');
+
+          // Webhook 模式发送
+          if (cred.startsWith('https://discord.com/api/webhooks') || cred.startsWith('https://discordapp.com/api/webhooks')) {
+            const bodyPayload: any = { content };
+            if (args.embed_title || args.embed_description) {
+              bodyPayload.embeds = [{
+                title: args.embed_title ? String(args.embed_title) : undefined,
+                description: args.embed_description ? String(args.embed_description) : undefined,
+                color: 0x5865F2,
+                timestamp: new Date().toISOString()
+              }];
+            }
+            const res = await fetch(cred, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(bodyPayload)
+            });
+            if (!res.ok) {
+              const err = await res.text();
+              throw new Error(`Discord Webhook 发送失败 (HTTP ${res.status}): ${err}`);
+            }
+            return {
+              success: true,
+              mode: 'webhook',
+              content,
+              message: '已成功向 Discord 频道推送消息'
+            };
+          }
+
+          // Bot Token 模式发送
+          const channelId = String(args.channel_id || discordRecord.env?.DISCORD_CHANNEL_ID || '').trim();
+          if (!channelId) {
+            throw new Error('使用 Discord Bot 发信必须指定目标频道 channel_id，请在参数中提供');
+          }
+
+          const token = cred.startsWith('Bot ') ? cred : `Bot ${cred}`;
+          const bodyPayload: any = { content };
+          if (args.embed_title || args.embed_description) {
+            bodyPayload.embeds = [{
+              title: args.embed_title ? String(args.embed_title) : undefined,
+              description: args.embed_description ? String(args.embed_description) : undefined,
+              color: 0x5865F2
+            }];
+          }
+
+          const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+            method: 'POST',
+            headers: {
+              'Authorization': token,
+              'Content-Type': 'application/json',
+              'User-Agent': 'MuseClaw/0.1.0'
+            },
+            body: JSON.stringify(bodyPayload)
+          });
+
+          if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`Discord Bot 消息发送失败 (HTTP ${res.status}): ${err}`);
+          }
+
+          const json: any = await res.json();
+          return {
+            success: true,
+            mode: 'bot',
+            messageId: json.id,
+            channelId: json.channel_id,
+            content: json.content,
+            message: '已成功向 Discord 频道发送消息'
+          };
+        }
+      });
+    }
+
+    // 2. GitHub 连接器真实执行器
+    const githubRecord = this.records.get('github');
+    if (githubRecord && githubRecord.status === 'connected') {
+      defs.push({
+        name: 'github_search_repositories',
+        description: '在 GitHub 上搜索代码仓库',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'GitHub 搜索查询词' },
+            per_page: { type: 'number', description: '返回结果数量（默认 5）' }
+          },
+          required: ['query']
+        },
+        execute: async (args: Record<string, unknown>) => {
+          const token = githubRecord.key || githubRecord.token;
+          const q = encodeURIComponent(String(args.query || ''));
+          const perPage = Number(args.per_page) || 5;
+          const headers: Record<string, string> = { 'User-Agent': 'MuseClaw/0.1.0' };
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          const res = await fetch(`https://api.github.com/search/repositories?q=${q}&per_page=${perPage}`, { headers });
+          if (!res.ok) throw new Error(`GitHub 搜索失败: HTTP ${res.status}`);
+          const data: any = await res.json();
+          return {
+            totalCount: data.total_count,
+            items: (data.items || []).map((r: any) => ({
+              fullName: r.full_name,
+              description: r.description,
+              stars: r.stargazers_count,
+              url: r.html_url
+            }))
+          };
+        }
+      });
+
+      defs.push({
+        name: 'github_list_issues',
+        description: '拉取指定 GitHub 仓库的 Issue 列表',
+        parameters: {
+          type: 'object',
+          properties: {
+            owner: { type: 'string', description: '仓库所有者或组织' },
+            repo: { type: 'string', description: '仓库名称' },
+            state: { type: 'string', enum: ['open', 'closed', 'all'], description: '状态（默认 open）' }
+          },
+          required: ['owner', 'repo']
+        },
+        execute: async (args: Record<string, unknown>) => {
+          const token = githubRecord.key || githubRecord.token;
+          const owner = String(args.owner);
+          const repo = String(args.repo);
+          const state = String(args.state || 'open');
+          const headers: Record<string, string> = { 'User-Agent': 'MuseClaw/0.1.0' };
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+          const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues?state=${state}&per_page=10`, { headers });
+          if (!res.ok) throw new Error(`GitHub 获取 Issue 失败: HTTP ${res.status}`);
+          const issues: any = await res.json();
+          return {
+            issues: (issues || []).map((i: any) => ({
+              number: i.number,
+              title: i.title,
+              state: i.state,
+              url: i.html_url,
+              user: i.user?.login
+            }))
+          };
+        }
+      });
+    }
+
+    // 3. Tavily 连接器真实执行器
+    const tavilyRecord = this.records.get('tavily');
+    if (tavilyRecord && tavilyRecord.status === 'connected') {
+      defs.push({
+        name: 'tavily_search',
+        description: '使用 Tavily 智能检索引擎搜索互联网最新信息与网页摘要',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '搜索关键词或问题' },
+            search_depth: { type: 'string', enum: ['basic', 'advanced'], description: '检索深度' }
+          },
+          required: ['query']
+        },
+        execute: async (args: Record<string, unknown>) => {
+          const key = tavilyRecord.key;
+          if (!key) throw new Error('未配置 Tavily API Key');
+          const res = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              api_key: key,
+              query: args.query,
+              search_depth: args.search_depth || 'basic'
+            })
+          });
+          if (!res.ok) throw new Error(`Tavily 检索失败: HTTP ${res.status}`);
+          return res.json();
+        }
+      });
+    }
+
+    // 4. 高德地图连接器真实执行器
+    const amapRecord = this.records.get('amap');
+    if (amapRecord && amapRecord.status === 'connected') {
+      defs.push({
+        name: 'amap_weather',
+        description: '查询国内城市的实时天气与未来天气预报',
+        parameters: {
+          type: 'object',
+          properties: {
+            city: { type: 'string', description: '城市名称或 Adcode 编码，例如 "北京" 或 "310000"' },
+            extensions: { type: 'string', enum: ['base', 'all'], description: '气象类型: base 为实况，all 为预报' }
+          },
+          required: ['city']
+        },
+        execute: async (args: Record<string, unknown>) => {
+          const key = amapRecord.key;
+          if (!key) throw new Error('未配置高德地图 API Key');
+          const city = encodeURIComponent(String(args.city));
+          const extensions = args.extensions || 'base';
+          const res = await fetch(`https://restapi.amap.com/v3/weather/weatherInfo?key=${key}&city=${city}&extensions=${extensions}`);
+          if (!res.ok) throw new Error(`高德天气查询失败: HTTP ${res.status}`);
+          return res.json();
+        }
+      });
+    }
+
+    return defs;
+  }
 }
