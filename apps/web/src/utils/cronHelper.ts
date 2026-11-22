@@ -510,3 +510,231 @@ function formatDateTime(d: Date): string {
   const dow = WEEKDAY_NAMES[d.getDay()];
   return `${year}-${month}-${day} (周${dow}) ${hour}:${min}`;
 }
+
+const CN_NUM_MAP: Record<string, number> = {
+  '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
+  '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+};
+
+function parseCnOrArabicNum(raw: string): number | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  if (s === '十') return 10;
+  if (s.startsWith('十') && s.length === 2) {
+    const u = CN_NUM_MAP[s[1]];
+    return u !== undefined ? 10 + u : null;
+  }
+  if (s.endsWith('十') && s.length === 2) {
+    const tens = CN_NUM_MAP[s[0]];
+    return tens !== undefined ? tens * 10 : null;
+  }
+  if (s.length === 3 && s[1] === '十') {
+    const tens = CN_NUM_MAP[s[0]];
+    const unit = CN_NUM_MAP[s[2]];
+    if (tens !== undefined && unit !== undefined) return tens * 10 + unit;
+  }
+  return CN_NUM_MAP[s] ?? null;
+}
+
+export function parseNaturalLanguageToCron(rawInput: string): {
+  cron: string;
+  kind: 'cron' | 'every' | 'at';
+  description: string;
+} | null {
+  if (!rawInput || !rawInput.trim()) return null;
+  const input = rawInput.trim();
+
+  // 1. 若直接是标准 Cron 或 @every / @at 格式
+  if (input.startsWith('@every ') || input.startsWith('@at ') || ['@hourly', '@daily', '@weekly', '@monthly'].includes(input)) {
+    const kind = input.startsWith('@every ') ? 'every' : input.startsWith('@at ') ? 'at' : 'cron';
+    return { cron: input, kind, description: formatCronZh(input) };
+  }
+  const parts = input.split(/\s+/);
+  if (parts.length === 5 && !parts.some((p) => /[\u4e00-\u9fa5]/.test(p))) {
+    return { cron: input, kind: 'cron', description: formatCronZh(input) };
+  }
+
+  // 2. 匹配预设别名
+  const matchedPreset = SCHEDULE_PRESETS.find((p) =>
+    input === p.label || input.startsWith(p.label) || input === p.description
+  );
+  if (matchedPreset) {
+    return {
+      cron: matchedPreset.cronExpr,
+      kind: matchedPreset.kind,
+      description: formatCronZh(matchedPreset.cronExpr),
+    };
+  }
+
+  // 3. 间隔循环识别
+  if (/(?:每|每隔)\s*半小时/i.test(input)) {
+    return { cron: '*/30 * * * *', kind: 'every', description: '每隔 30 分钟执行一次' };
+  }
+
+  const minuteIntervalMatch = /(?:每|每隔)\s*(\d+|[一二两三四五六七八九十]+)\s*(?:分钟|分|mins?|m\b)/i.exec(input);
+  if (minuteIntervalMatch) {
+    const num = parseCnOrArabicNum(minuteIntervalMatch[1]);
+    if (num && num > 0) {
+      if ([1, 2, 3, 5, 10, 15, 20, 30].includes(num)) {
+        return { cron: `*/${num} * * * *`, kind: 'every', description: `每隔 ${num} 分钟执行一次` };
+      }
+      return { cron: `@every ${num}m`, kind: 'every', description: `每隔 ${num} 分钟执行一次` };
+    }
+  }
+
+  if (/(?:每小时整点|每小时执行|每隔1小时|每1小时|每小时\b)/i.test(input)) {
+    return { cron: '0 * * * *', kind: 'cron', description: '每小时整点执行' };
+  }
+
+  const hourIntervalMatch = /(?:每|每隔)\s*(\d+|[一二两三四五六七八九十]+)\s*(?:小时|个半小时|小时整|hours?|h\b)/i.exec(input);
+  if (hourIntervalMatch) {
+    const num = parseCnOrArabicNum(hourIntervalMatch[1]);
+    if (num && num > 0) {
+      if ([2, 3, 4, 6, 8, 12].includes(num)) {
+        return { cron: `0 */${num} * * *`, kind: 'cron', description: `每隔 ${num} 小时整点执行` };
+      }
+      return { cron: `@every ${num}h`, kind: 'every', description: `每隔 ${num} 小时周期执行` };
+    }
+  }
+
+  // 4. 定时时刻提取 (时、分)
+  let extractedHour: number | null = null;
+  let extractedMinute: number | null = null;
+
+  const colonTimeMatch = /(\d{1,2})[:：](\d{1,2})/.exec(input);
+  if (colonTimeMatch) {
+    extractedHour = parseInt(colonTimeMatch[1], 10);
+    extractedMinute = parseInt(colonTimeMatch[2], 10);
+  } else {
+    const pointHalfMatch = /(\d{1,2}|[一二两三四五六七八九十]+)\s*点\s*半/.exec(input);
+    if (pointHalfMatch) {
+      extractedHour = parseCnOrArabicNum(pointHalfMatch[1]);
+      extractedMinute = 30;
+    } else {
+      const pointMinuteMatch = /(\d{1,2}|[一二两三四五六七八九十]+)\s*点\s*(\d{1,2}|[一二两三四五六七八九十]+)\s*分?/.exec(input);
+      if (pointMinuteMatch) {
+        extractedHour = parseCnOrArabicNum(pointMinuteMatch[1]);
+        extractedMinute = parseCnOrArabicNum(pointMinuteMatch[2]);
+      } else {
+        const pointOnlyMatch = /(\d{1,2}|[一二两三四五六七八九十]+)\s*点/.exec(input);
+        if (pointOnlyMatch) {
+          extractedHour = parseCnOrArabicNum(pointOnlyMatch[1]);
+          extractedMinute = 0;
+        }
+      }
+    }
+  }
+
+  // 下午/傍晚/晚上修正
+  const isPm = /(?:下午|傍晚|晚上|夜间|下班)/.test(input);
+  if (isPm && extractedHour !== null && extractedHour < 12 && extractedHour > 0) {
+    extractedHour += 12;
+  }
+
+  // 默认常用时间推测
+  if (extractedHour === null) {
+    if (/(?:下班|傍晚|晚间)/.test(input)) {
+      extractedHour = 18;
+      extractedMinute = 0;
+    } else if (/(?:早晨|早上|上午|晨会)/.test(input)) {
+      extractedHour = 9;
+      extractedMinute = 0;
+    } else if (/(?:中午|午间)/.test(input)) {
+      extractedHour = 12;
+      extractedMinute = 0;
+    } else if (/(?:午夜|半夜|零点)/.test(input)) {
+      extractedHour = 0;
+      extractedMinute = 0;
+    } else {
+      extractedHour = 9;
+      extractedMinute = 0;
+    }
+  }
+  if (extractedMinute === null) {
+    extractedMinute = 0;
+  }
+
+  extractedHour = Math.max(0, Math.min(23, extractedHour));
+  extractedMinute = Math.max(0, Math.min(59, extractedMinute));
+
+  // 5. 日期与周期抽取
+  let dowPart = '*';
+  let domPart = '*';
+
+  if (/(?:工作日|周一至周五|周一到周五|礼拜一至礼拜五)/.test(input)) {
+    dowPart = '1-5';
+  } else if (/(?:周末|双休日)/.test(input)) {
+    dowPart = '0,6';
+  } else if (/(?:每周|每星期|周|星期|礼拜)/.test(input)) {
+    const dayMap: Record<string, number> = {
+      '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0, '七': 0,
+      '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '0': 0, '7': 0,
+    };
+    const matchedDays = new Set<number>();
+    const re = /(?:周|星期|礼拜)\s*([一二三四五六日天1-7])/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(input)) !== null) {
+      const d = dayMap[m[1]];
+      if (d !== undefined) matchedDays.add(d);
+    }
+    if (matchedDays.size > 0) {
+      dowPart = Array.from(matchedDays).sort((a, b) => a - b).join(',');
+    }
+  }
+
+  const monthDayMatch = /(?:每月|每个月)\s*(\d{1,2}|[一二两三四五六七八九十]+)\s*(?:号|日)/.exec(input);
+  if (monthDayMatch) {
+    const d = parseCnOrArabicNum(monthDayMatch[1]);
+    if (d && d >= 1 && d <= 31) {
+      domPart = d.toString();
+    }
+  } else if (/(?:月初|每月1号|每月1日)/.test(input)) {
+    domPart = '1';
+  } else if (/(?:月中|每月15号|每月15日)/.test(input)) {
+    domPart = '15';
+  } else if (/(?:月末|最后一天|每月31号)/.test(input)) {
+    domPart = '31';
+  }
+
+  const cron = `${extractedMinute} ${extractedHour} ${domPart} * ${dowPart}`;
+  return {
+    cron,
+    kind: 'cron',
+    description: formatCronZh(cron),
+  };
+}
+
+export function parseNaturalLanguageRoutine(text: string): {
+  name: string;
+  instructions: string;
+  cronExpr: string;
+  scheduleKind: 'cron' | 'every' | 'at';
+  humanZh: string;
+} {
+  const parsedCron = parseNaturalLanguageToCron(text) || {
+    cron: '0 9 * * 1-5',
+    kind: 'cron' as const,
+    description: '工作日 (周一至周五) 上午 09:00',
+  };
+
+  // 提炼标题
+  let cleanName = text
+    .replace(/(?:每个?工作日|每天|每周[一二三四五六日天1-7、,]*|每月\d*号?|每隔\d*分钟|每半小时|每小时整点|早晨|早上|上午|中午|下午|傍晚|晚上|夜间|\d{1,2}[:：]\d{1,2}|\d{1,2}点半?)/g, '')
+    .trim();
+
+  if (!cleanName || cleanName.length < 2) {
+    cleanName = '例行自动化巡检任务';
+  }
+  if (cleanName.length > 28) {
+    cleanName = cleanName.slice(0, 26) + '...';
+  }
+
+  return {
+    name: cleanName,
+    instructions: text,
+    cronExpr: parsedCron.cron,
+    scheduleKind: parsedCron.kind,
+    humanZh: parsedCron.description,
+  };
+}

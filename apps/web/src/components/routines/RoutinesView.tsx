@@ -15,13 +15,14 @@ import {
   Edit3,
   Bot as BotIcon,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import type { Routine, RoutineRun, ScheduleKind, DeliverTarget, OverlapPolicy } from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
 import { formatTime } from '../../utils/format';
-import { formatCronZh } from '../../utils/cronHelper';
+import { formatCronZh, parseNaturalLanguageRoutine } from '../../utils/cronHelper';
 import { ToolTrace } from '../chat/ToolTrace';
 import { SchedulePicker } from './SchedulePicker';
 
@@ -54,6 +55,7 @@ export const RoutinesView: React.FC = () => {
   const [formOverlap, setFormOverlap] = useState<OverlapPolicy>('skip');
   const [formDeleteAfterRun, setFormDeleteAfterRun] = useState(false);
   const [formTimeoutSeconds, setFormTimeoutSeconds] = useState(300);
+  const [aiQuickPrompt, setAiQuickPrompt] = useState('');
 
   const loadRoutines = async () => {
     try {
@@ -156,6 +158,7 @@ export const RoutinesView: React.FC = () => {
     setFormOverlap('skip');
     setFormDeleteAfterRun(false);
     setFormTimeoutSeconds(300);
+    setAiQuickPrompt('');
     setModalTab('basic');
     setIsModalOpen(true);
   };
@@ -173,8 +176,24 @@ export const RoutinesView: React.FC = () => {
     setFormOverlap(r.overlap || 'skip');
     setFormDeleteAfterRun(Boolean(r.deleteAfterRun));
     setFormTimeoutSeconds(r.timeoutSeconds || 300);
+    setAiQuickPrompt('');
     setModalTab('basic');
     setIsModalOpen(true);
+  };
+
+  // AI 自然语言一句话提炼并填入任务
+  const handleAiQuickFill = (presetText?: string) => {
+    const text = presetText || aiQuickPrompt;
+    if (!text.trim()) {
+      showToast('请输入自然语言任务描述', 'warning');
+      return;
+    }
+    const result = parseNaturalLanguageRoutine(text.trim());
+    setFormName(result.name);
+    setFormPrompt(result.instructions);
+    setFormCron(result.cronExpr);
+    setFormScheduleKind(result.scheduleKind);
+    showToast(`✨ AI 已智能提炼并填入：${result.humanZh}`, 'success');
   };
 
   // 提交保存（新建或编辑）
@@ -713,6 +732,69 @@ export const RoutinesView: React.FC = () => {
         }
       >
         <div className="routine-modal-container">
+          {/* AI 一句话智能速建 (仅在新建任务时展示) */}
+          {!editingRoutineId && (
+            <div className="routine-ai-magic-bar">
+              <div className="routine-ai-magic-header">
+                <span className="routine-ai-sparkle-pill">
+                  <Sparkles size={12} /> AI 智能自然语言速建
+                </span>
+                <span className="routine-ai-magic-hint">
+                  输入大白话，AI 自动提炼任务名称、执行指令与调度周期
+                </span>
+              </div>
+              <div className="routine-ai-magic-input-row">
+                <input
+                  type="text"
+                  placeholder="例如：每个工作日早上9点巡检服务器系统资源与各关键服务，汇总异常"
+                  value={aiQuickPrompt}
+                  onChange={(e) => setAiQuickPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAiQuickFill();
+                  }}
+                  className="routine-ai-magic-input"
+                />
+                <button
+                  type="button"
+                  className="btn-primary routine-ai-magic-btn"
+                  onClick={() => handleAiQuickFill()}
+                >
+                  <Sparkles size={13} /> 智能解析填入
+                </button>
+              </div>
+              <div className="routine-ai-magic-chips">
+                <span className="routine-ai-chips-label">速填范例:</span>
+                <button
+                  type="button"
+                  className="routine-ai-chip-btn"
+                  onClick={() =>
+                    handleAiQuickFill('工作日早晨9点巡检工作站系统资源与各关键服务，汇总异常并生成结论')
+                  }
+                >
+                  💼 工作日系统巡检
+                </button>
+                <button
+                  type="button"
+                  className="routine-ai-chip-btn"
+                  onClick={() =>
+                    handleAiQuickFill('每隔30分钟监控一次关键服务与网络端口状态，记录异常')
+                  }
+                >
+                  ⚡ 30分钟高频监控
+                </button>
+                <button
+                  type="button"
+                  className="routine-ai-chip-btn"
+                  onClick={() =>
+                    handleAiQuickFill('每周五傍晚18点汇总本周团队日志与开发进展，生成周报')
+                  }
+                >
+                  📋 周五下班周报汇总
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Tab 导航切换 */}
           <div className="routine-modal-tabs">
             <button
@@ -727,7 +809,7 @@ export const RoutinesView: React.FC = () => {
               onClick={() => setModalTab('schedule')}
               className={`routine-modal-tab-btn ${modalTab === 'schedule' ? 'is-active' : ''}`}
             >
-              2. 调度周期与预设
+              2. 调度周期 (AI 语言识别)
             </button>
             <button
               type="button"
