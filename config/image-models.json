@@ -1,0 +1,71 @@
+{
+  "activeProviderId": "siliconflow",
+  "providers": [
+    {
+      "id": "siliconflow",
+      "name": "硅基流动 (SiliconFlow)",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "model": "Kwai-Kolors/Kolors",
+      "candidateModels": [
+        "Kwai-Kolors/Kolors",
+        "Tongyi-MAI/Z-Image-Turbo",
+        "Tongyi-MAI/Z-Image",
+        "Qwen/Qwen-Image",
+        "OpenMOSS-Team/MOSS-Image",
+        "black-forest-labs/FLUX.1-schnell"
+      ],
+      "description": "国内顶尖云端生图平台，支持 Kolors、Z-Image 与 Qwen-Image 毫秒级极速渲染",
+      "enabled": true
+    },
+    {
+      "id": "google",
+      "name": "Google Gemini & Imagen 3",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "model": "gemini-2.5-flash-image",
+      "candidateModels": [
+        "gemini-2.5-flash-image",
+        "gemini-3.1-flash-image",
+        "gemini-3-pro-image",
+        "imagen-3.0-generate-002"
+      ],
+      "description": "Google 官方 Imagen 3 高清画图引擎与 Gemini 多模态生图（需在 Google AI Studio 关联结算账号）",
+      "enabled": true
+    },
+    {
+      "id": "dashscope",
+      "name": "阿里灵积 / 通义万相",
+      "baseUrl": "https://dashscope.aliyuncs.com/api/v1",
+      "model": "qwen-image-3.0",
+      "candidateModels": [
+        "qwen-image-3.0",
+        "wanx-v1"
+      ],
+      "description": "阿里巴巴官方通义万相多模态绘图与动作合成引擎",
+      "enabled": true
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI DALL-E",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "dall-e-3",
+      "candidateModels": [
+        "dall-e-3",
+        "dall-e-2"
+      ],
+      "description": "OpenAI 官方 DALL-E 3 高清图像生成引擎",
+      "enabled": true
+    },
+    {
+      "id": "builtin",
+      "name": "内置离线矢量引擎 (Built-in)",
+      "baseUrl": "local://builtin",
+      "model": "museclaw-avatar-v1",
+      "candidateModels": [
+        "museclaw-avatar-v1"
+      ],
+      "description": "无需联网与 API Key，基于自适应角色算法本地秒级生成精美 SVG/WebP 形象",
+      "enabled": true
+    }
+  ],
+  "updatedAt": 1795355134934
+}

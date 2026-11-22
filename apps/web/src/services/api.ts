@@ -143,6 +143,20 @@ export const api = {
     }),
   getMeshNodes: () => request<any[]>('/api/mesh/nodes'),
 
+  // Image Generation Models (独立生图模型管理)
+  getImageModelsConfig: () =>
+    request<{ activeProviderId: string; providers: any[] }>('/api/avatar/models/config'),
+  saveImageModelsConfig: (data: { activeProviderId?: string; provider?: any }) =>
+    request<{ ok: boolean; activeProviderId: string }>('/api/avatar/models/config', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  testImageModel: (data: { id: string; model?: string; apiKey?: string; baseUrl?: string }) =>
+    request<{ ok: boolean; latencyMs: number; error?: string; models?: string[] }>('/api/avatar/models/test', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Goals
   getGoals: (filter?: { category?: string; status?: string }) => {
     const params = new URLSearchParams();

@@ -33,6 +33,7 @@ const ArtifactsView = lazy(() =>
 );
 
 import { ModelSettingsModal } from './components/modals/ModelSettingsModal';
+import { ImageModelSettingsModal } from './components/modals/ImageModelSettingsModal';
 import { AddMachineModal } from './components/modals/AddMachineModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { BotProfileModal } from './components/modals/BotProfileModal';
@@ -171,6 +172,7 @@ export const App: React.FC = () => {
 
       {/* Modals & Toasts */}
       <ModelSettingsModal />
+      <ImageModelSettingsModal />
       <AddMachineModal />
       <AuthModal />
       <BotProfileModal />

@@ -13,6 +13,7 @@ import {
   Palette,
   Play,
   RotateCcw,
+  Settings,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { BotAvatar } from '../common/BotAvatar';
@@ -100,13 +101,19 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
   onApplied,
   zIndex,
 }) => {
-  const { activeBot, showToast, loadBots } = useApp();
+  const { activeBot, showToast, loadBots, isImageModelModalOpen, setIsImageModelModalOpen } = useApp();
   const currentBot = targetBot || activeBot;
 
   const [activeTab, setActiveTab] = useState<'create' | 'presets' | 'custom'>('create');
   const [studioStatus, setStudioStatus] = useState<AvatarStudioView | null>(null);
   const [stageMood, setStageMood] = useState<AvatarMood>('idle');
   const [isAutoCycle, setIsAutoCycle] = useState(false);
+
+  useEffect(() => {
+    if (!isImageModelModalOpen) {
+      fetchStatus();
+    }
+  }, [isImageModelModalOpen]);
 
   // AI 创作表单状态
   const [description, setDescription] = useState('');
@@ -511,31 +518,67 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
           {/* Tab 1: AI 智能创作 */}
           {activeTab === 'create' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 }}>
-              {/* 绘图引擎状态提示栏 */}
+              {/* 独立生图引擎状态指示栏 & 快捷配置入口 */}
               <div
                 style={{
-                  padding: '9px 12px',
+                  padding: '10px 14px',
                   borderRadius: '10px',
-                  background: studioStatus?.cloud ? 'rgba(59, 130, 246, 0.08)' : 'rgba(245, 158, 11, 0.08)',
-                  border: studioStatus?.cloud ? '1px solid rgba(59, 130, 246, 0.25)' : '1px solid rgba(245, 158, 11, 0.25)',
-                  fontSize: '11.5px',
-                  color: studioStatus?.cloud ? '#2563eb' : '#b45309',
+                  background: studioStatus?.cloud ? 'rgba(139, 92, 246, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                  border: studioStatus?.cloud ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)',
+                  fontSize: '12px',
+                  color: studioStatus?.cloud ? '#7c3aed' : '#b45309',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: '8px',
+                  gap: '10px',
                 }}
               >
-                <span>
-                  {studioStatus?.cloud
-                    ? `⚡ 绘图引擎: 云端大模型 (${studioStatus?.provider} · ${studioStatus?.imageModel})`
-                    : '🎨 绘图引擎: 智能自适应矢量引擎 (离线本地绘图模式)'}
-                </span>
-                <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
-                  {studioStatus?.cloud
-                    ? '已接入商用图像大模型'
-                    : '提示：若需生成超逼真/照片级 AI 画面，可在「系统设置 → 模型」或 .env 配置 Google (Gemini/Imagen 3) / DashScope / 硅基流动 / OpenAI Key'}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 600 }}>
+                      {studioStatus?.cloud
+                        ? `⚡ 绘图引擎: ${studioStatus?.provider} (${studioStatus?.imageModel})`
+                        : '🎨 绘图引擎: 智能自适应矢量引擎 (离线本地绘图模式)'}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        padding: '1px 6px',
+                        borderRadius: '10px',
+                        background: studioStatus?.cloud ? 'rgba(139, 92, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {studioStatus?.cloud ? '商业云端' : '本地离线'}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
+                    {studioStatus?.cloud
+                      ? '已独立连接专用生图大模型，与对话模型完全隔离'
+                      : '提示：可随时点击右侧按钮连接硅基流动、Google 或通义万相'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsImageModelModalOpen(true)}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    background: '#8b5cf6',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 1px 3px rgba(139, 92, 246, 0.3)',
+                  }}
+                >
+                  <Settings size={13} /> 配置生图引擎
+                </button>
               </div>
 
               {/* AI 灵感预设卡片 (4 款代表性风格效果预览) */}

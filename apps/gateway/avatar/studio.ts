@@ -12,6 +12,7 @@ import type {
 } from '@museclaw/protocol';
 import type { BotRegistry } from '../bots/registry.ts';
 import { globalModelStore } from '../bots/provider-store.ts';
+import { globalImageModelStore } from './image-provider-store.ts';
 import { resolveApiKey } from '../../../packages/sandbox-core/src/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -207,57 +208,15 @@ export class AvatarStudio {
     apiKey: string;
     baseUrl: string;
   } {
-    const qwenProv = globalModelStore?.getProviderConfig?.('qwen');
-    const openAiProv = globalModelStore?.getProviderConfig?.('openai');
-    const siliconProv = globalModelStore?.getProviderConfig?.('siliconflow');
-    const googleProv = globalModelStore?.getProviderConfig?.('google');
-
-    const envGoogleKey = resolveApiKey(googleProv?.apiKey, 'google');
-    const envDashscopeKey = resolveApiKey(qwenProv?.apiKey, 'dashscope');
-    const envSiliconKey = resolveApiKey(siliconProv?.apiKey, 'siliconflow');
-    const envOpenAiKey = resolveApiKey(openAiProv?.apiKey, 'openai');
-
-    if (envGoogleKey) {
+    const active = globalImageModelStore.getActiveProvider();
+    if (active.id !== 'builtin' && active.effectiveKey) {
       return {
         available: true,
-        provider: 'google',
-        model: googleProv?.model || 'gemini-2.5-flash-image',
+        provider: active.id,
+        model: active.model,
         videoModel: '',
-        apiKey: envGoogleKey,
-        baseUrl: googleProv?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta',
-      };
-    }
-
-    if (envDashscopeKey) {
-      return {
-        available: true,
-        provider: 'dashscope',
-        model: 'qwen-image-3.0',
-        videoModel: 'wan2.2-i2v-flash',
-        apiKey: envDashscopeKey,
-        baseUrl: 'https://dashscope.aliyuncs.com/api/v1',
-      };
-    }
-
-    if (envSiliconKey) {
-      return {
-        available: true,
-        provider: 'siliconflow',
-        model: 'black-forest-labs/FLUX.1-schnell',
-        videoModel: '',
-        apiKey: envSiliconKey,
-        baseUrl: 'https://api.siliconflow.cn/v1',
-      };
-    }
-
-    if (envOpenAiKey) {
-      return {
-        available: true,
-        provider: 'openai',
-        model: 'dall-e-3',
-        videoModel: '',
-        apiKey: envOpenAiKey,
-        baseUrl: 'https://api.openai.com/v1',
+        apiKey: active.effectiveKey,
+        baseUrl: active.baseUrl
       };
     }
 
@@ -388,7 +347,7 @@ export class AvatarStudio {
     const ep = this.getImageEndpointConfig();
     const sessionDir = path.join(this.sessionsDir, session.id);
 
-    const tasks = Array.from({ length: AVATAR_CANDIDATES }).map(async (_, index) => {
+    for (let index = 0; index < AVATAR_CANDIDATES; index++) {
       try {
         const prompt = this.buildPrompt(session.description, index, session.style);
         const imgBuffer = await this.renderImage(ep, prompt, session.reference, index);
@@ -406,9 +365,7 @@ export class AvatarStudio {
         session.errors.push(`候选图 ${index + 1}: ${err.message || err}`);
         this.notify();
       }
-    });
-
-    await Promise.allSettled(tasks);
+    }
 
     if (session.candidates.some((c) => c !== null)) {
       session.stage = 'choose';
@@ -660,7 +617,7 @@ export class AvatarStudio {
       }
     }
 
-    if ((ep.provider === 'openai' || ep.provider === 'siliconflow') && ep.apiKey) {
+    if (ep.provider === 'siliconflow' && ep.apiKey) {
       try {
         const resp = await fetch(`${ep.baseUrl}/images/generations`, {
           method: 'POST',
@@ -669,11 +626,44 @@ export class AvatarStudio {
             Authorization: `Bearer ${ep.apiKey}`,
           },
           body: JSON.stringify({
-            model: ep.model || (ep.provider === 'siliconflow' ? 'black-forest-labs/FLUX.1-schnell' : 'dall-e-3'),
+            model: ep.model || 'Kwai-Kolors/Kolors',
             prompt,
-            ...(ep.provider === 'siliconflow'
-              ? { image_size: '1024x1024', batch_size: 1 }
-              : { n: 1, size: '1024x1024', response_format: 'b64_json' }),
+            image_size: '1024x1024',
+            batch_size: 1
+          }),
+        });
+        if (resp.ok) {
+          const data = (await resp.json()) as any;
+          const url = data.images?.[0]?.url || data.data?.[0]?.url;
+          if (url) {
+            const imgRes = await fetch(url);
+            return Buffer.from(await imgRes.arrayBuffer());
+          }
+          const b64 = data.images?.[0]?.b64_json || data.data?.[0]?.b64_json;
+          if (b64) return Buffer.from(b64, 'base64');
+        } else {
+          const errText = await resp.text();
+          console.warn(`[AvatarStudio] SiliconFlow 图像接口异常 (${resp.status}):`, errText.slice(0, 200));
+        }
+      } catch (e) {
+        console.warn(`[AvatarStudio] SiliconFlow 图像接口调用失败，降级至内置生成器:`, e);
+      }
+    }
+
+    if (ep.provider === 'openai' && ep.apiKey) {
+      try {
+        const resp = await fetch(`${ep.baseUrl}/images/generations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${ep.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: ep.model || 'dall-e-3',
+            prompt,
+            n: 1,
+            size: '1024x1024',
+            response_format: 'b64_json',
           }),
         });
         if (resp.ok) {
@@ -687,7 +677,7 @@ export class AvatarStudio {
           }
         }
       } catch (e) {
-        console.warn(`[AvatarStudio] ${ep.provider} 图像接口调用失败，降级至内置生成器:`, e);
+        console.warn(`[AvatarStudio] OpenAI 图像接口调用失败，降级至内置生成器:`, e);
       }
     }
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import { ProviderIcon } from '../../utils/icons';
-import { Cpu, Laptop, AlertCircle } from 'lucide-react';
+import { Cpu, Laptop, AlertCircle, Palette } from 'lucide-react';
 import { api } from '../../services/api';
 import type { ModelProvider } from '../../types';
 
@@ -10,6 +10,8 @@ export const ModelSettingsModal: React.FC = () => {
   const {
     isModelModalOpen,
     setIsModelModalOpen,
+    isImageModelModalOpen,
+    setIsImageModelModalOpen,
     setIsAddMachineModalOpen,
     modelsConfig,
     loadModelsConfig,
@@ -125,6 +127,59 @@ export const ModelSettingsModal: React.FC = () => {
       maxWidth="780px"
       zIndex={1000}
     >
+      {/* 顶部对话模型与生图模型专属分流导航 */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '16px',
+          borderBottom: '1px solid var(--om-border, #e5e7eb)',
+          paddingBottom: '10px',
+        }}
+      >
+        <button
+          type="button"
+          style={{
+            padding: '7px 16px',
+            borderRadius: '6px',
+            fontSize: '13px',
+            fontWeight: 600,
+            background: 'var(--om-primary, #2563eb)',
+            color: '#fff',
+            border: 'none',
+            cursor: 'default',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Cpu size={14} /> 💬 对话与推理模型 (LLM)
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setIsModelModalOpen(false);
+            setIsImageModelModalOpen(true);
+          }}
+          style={{
+            padding: '7px 16px',
+            borderRadius: '6px',
+            fontSize: '13px',
+            fontWeight: 500,
+            background: 'var(--om-bg-subtle, #f3f4f6)',
+            color: 'var(--om-text-secondary, #4b5563)',
+            border: '1px solid var(--om-border, #e5e7eb)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Palette size={14} /> 🎨 图像生成模型 (独立配置)
+        </button>
+      </div>
+
       {/* 顶部接入计算节点快捷横幅 */}
       <div className="model-compute-banner">
         <div className="model-compute-banner-info">

@@ -6,6 +6,7 @@ import { runAgentLoop, type LLMMessage, type LLMCaller } from '../../../packages
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
 import { globalModelStore } from '../bots/provider-store.ts';
+import { globalImageModelStore } from '../avatar/image-provider-store.ts';
 import {
   MicroSandbox,
   CHANNEL_RANK,
@@ -772,6 +773,40 @@ export function startGatewayServer(defaultPort = 8799) {
     if (req.method === 'GET' && url.pathname === '/api/avatar/presets') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(avatarStudio.getPresets()));
+    }
+
+    // B1.3 独立生图大模型配置接口 (Image Generation Model Providers API)
+    if (req.method === 'GET' && url.pathname === '/api/avatar/models/config') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(globalImageModelStore.getPublicConfig()));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/models/config') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const result = globalImageModelStore.updateConfig(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(result));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/models/test') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const result = await globalImageModelStore.testProvider(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(result));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/avatar/begin') {

@@ -37,6 +37,8 @@ interface AppContextType {
   loadModelsConfig: () => Promise<void>;
   isModelModalOpen: boolean;
   setIsModelModalOpen: (open: boolean) => void;
+  isImageModelModalOpen: boolean;
+  setIsImageModelModalOpen: (open: boolean) => void;
   isAddMachineModalOpen: boolean;
   setIsAddMachineModalOpen: (open: boolean) => void;
   isAuthModalOpen: boolean;
@@ -177,6 +179,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Modals & Panels
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
+  const [isImageModelModalOpen, setIsImageModelModalOpen] = useState(false);
   const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isBotModalOpen, setIsBotModalOpen] = useState(false);
@@ -558,6 +561,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         loadModelsConfig,
         isModelModalOpen,
         setIsModelModalOpen,
+        isImageModelModalOpen,
+        setIsImageModelModalOpen,
         isAddMachineModalOpen,
         setIsAddMachineModalOpen,
         isAuthModalOpen,
