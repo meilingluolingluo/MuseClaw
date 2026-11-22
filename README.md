@@ -136,3 +136,16 @@ pnpm dev:web        # http://localhost:5173
 - [ ] **Milestone 6: 数据飞轮与自进化**
   - 任务轨迹收集并输出标准训练数据格式，用于私有模型迭代。
   - 探索高频工作流自动提炼为持久化 Skill。
+
+---
+
+## 📚 项目技术文档 (Documentation)
+
+全部架构规范、设计准则与重构交付文档已统一归档于 [`docs/`](./docs) 目录：
+
+- [系统总体架构与数据流 (ARCHITECTURE.md)](./docs/ARCHITECTURE.md)
+- [系统实施计划与阶段目标 (IMPLEMENTATION_PLAN.md)](./docs/IMPLEMENTATION_PLAN.md)
+- [产品定位与业务边界 (PRODUCT.md)](./docs/PRODUCT.md)
+- [界面设计系统与 Tokens 规范 (DESIGN.md)](./docs/DESIGN.md)
+- [工作台全页面重构打磨路线图 (REFACTORING_ROADMAP.md)](./docs/REFACTORING_ROADMAP.md)
+
