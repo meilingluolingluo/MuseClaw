@@ -114,6 +114,16 @@ export const ChatView: React.FC = () => {
       setSessionLoadError(null);
       return;
     }
+
+    // 默认空会话/未落盘草稿优化：无需发起远端查询，直接归零展示，杜绝无意义的网络请求与加载等待
+    if (activeSessionId.endsWith('_init') || activeSessionId.endsWith('_default')) {
+      setMessages([]);
+      setVisibleCount(PAGE_SIZE);
+      setLoadingSession(false);
+      setSessionLoadError(null);
+      isInitialSwitchRef.current = false;
+      return;
+    }
     let cancelled = false;
     isInitialSwitchRef.current = true;
     setMessages([]);

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { TabType, User, Bot, Session, ModelsConfig } from '../types';
 import { api, setOnUnauthorizedCallback } from '../services/api';
 import { safeStorage } from '../utils/storage';
@@ -161,6 +161,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeBotId, setActiveBotId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
   const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
@@ -203,28 +207,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const sessionList = Array.isArray(s) ? s : [];
         if (sessionList.length > 0) {
           setSessions(sessionList);
+          const currentActive = activeSessionIdRef.current;
           if (keepActiveId && sessionList.some((it) => it.id === keepActiveId)) {
             setActiveSessionId(keepActiveId);
-          } else if (!activeSessionId || !sessionList.some((it) => it.id === activeSessionId)) {
+          } else if (!currentActive || !sessionList.some((it) => it.id === currentActive)) {
             setActiveSessionId(sessionList[0].id);
           }
         } else {
-          const initId = `sess_${botId}_${Date.now()}`;
-          const initSess: Session = {
-            id: initId,
-            botId,
-            title: '新任务对话',
-            createdAt: Date.now(),
-            messageCount: 0,
-          };
-          setSessions([initSess]);
-          setActiveSessionId(initId);
+          // 当前 Bot 没有任何会话记录：保留现有的同 Bot 空会话草稿，避免反复生成 Date.now() ID 导致无限重复刷新
+          const currentActive = activeSessionIdRef.current;
+          const defaultSessionId = `sess_${botId}_init`;
+          const existingDraftId =
+            currentActive && currentActive.startsWith(`sess_${botId}_`) ? currentActive : defaultSessionId;
+
+          setSessions((prev) => {
+            if (prev.length === 1 && prev[0].id === existingDraftId && prev[0].botId === botId) {
+              return prev;
+            }
+            const initSess: Session = {
+              id: existingDraftId,
+              botId,
+              title: '新任务对话',
+              createdAt: Date.now(),
+              messageCount: 0,
+            };
+            return [initSess];
+          });
+
+          setActiveSessionId((prev) => (prev === existingDraftId ? prev : existingDraftId));
         }
       } catch (err) {
         console.error('Failed to load sessions:', err);
       }
     },
-    [activeSessionId]
+    []
   );
 
   const selectBot = useCallback(
@@ -276,6 +292,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const createNewSession = useCallback(
     async (silent = false): Promise<Session | undefined> => {
       if (!activeBotId) return undefined;
+      const currentActiveId = activeSessionIdRef.current;
+      const currentSession = sessions.find((s) => s.id === currentActiveId);
+      if (currentSession && (!currentSession.messageCount || currentSession.messageCount === 0)) {
+        if (!silent) showToast('当前已处于新建会话', 'info');
+        return currentSession;
+      }
       try {
         const newSession = await api.createSession(activeBotId, '新任务对话');
         if (!newSession) throw new Error('服务端未返回会话');
@@ -288,7 +310,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return undefined;
       }
     },
-    [activeBotId, showToast]
+    [activeBotId, sessions, showToast]
   );
 
   const deleteSession = useCallback(
