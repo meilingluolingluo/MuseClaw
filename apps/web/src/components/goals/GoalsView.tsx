@@ -65,6 +65,7 @@ export const GoalsView: React.FC = () => {
   const [newDue, setNewDue] = useState('');
   const [newCadence, setNewCadence] = useState('weekdays 09:30');
   const [newStepsText, setNewStepsText] = useState('');
+  const [isCustomEdited, setIsCustomEdited] = useState(false);
 
   // 编辑目标弹窗状态
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
@@ -363,15 +364,14 @@ export const GoalsView: React.FC = () => {
     showToast('已跳转到对话，可直接发送或补充要求', 'info');
   };
 
-  // 打开新建弹窗并可预填分类
+  // 打开新建弹窗并预填指定分类示例
   const handleOpenCreateModal = (catId?: string) => {
     const targetCat = catId || 'career';
     setCreateError('');
     setNewCategory(targetCat);
-    setNewTitle('');
-    setNewDesc('');
     setNewDue('');
     setNewCadence('weekdays 09:30');
+    setIsCustomEdited(false);
 
     const preset = CATEGORY_PRESETS[targetCat];
     if (preset) {
@@ -379,9 +379,31 @@ export const GoalsView: React.FC = () => {
       setNewDesc(preset.description);
       setNewStepsText(preset.steps.join('\n'));
     } else {
+      setNewTitle('');
+      setNewDesc('');
       setNewStepsText('');
     }
     setIsCreateModalOpen(true);
+  };
+
+  // 切换新建目标的领域分类并联动示例填充
+  const handleSelectNewCategory = (catId: string) => {
+    setNewCategory(catId);
+    const targetPreset = CATEGORY_PRESETS[catId];
+    if (!targetPreset) return;
+
+    // 当用户未手动编辑、标题为空或当前标题匹配预设示例时，同步切换为目标分类示例
+    const isPresetTitle = Object.values(CATEGORY_PRESETS).some(
+      (p) => p.title.trim() === newTitle.trim()
+    );
+    const shouldUpdatePreset = !isCustomEdited || !newTitle.trim() || isPresetTitle;
+
+    if (shouldUpdatePreset) {
+      setNewTitle(targetPreset.title);
+      setNewDesc(targetPreset.description);
+      setNewStepsText(targetPreset.steps.join('\n'));
+      setIsCustomEdited(false);
+    }
   };
 
   // 让 Agent 协助规划目标 (跳转对话)
@@ -1083,7 +1105,10 @@ export const GoalsView: React.FC = () => {
               type="text"
               placeholder="例如：深入掌握 Agent 核心推理原理、完成 Q4 核心系统上线..."
               value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
+              onChange={(e) => {
+                setNewTitle(e.target.value);
+                setIsCustomEdited(true);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -1108,15 +1133,7 @@ export const GoalsView: React.FC = () => {
                   <button
                     key={c.id}
                     type="button"
-                    onClick={() => {
-                      setNewCategory(c.id);
-                      const p = CATEGORY_PRESETS[c.id];
-                      if (p && !newTitle.trim()) {
-                        setNewTitle(p.title);
-                        setNewDesc(p.description);
-                        setNewStepsText(p.steps.join('\n'));
-                      }
-                    }}
+                    onClick={() => handleSelectNewCategory(c.id)}
                     className={`goal-cat-btn ${isSelected ? 'is-active' : ''}`}
                   >
                     {c.icon({ size: 12 })}
@@ -1167,7 +1184,10 @@ export const GoalsView: React.FC = () => {
               rows={2}
               placeholder="说明为什么这个目标重要、客观资源约束或核心成功标准..."
               value={newDesc}
-              onChange={(e) => setNewDesc(e.target.value)}
+              onChange={(e) => {
+                setNewDesc(e.target.value);
+                setIsCustomEdited(true);
+              }}
               className="goal-form-textarea"
             />
           </div>
@@ -1195,7 +1215,10 @@ export const GoalsView: React.FC = () => {
               rows={4}
               placeholder="步骤 1: 需求梳理与环境准备&#10;步骤 2: 方案落地与代码实现&#10;步骤 3: 自动化测试回归&#10;步骤 4: 交付复盘与沉淀"
               value={newStepsText}
-              onChange={(e) => setNewStepsText(e.target.value)}
+              onChange={(e) => {
+                setNewStepsText(e.target.value);
+                setIsCustomEdited(true);
+              }}
               className="goal-form-textarea"
             />
           </div>
