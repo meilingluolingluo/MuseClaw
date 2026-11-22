@@ -6,7 +6,18 @@ import { runAgentLoop, type LLMMessage, type LLMCaller } from '../../../packages
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
 import { globalModelStore } from '../bots/provider-store.ts';
-import { MicroSandbox, CHANNEL_RANK, CHANNEL_DETAILS, probeLocalAgents, globalRunnerMesh, globalMulticaBridge } from '../../../packages/sandbox-core/src/index.ts';
+import {
+  MicroSandbox,
+  CHANNEL_RANK,
+  CHANNEL_DETAILS,
+  probeLocalAgents,
+  globalRunnerMesh,
+  globalMulticaBridge,
+  Attachment,
+  formatAttachmentNote,
+  modelTakesImages,
+  buildMultimodalContent
+} from '../../../packages/sandbox-core/src/index.ts';
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
@@ -2690,9 +2701,42 @@ fi
         })
         .filter((m) => m.content && m.content.trim().length > 0);
 
+      // 智能解析附件并判定多模态视觉通道
+      const uploadDir = path.resolve(__dirname, '../data/uploads');
+      const attachmentObjects: Attachment[] = [];
+
+      for (const a of attachments) {
+        let absPath = '';
+        if (a.url?.startsWith('/uploads/')) {
+          absPath = path.join(uploadDir, a.url.replace(/^\/?uploads\//, ''));
+        } else if (a.url) {
+          absPath = path.resolve(process.cwd(), a.url.replace(/^\//, ''));
+        }
+        if (absPath) {
+          attachmentObjects.push(Attachment.fromFile(absPath, a.name));
+        }
+      }
+
+      const activeProvider = globalModelStore.getActiveProvider();
+      const currentModelName = bot.model || activeProvider?.model || 'deepseek-flash';
+      const isVisionModel = modelTakesImages(currentModelName) === true;
+
+      const imagePaths = attachmentObjects
+        .filter((a) => a.kind === 'image')
+        .map((a) => a.path);
+
+      const attachmentNote = formatAttachmentNote(attachmentObjects, isVisionModel);
+      const userTextWithNote = attachmentNote
+        ? `${text || (attachmentObjects.length > 0 ? '请查看附件' : '')}\n\n${attachmentNote}`.trim()
+        : (promptWithImages || text || '新任务');
+
+      const userGoal = isVisionModel && imagePaths.length > 0
+        ? buildMultimodalContent(userTextWithNote, imagePaths, true)
+        : userTextWithNote;
+
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
-        resolveSkillPrompt(promptWithImages),
+        typeof userGoal === 'string' ? resolveSkillPrompt(userGoal) : userGoal,
         refreshTools(),
         sentinel,
         userScopedCaller,
