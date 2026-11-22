@@ -38,6 +38,7 @@ import { AddMachineModal } from './components/modals/AddMachineModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { BotProfileModal } from './components/modals/BotProfileModal';
 import { AvatarStudioModal } from './components/modals/AvatarStudioModal';
+import { SettingsModal } from './components/modals/SettingsModal';
 
 function ViewLoading() {
   return (
@@ -185,6 +186,7 @@ export const App: React.FC = () => {
         targetBot={activeBot}
         zIndex={2100}
       />
+      <SettingsModal />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

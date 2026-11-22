@@ -9,6 +9,10 @@ interface AppContextType {
   setTab: (tab: TabType) => void;
   theme: 'light' | 'dark' | 'system';
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  accentColor: string;
+  setAccentColor: (color: string) => void;
+  isSettingsModalOpen: boolean;
+  setIsSettingsModalOpen: (open: boolean) => void;
   user: User | null;
   setUser: (u: User | null) => void;
   bots: Bot[];
@@ -126,6 +130,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return () => (media as any).removeListener(listener);
     }
   }, [theme]);
+
+  // 主题强调色与持久化
+  const [accentColor, setAccentColorState] = useState<string>(() => {
+    return safeStorage.getItem('museclaw_accent') || '#0064d4';
+  });
+
+  const setAccentColor = (color: string) => {
+    setAccentColorState(color);
+    safeStorage.setItem('museclaw_accent', color);
+    document.documentElement.style.setProperty('--om-accent', color);
+    document.documentElement.style.setProperty('--om-accent-soft', `${color}18`);
+    document.documentElement.style.setProperty('--om-accent-soft-fg', color);
+  };
+
+  useEffect(() => {
+    if (accentColor) {
+      document.documentElement.style.setProperty('--om-accent', accentColor);
+      document.documentElement.style.setProperty('--om-accent-soft', `${accentColor}18`);
+      document.documentElement.style.setProperty('--om-accent-soft-fg', accentColor);
+    }
+  }, [accentColor]);
+
+  // 系统设置弹窗状态控制
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // User
   const [user, setUser] = useState<User | null>(null);
@@ -534,6 +562,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveBotId,
         theme,
         setTheme,
+        accentColor,
+        setAccentColor,
+        isSettingsModalOpen,
+        setIsSettingsModalOpen,
         user,
         setUser,
         bots,

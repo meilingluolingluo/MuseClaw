@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { ClawLogo } from '../../utils/icons';
 import {
@@ -11,35 +11,12 @@ import {
   ShieldCheck,
   Package,
   Cpu,
-  Sun,
-  Moon,
-  Laptop,
+  Settings,
 } from 'lucide-react';
 import type { TabType } from '../../types';
 
 export const NavRail: React.FC = () => {
-  const { tab, setTab, theme, setTheme, setIsModelModalOpen, modelsConfig } = useApp();
-  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
-  const themeMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (themeMenuRef.current && !themeMenuRef.current.contains(e.target as Node)) {
-        setIsThemeMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsThemeMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
+  const { tab, setTab, setIsModelModalOpen, setIsSettingsModalOpen, modelsConfig } = useApp();
 
   const navItems: Array<{ id: TabType; label: string; icon: React.ReactNode }> = [
     { id: 'chat', label: '对话', icon: <MessageSquare size={20} /> },
@@ -105,79 +82,19 @@ export const NavRail: React.FC = () => {
         <span className="nav-label">模型</span>
       </button>
 
-      {/* 外观模式设置 */}
-      <div className="theme-picker-container" ref={themeMenuRef}>
-        <button
-          className="nav-item nav-theme-toggle"
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={isThemeMenuOpen}
-          title="外观模式切换"
-          aria-label="外观模式切换"
-          onClick={() => setIsThemeMenuOpen((prev) => !prev)}
-        >
-          <span className="nav-icon">
-            {theme === 'light' ? <Sun size={20} /> : theme === 'dark' ? <Moon size={20} /> : <Laptop size={20} />}
-          </span>
-          <span className="nav-label">
-            {theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '系统'}
-          </span>
-        </button>
-
-        {isThemeMenuOpen && (
-          <div className="theme-menu is-open" role="menu">
-            <div className="theme-menu-header">外观模式</div>
-            <button
-              className={`theme-menu-item ${theme === 'light' ? 'active' : ''}`}
-              type="button"
-              role="menuitemradio"
-              aria-checked={theme === 'light'}
-              onClick={() => {
-                setTheme('light');
-                setIsThemeMenuOpen(false);
-              }}
-            >
-              <span className="theme-menu-icon"><Sun size={16} /></span>
-              <div className="theme-menu-text">
-                <span className="theme-menu-label">浅色模式</span>
-              </div>
-              {theme === 'light' && <span className="theme-menu-check">✓</span>}
-            </button>
-            <button
-              className={`theme-menu-item ${theme === 'dark' ? 'active' : ''}`}
-              type="button"
-              role="menuitemradio"
-              aria-checked={theme === 'dark'}
-              onClick={() => {
-                setTheme('dark');
-                setIsThemeMenuOpen(false);
-              }}
-            >
-              <span className="theme-menu-icon"><Moon size={16} /></span>
-              <div className="theme-menu-text">
-                <span className="theme-menu-label">深色模式</span>
-              </div>
-              {theme === 'dark' && <span className="theme-menu-check">✓</span>}
-            </button>
-            <button
-              className={`theme-menu-item ${theme === 'system' ? 'active' : ''}`}
-              type="button"
-              role="menuitemradio"
-              aria-checked={theme === 'system'}
-              onClick={() => {
-                setTheme('system');
-                setIsThemeMenuOpen(false);
-              }}
-            >
-              <span className="theme-menu-icon"><Laptop size={16} /></span>
-              <div className="theme-menu-text">
-                <span className="theme-menu-label">跟随系统</span>
-              </div>
-              {theme === 'system' && <span className="theme-menu-check">✓</span>}
-            </button>
-          </div>
-        )}
-      </div>
+      {/* 工作台系统设置 */}
+      <button
+        className="nav-item nav-settings-btn"
+        type="button"
+        title="设置"
+        aria-label="工作台系统设置"
+        onClick={() => setIsSettingsModalOpen(true)}
+      >
+        <span className="nav-icon">
+          <Settings size={20} />
+        </span>
+        <span className="nav-label">设置</span>
+      </button>
     </nav>
   );
 };
