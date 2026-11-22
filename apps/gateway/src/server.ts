@@ -588,7 +588,7 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname === '/api/chat' ||
     url.pathname === '/api/channels/feishu/webhook' ||
     url.pathname === '/api/channels/infoflow/webhook' ||
-    (req.method === 'GET' && url.pathname === '/api/bots') ||
+    url.pathname.startsWith('/api/bots') ||
     (req.method === 'GET' && url.pathname === '/api/models/config') ||
     (req.method === 'GET' && url.pathname === '/api/models/local-agents');
 

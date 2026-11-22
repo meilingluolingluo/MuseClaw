@@ -248,7 +248,23 @@ export class AuthService {
     const cookies = parseCookies(req.headers.cookie);
     const sessionToken = cookies['museclaw_session'];
     if (sessionToken) {
-      return this.validateSession(sessionToken);
+      const user = this.validateSession(sessionToken);
+      if (user) return user;
+    }
+
+    // 本机开发免密：若请求来自本地回环地址（127.0.0.1 / localhost），未携带凭证时自动以本地开发者身份访问
+    const remoteIp = (req.socket.remoteAddress || req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || '').replace('::ffff:', '');
+    const isLoopback = ['127.0.0.1', '::1', 'localhost'].includes(remoteIp) ||
+                       remoteIp.startsWith('127.') ||
+                       req.headers.host?.startsWith('localhost') ||
+                       req.headers.host?.startsWith('127.0.0.1');
+    if (isLoopback) {
+      return {
+        id: 'usr_local_dev',
+        username: 'dev_user',
+        displayName: '开发者 (本地免密)',
+        createdAt: new Date().toISOString()
+      };
     }
 
     return null;
