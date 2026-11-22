@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { BotAvatar } from '../common/BotAvatar';
-import { Plus, Trash2, MessageSquare, Search, X, Check, Bot as BotIcon } from 'lucide-react';
+import { Plus, Trash2, MessageSquare, Search, X } from 'lucide-react';
 
 export const SideDrawer: React.FC = () => {
   const {
@@ -23,8 +23,6 @@ export const SideDrawer: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  if (tab !== 'chat' && tab !== 'memory') return null;
-
   const closeMobileDrawer = () => setIsMobileDrawerOpen(false);
 
   const filteredBots = useMemo(() => {
@@ -40,6 +38,8 @@ export const SideDrawer: React.FC = () => {
     const q = searchQuery.toLowerCase().trim();
     return sessions.filter((s) => s.title?.toLowerCase().includes(q));
   }, [sessions, searchQuery]);
+
+  if (tab !== 'chat' && tab !== 'memory') return null;
 
   const handleDeleteClick = (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
