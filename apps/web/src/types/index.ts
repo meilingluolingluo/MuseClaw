@@ -366,6 +366,52 @@ export interface McpServer {
   tools?: string[];
 }
 
+export type ConnectorCategory =
+  | 'builtin'
+  | 'work'
+  | 'talk'
+  | 'dev'
+  | 'data'
+  | 'design'
+  | 'search'
+  | 'money'
+  | 'custom';
+
+export type ConnectorAuthType = 'none' | 'key' | 'oauth' | 'stdio' | 'sse';
+
+export type ConnectorStatus = 'connected' | 'disconnected' | 'connecting' | 'error' | 'reauth';
+
+export interface ConnectorTool {
+  name: string;
+  description: string;
+  enabled: boolean;
+  parameters?: Record<string, unknown>;
+}
+
+export interface ConnectorItem {
+  id: string;
+  name: string;
+  category: ConnectorCategory;
+  description: string;
+  status: ConnectorStatus;
+  authType: ConnectorAuthType;
+  icon?: string;
+  color: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  key?: string;
+  token?: string;
+  keyHint?: string;
+  docs?: string;
+  connectedAt?: number;
+  updatedAt?: number;
+  error?: string;
+  disabledTools?: string[];
+  tools: ConnectorTool[];
+}
+
 export type SkillCategory = 'devops' | 'productivity' | 'research' | 'integration' | 'utility' | 'custom';
 export type SkillSource = 'builtin' | 'custom' | 'imported' | 'learned';
 export type SkillChannel = 'api' | 'cli' | 'web' | 'browser' | 'gui' | 'mixed';

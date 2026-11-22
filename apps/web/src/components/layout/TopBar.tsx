@@ -173,7 +173,7 @@ export const TopBar: React.FC = () => {
             )}
           </>
         ) : (
-          <div className="top-bar-view-heading">
+          <div key={tab} className="top-bar-view-heading">
             {tabTitles[tab]?.icon}
             <h1 className="top-bar-view-title">{tabTitles[tab]?.title || tab}</h1>
           </div>

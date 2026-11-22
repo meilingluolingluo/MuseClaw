@@ -26,6 +26,7 @@ import { ProactiveManager } from '../proactive/index.ts';
 import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager, FeedStore } from '../bots/index.ts';
 import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
+import { ConnectorManager } from './connectors.ts';
 import { globalSkillStore } from '../skills/index.ts';
 import { authService, parseCookies, type AuthUser } from '../auth/auth-service.ts';
 import { AvatarStudio, parseAvatarRequest, parseAvatarChoice } from '../avatar/index.ts';
@@ -136,10 +137,12 @@ const baseTools = createDefaultTools({
   }
 });
 const mcpManager = new McpClientManager();
+const connectorManager = new ConnectorManager(undefined, mcpManager);
 let tools = [...baseTools];
 
 function refreshTools() {
-  tools = [...baseTools, ...mcpManager.getToolDefinitions()];
+  const allTools = [...baseTools, ...mcpManager.getToolDefinitions()];
+  tools = allTools.filter(t => connectorManager.isToolEnabled(t.name));
   return tools;
 }
 
@@ -1407,6 +1410,101 @@ export function startGatewayServer(defaultPort = 8799) {
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/mcp/servers/')) {
       const name = url.pathname.replace('/api/mcp/servers/', '');
       const success = await mcpManager.removeServer(name);
+      refreshTools();
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success }));
+    }
+
+    // ==========================================
+    // B5.1 连接器管理体系 (Connectors Hub)
+    // ==========================================
+    if (req.method === 'GET' && url.pathname === '/api/connectors') {
+      const all = connectorManager.listAll();
+      const connectedCount = all.filter((c) => c.status === 'connected').length;
+      const totalTools = all.reduce((sum, c) => sum + (c.tools?.length || 0), 0);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        connectors: all,
+        total: all.length,
+        connectedCount,
+        totalTools
+      }));
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/api/connectors/')) {
+      const id = url.pathname.replace('/api/connectors/', '');
+      const item = connectorManager.get(id);
+      if (!item) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `连接器 [${id}] 未找到` }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ connector: item }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/connect') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body || '{}');
+      if (!payload.id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '字段 "id" 必填' }));
+      }
+      try {
+        const connectedItem = await connectorManager.connect(payload.id, payload);
+        refreshTools();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, connector: connectedItem }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/disconnect') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { id } = JSON.parse(body || '{}');
+      if (!id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '字段 "id" 必填' }));
+      }
+      const success = await connectorManager.disconnect(id);
+      refreshTools();
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/test') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { id } = JSON.parse(body || '{}');
+      if (!id) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '字段 "id" 必填' }));
+      }
+      const result = await connectorManager.test(id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/connectors/tools/toggle') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { id, toolName, enabled } = JSON.parse(body || '{}');
+      if (!id || !toolName || enabled === undefined) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '字段 "id", "toolName" 与 "enabled" 必填' }));
+      }
+      const success = connectorManager.toggleTool(id, toolName, Boolean(enabled));
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success }));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/connectors/')) {
+      const id = url.pathname.replace('/api/connectors/', '');
+      const success = await connectorManager.remove(id);
       refreshTools();
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success }));

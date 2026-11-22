@@ -22,7 +22,8 @@ import type {
   McpServer,
   Skill,
   SkillFileEntry,
-  User
+  User,
+  ConnectorItem
 } from '../types';
 
 let onUnauthorizedCallback: (() => void) | null = null;
@@ -282,6 +283,47 @@ export const api = {
     const servers = Array.isArray(res) ? res : Array.isArray(res?.servers) ? res.servers : [];
     return { servers, totalTools: typeof res?.totalTools === 'number' ? res.totalTools : 0 };
   },
+
+  // Connectors 连接器体系
+  getConnectors: () =>
+    request<{ connectors: ConnectorItem[]; total: number; connectedCount: number; totalTools: number }>('/api/connectors'),
+  getConnector: (id: string) =>
+    request<{ connector: ConnectorItem }>(`/api/connectors/${encodeURIComponent(id)}`),
+  connectConnector: (data: {
+    id: string;
+    key?: string;
+    token?: string;
+    url?: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    label?: string;
+    description?: string;
+    category?: string;
+  }) =>
+    request<{ success: boolean; connector: ConnectorItem }>('/api/connectors/connect', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  disconnectConnector: (id: string) =>
+    request<{ success: boolean }>('/api/connectors/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ id })
+    }),
+  testConnector: (id: string) =>
+    request<{ success: boolean; latencyMs: number; message: string }>('/api/connectors/test', {
+      method: 'POST',
+      body: JSON.stringify({ id })
+    }),
+  toggleConnectorTool: (id: string, toolName: string, enabled: boolean) =>
+    request<{ success: boolean }>('/api/connectors/tools/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ id, toolName, enabled })
+    }),
+  deleteConnector: (id: string) =>
+    request<{ success: boolean }>(`/api/connectors/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
 
   // Skills Ecosystem (Agent Skills 规程与技能管理)
   getSkills: (params?: { botId?: string; q?: string; category?: string; source?: string; readiness?: string; channel?: string; tag?: string; enabled?: boolean }) => {

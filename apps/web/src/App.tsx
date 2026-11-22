@@ -166,7 +166,9 @@ export const App: React.FC = () => {
         <TopBar />
         <ViewBoundary tab={tab}>
           <Suspense fallback={<ViewLoading />}>
-            {tab === 'chat' ? <ChatView /> : ActiveView ? <ActiveView /> : null}
+            <div key={tab} className="stage-view-wrapper">
+              {tab === 'chat' ? <ChatView /> : ActiveView ? <ActiveView /> : null}
+            </div>
           </Suspense>
         </ViewBoundary>
       </main>
