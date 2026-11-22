@@ -91,11 +91,12 @@ export class BotMemoryManager {
   public getMemory(botId: string, userId: string = 'system'): string {
     const filePath = this.getMemoryPath(botId, userId);
     if (!fs.existsSync(filePath)) {
-      const defaultContent =
-        DEFAULT_BOT_TEMPLATES[botId] ||
-        `# ${botId} 核心准则\n## 用户画像与核心身份 (Profile)\n- 企业数字员工 [user]\n\n## 偏好与工作习惯 (Preferences)\n- 严谨执行任务\n`;
-      this.saveMemory(botId, defaultContent, userId);
-      return defaultContent;
+      const defaultContent = DEFAULT_BOT_TEMPLATES[botId];
+      if (defaultContent) {
+        this.saveMemory(botId, defaultContent, userId);
+        return defaultContent;
+      }
+      return '';
     }
 
     try {
@@ -285,11 +286,12 @@ export class BotMemoryManager {
   public searchMemory(
     botId: string,
     query: string,
-    userId: string = 'system'
+    userId: string = 'system',
+    options?: { category?: MemoryCategory; userId?: string }
   ): Array<{ item: MemoryItem; score: number }> {
     const content = this.getMemory(botId, userId);
     const { items } = parseMemoryMarkdown(content);
-    return searchMemoryItems(items, query);
+    return searchMemoryItems(items, query, { userId, ...options });
   }
 
   /**

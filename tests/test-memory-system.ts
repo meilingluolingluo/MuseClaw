@@ -151,7 +151,7 @@ async function runTests() {
       getMemory: (botId, userId) => manager.getMemory(botId, userId || 'test_user'),
       addItem: (botId, content, category, isUser, userId) =>
         manager.addMemoryItem(botId, content, category as any, isUser ?? false, userId || 'test_user'),
-      search: (botId, query, userId) => manager.searchMemory(botId, query, userId || 'test_user'),
+      search: (botId, query, userId, options) => manager.searchMemory(botId, query, userId || 'test_user', options),
       deleteItem: (botId, itemId, userId) => manager.deleteMemoryItem(botId, itemId, userId || 'test_user', true)
     }
   });
@@ -159,13 +159,15 @@ async function runTests() {
   const memTool = memoryTools.find((t) => t.name === 'memory');
   assert(memTool, 'sandbox-core 工具集中应注册 memory 工具');
 
+  const testContext = { userId: 'test_user', botId: 'test_bot' };
+
   // Agent 执行 remember
   const remRes = await memTool.execute({
     action: 'remember',
     botId: 'test_bot',
     content: '测试环境网关端口为 8799',
     category: 'general'
-  });
+  }, testContext);
   assert(remRes.success, 'Agent remember 应执行成功');
 
   // Agent 执行 recall
@@ -173,16 +175,60 @@ async function runTests() {
     action: 'recall',
     botId: 'test_bot',
     query: '网关端口'
-  });
+  }, testContext);
   assert(recRes.matchedCount > 0, 'Agent recall 应能检索到刚才沉淀的事实');
   assert(recRes.facts[0].content.includes('8799'));
+
+  // 6.1 验证多关键词、分类语义与用户标识 recall 召回
+  await memTool.execute({
+    action: 'remember',
+    botId: 'test_bot',
+    content: '用户习惯中文简洁回复，优先输出代码',
+    category: 'preference'
+  }, testContext);
+  await memTool.execute({
+    action: 'remember',
+    botId: 'test_bot',
+    content: '企业系统架构核心协调员',
+    category: 'profile'
+  }, testContext);
+
+  const catRec = await memTool.execute({
+    action: 'recall',
+    botId: 'test_bot',
+    query: '偏好'
+  }, testContext);
+  assert(catRec.matchedCount > 0, '按分类词“偏好”检索应成功召回 preference 类事实');
+  assert(catRec.facts.some((f: any) => f.content.includes('简洁回复')));
+
+  const multiRec = await memTool.execute({
+    action: 'recall',
+    botId: 'test_bot',
+    query: '用户画像 身份 偏好 习惯 约束 人物 例行'
+  }, testContext);
+  assert(multiRec.matchedCount >= 2, '复合多领域分类词检索应成功召回所有关联分类记忆');
+
+  const userRec = await memTool.execute({
+    action: 'recall',
+    botId: 'test_bot',
+    query: 'test_user'
+  }, testContext);
+  assert(userRec.matchedCount >= 2, '按目标用户名检索应成功返回该用户空间下的持久化记忆');
+
+  const allRec = await memTool.execute({
+    action: 'recall',
+    botId: 'test_bot',
+    query: ''
+  }, testContext);
+  assert(allRec.matchedCount >= 3, '空查询词或 all 应返回当前全部受控记忆条目');
+  assert(allRec.memory.length > 0, '返回结构中必须包含完整的原始 MEMORY.md 文本');
 
   // Agent 执行 forget
   const forRes = await memTool.execute({
     action: 'forget',
     botId: 'test_bot',
     query: recRes.facts[0].id
-  });
+  }, testContext);
   assert(forRes.success, 'Agent forget 应执行成功');
 
   // 清理测试目录

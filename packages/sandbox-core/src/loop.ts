@@ -85,7 +85,7 @@ export async function* runAgentLoop(
   // 1. 按 profile 注入 system_prompt 与 memory_ns / memory
   let effectivePrompt = context.profile?.system_prompt || context.profile?.systemPrompt || systemPrompt;
   if (context.profile?.memory) {
-    effectivePrompt += `\n\n[Bot Memory & Preferences]:\n${context.profile.memory}`;
+    effectivePrompt += `\n\n[Bot Memory & Preferences]:\n【系统受控长期记忆库 (Persistent Long-Term Memory)】\n以下内容来自系统为你与当前员工持久化存储的长期记忆事实、画像偏好与业务准则（来自 MEMORY.md，跨会话永久生效）。你已知晓并应直接遵循这些事实与偏好；若需检索细节或沉淀新事实，可调用 memory 工具：\n${context.profile.memory}`;
   } else if (context.profile?.memory_ns) {
     effectivePrompt += `\n[Memory Workspace: ${context.profile.memory_ns}]`;
   }

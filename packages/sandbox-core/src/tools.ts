@@ -16,7 +16,7 @@ export interface SkillsProvider {
 export interface MemoryProvider {
   getMemory?: (botId: string, userId?: string) => string;
   addItem?: (botId: string, content: string, category?: string, isUser?: boolean, userId?: string) => { success: boolean; item?: any; warning?: string; error?: string };
-  search?: (botId: string, query: string, userId?: string) => Array<{ item: any; score: number }>;
+  search?: (botId: string, query: string, userId?: string, options?: { category?: string; userId?: string }) => Array<{ item: any; score: number }>;
   deleteItem?: (botId: string, itemId: string, userId?: string) => { success: boolean; error?: string };
 }
 
@@ -200,7 +200,7 @@ export function createDefaultTools(options?: {
     // 长期受控记忆检索与事实持久化沉淀
     {
       name: 'memory',
-      description: '数字员工受控长期记忆检索与事实沉淀工具。action="recall" 检索已有关键事实与偏好；action="remember" 沉淀新发现的重要规则、环境信息或协作偏好；action="forget" 遗忘特定过时条目。',
+      description: '数字员工受控长期记忆检索与事实沉淀工具。action="recall" 检索已有关键事实、偏好习惯与业务准则；action="remember" 沉淀新发现的重要规则、环境信息或协作偏好；action="forget" 遗忘特定过时条目。',
       parameters: {
         type: 'object',
         properties: {
@@ -211,7 +211,10 @@ export function createDefaultTools(options?: {
             enum: ['profile', 'preference', 'people', 'routine', 'constraint', 'general'],
             description: '记忆分类：profile(身份画像), preference(偏好习惯), people(关键人物), routine(例行约定), constraint(业务红线), general(通用知识)'
           },
-          query: { type: 'string', description: '检索查询词或待遗忘的条目 ID/关键词（recall/forget 时必填）' },
+          query: {
+            type: 'string',
+            description: '检索查询词或待遗忘的条目 ID/关键词。recall 时选填（留空或传 "*" / "all" / "全部" 可检索当前员工名下的全部受控记忆条目；可输入分类、偏好、身份、流程等关键词检索）'
+          },
           botId: { type: 'string', description: '目标员工标识，默认为当前员工' }
         },
         required: ['action']
@@ -228,27 +231,32 @@ export function createDefaultTools(options?: {
         try {
           if (action === 'recall') {
             const q = String(args.query || '').trim();
-            if (!q) {
-              const raw = memoryProvider.getMemory ? memoryProvider.getMemory(targetBot, targetUser) : '';
-              return { botId: targetBot, userId: targetUser, memory: raw };
-            }
+            const targetCategory = args.category ? (String(args.category).trim() as any) : undefined;
+            const raw = memoryProvider.getMemory ? memoryProvider.getMemory(targetBot, targetUser) : '';
+
             if (memoryProvider.search) {
-              const results = memoryProvider.search(targetBot, q, targetUser);
+              const results = memoryProvider.search(targetBot, q, targetUser, {
+                category: targetCategory,
+                userId: targetUser
+              });
               return {
                 botId: targetBot,
                 userId: targetUser,
-                query: q,
+                query: q || 'all',
+                category: targetCategory,
                 matchedCount: results.length,
-                facts: results.slice(0, 10).map((r) => ({
+                memory: raw,
+                facts: results.slice(0, 15).map((r) => ({
                   id: r.item.id,
                   category: r.item.category,
                   source: r.item.source,
                   content: r.item.content,
+                  protected: r.item.protected,
                   score: Math.round(r.score * 100) / 100
                 }))
               };
             }
-            return { error: '当前记忆管理器不支持 search 方法' };
+            return { botId: targetBot, userId: targetUser, memory: raw };
           }
 
           if (action === 'remember') {

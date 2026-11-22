@@ -103,7 +103,7 @@ const baseTools = createDefaultTools({
     getMemory: (botId, userId) => botMemory.getMemory(botId, userId || 'user_web'),
     addItem: (botId, content, category, isUser, userId) =>
       botMemory.addMemoryItem(botId, content, category as any, isUser ?? true, userId || 'user_web'),
-    search: (botId, query, userId) => botMemory.searchMemory(botId, query, userId || 'user_web'),
+    search: (botId, query, userId, options) => botMemory.searchMemory(botId, query, userId || 'user_web', options),
     deleteItem: (botId, itemId, userId) => botMemory.deleteMemoryItem(botId, itemId, userId || 'user_web', false)
   },
   goalProvider: {

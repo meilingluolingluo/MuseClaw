@@ -27,6 +27,15 @@ export const MEMORY_CATEGORIES: CategoryMeta[] = [
   { key: 'general', label: '通用沉淀知识', header: '## 通用沉淀事实 (General)', description: '环境配置、服务地址、系统固定参数等' }
 ];
 
+export const CATEGORY_KEYWORDS: Record<MemoryCategory, string[]> = {
+  profile: ['profile', '用户画像', '身份', '画像', '角色', '职业', '工号', '姓名', '员工', '核心身份'],
+  preference: ['preference', 'preferences', '偏好', '习惯', '工作习惯', '偏好与习惯', '偏好与工作习惯', '风格', '排版', '格式', '响应'],
+  people: ['people', '关键人物', '协作', '人物', '领导', '汇报', '同事', '团队', '干系人', '协作关系'],
+  routine: ['routine', 'routines', '例行', '约定', '流程', '例会', '巡检', '周期', '日常', '定期'],
+  constraint: ['constraint', 'constraints', '约束', '红线', '业务约束', '禁止', '权限', '安全', '许可', '破坏性'],
+  general: ['general', '通用', '知识', '事实', '配置', '环境', '参数', '链接']
+};
+
 export interface MemoryItem {
   id: string; // m_1, m_2, ...
   content: string; // 事实内容纯文本
@@ -245,25 +254,102 @@ export function similarity(a: string, b: string): number {
  */
 export function searchMemoryItems(
   items: MemoryItem[],
-  query: string
+  query: string,
+  options?: { category?: MemoryCategory; userId?: string }
 ): Array<{ item: MemoryItem; score: number }> {
-  const q = query.trim().toLowerCase();
-  if (!q) {
-    return items.map((item) => ({ item, score: 1 }));
+  const q = (query || '').trim().toLowerCase();
+  const targetCategory = options?.category;
+  const targetUser = (options?.userId || '').trim().toLowerCase();
+
+  const isBroadQuery =
+    !q ||
+    q === '*' ||
+    ['all', '全部', '所有', '记忆', '长期记忆', '受控记忆', '清单', 'list', '用户记忆', '全部记忆', '备忘', '准则'].includes(q);
+
+  const isUserQuery =
+    Boolean(targetUser && (q === targetUser || q.includes(targetUser))) ||
+    ['我', '我的', '本人', '用户', '自己', 'me', 'my', 'user'].includes(q);
+
+  if (isBroadQuery || isUserQuery) {
+    return items
+      .filter((item) => (!targetCategory ? true : item.category === targetCategory))
+      .map((item) => {
+        let score = 1;
+        if (isUserQuery && (item.source === 'user' || item.category === 'profile')) {
+          score = 1.0;
+        } else if (isUserQuery) {
+          score = 0.85;
+        }
+        return { item, score };
+      })
+      .sort((a, b) => b.score - a.score);
   }
 
+  const rawTerms = q.split(/[\s,，;；|、]+/g).map((t) => t.trim()).filter(Boolean);
   const results: Array<{ item: MemoryItem; score: number }> = [];
+
   for (const item of items) {
+    if (targetCategory && item.category !== targetCategory) {
+      continue;
+    }
+
     const text = item.content.toLowerCase();
     let score = 0;
+
+    // 1. 全文子串完全匹配
     if (text.includes(q)) {
-      score += 0.8;
+      score += 0.85;
     }
+
+    // 2. 分词子串匹配
+    for (const term of rawTerms) {
+      if (text.includes(term)) {
+        score += term.length >= 2 ? 0.4 : 0.2;
+      }
+    }
+
+    // 3. 类别与关键词语义关联
+    const catKeywords = CATEGORY_KEYWORDS[item.category] || [];
+    const catMeta = MEMORY_CATEGORIES.find((c) => c.key === item.category);
+    let matchedCategory = false;
+
+    if (rawTerms.length > 0) {
+      for (const term of rawTerms) {
+        if (
+          catKeywords.some((kw) => kw.includes(term) || term.includes(kw)) ||
+          (catMeta && (catMeta.label.toLowerCase().includes(term) || catMeta.header.toLowerCase().includes(term)))
+        ) {
+          matchedCategory = true;
+          break;
+        }
+      }
+    } else if (
+      catKeywords.some((kw) => kw.includes(q) || q.includes(kw)) ||
+      (catMeta && (catMeta.label.toLowerCase().includes(q) || catMeta.header.toLowerCase().includes(q)))
+    ) {
+      matchedCategory = true;
+    }
+
+    if (matchedCategory) {
+      score += 0.75;
+    }
+
+    // 4. Jaccard 相似度兜底
     const sim = similarity(text, q);
-    score += sim * 0.5;
+    score += sim * 0.4;
+    for (const term of rawTerms) {
+      if (term.length >= 2) {
+        score += similarity(text, term) * 0.2;
+      }
+    }
+
+    // 5. 用户声明加权
+    if (item.source === 'user' && (q.includes('用户') || q.includes('user') || q.includes('我'))) {
+      score += 0.2;
+    }
 
     if (score > 0.05) {
-      results.push({ item, score: Math.min(1, score) });
+      results.push({ item, score: Math.min(1, Math.round(score * 100) / 100) });
     }
   }
 
