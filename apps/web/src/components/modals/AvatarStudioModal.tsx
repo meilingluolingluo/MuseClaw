@@ -32,6 +32,7 @@ interface AvatarStudioModalProps {
   onClose: () => void;
   targetBot?: Bot | null;
   onApplied?: (updatedBot: Bot) => void;
+  zIndex?: number;
 }
 
 const STYLES_CATALOG: Array<{ id: AvatarStyle; label: string; desc: string; icon: string }> = [
@@ -66,6 +67,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
   onClose,
   targetBot,
   onApplied,
+  zIndex,
 }) => {
   const { activeBot, showToast, loadBots } = useApp();
   const currentBot = targetBot || activeBot;
@@ -239,8 +241,14 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="虚拟形象工坊 (Avatar Studio)" maxWidth="940px">
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '24px', minHeight: '520px' }}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="虚拟形象工坊 (Avatar Studio)"
+      maxWidth="940px"
+      zIndex={zIndex ?? 2100}
+    >
+      <div className="avatar-studio-layout">
         {/* 左侧：虚拟形象交互展示台 (Live Stage) */}
         <div
           style={{

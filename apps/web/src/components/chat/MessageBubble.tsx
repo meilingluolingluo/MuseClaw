@@ -36,7 +36,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   onApprovalResolved,
   live,
 }) => {
-  const { setIsAuditDrawerOpen, setFocusApprovalId, showToast } = useApp();
+  const { setIsAuditDrawerOpen, setFocusApprovalId, showToast, setIsAvatarStudioOpen } = useApp();
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string | null>(() => {
     if (message.approvalRequest?.status === 'approved') return '已批准';
@@ -240,7 +240,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
         {/* 形象工坊交互卡片 */}
         {message.avatarEvent && (
-          <AvatarOptionsCard event={message.avatarEvent} botName={bot?.name} />
+          <AvatarOptionsCard
+            event={message.avatarEvent}
+            botName={bot?.name}
+            onOpenStudio={() => setIsAvatarStudioOpen(true)}
+          />
         )}
 
         {/* Markdown Rendered Content */}

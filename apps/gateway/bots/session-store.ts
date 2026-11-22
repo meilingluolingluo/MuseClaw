@@ -148,12 +148,23 @@ export class SessionStore {
       throw new Error('创建会话必须指定归属的 bot_id');
     }
     const effectiveUserId = userId || 'system_proactive';
-
     const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
+
+    // 核心约束：主聊类型、标识或指定主聊标题的会话统一收敛委托给 getMainSession，保证严格单例
+    const isMainRequested =
+      kind === 'main' ||
+      id.endsWith('_main') ||
+      id === 'main' ||
+      title === '主要聊天';
+
+    if (isMainRequested) {
+      return this.getMainSession(botId, sanitized);
+    }
+
     const sessionMap = this.loadUser(sanitized);
 
-    const determinedKind: 'main' | 'side' =
-      kind || (id.endsWith('_main') || id === 'main' ? 'main' : 'side');
+    // 旁聊标题保护：严禁非主聊使用“主要聊天”名称
+    const safeTitle = title && title !== '主要聊天' ? title : '新旁聊';
 
     const existing = sessionMap.get(id);
     if (existing) {
@@ -161,7 +172,7 @@ export class SessionStore {
         throw new Error(`禁止将会话换绑到另一 Bot (${existing.bot_id} -> ${botId})`);
       }
       if (!existing.kind) {
-        existing.kind = determinedKind;
+        existing.kind = 'side';
       }
       return existing;
     }
@@ -172,8 +183,8 @@ export class SessionStore {
       bot_id: botId,
       botId,
       userId: sanitized,
-      title,
-      kind: determinedKind,
+      title: safeTitle,
+      kind: 'side',
       created_at: now,
       updated_at: now,
       messages: []
@@ -186,21 +197,77 @@ export class SessionStore {
 
   /**
    * 获取或初始化指定 Bot 的常驻主聊 (Main Chat)
+   * 严格保证每个数字员工仅有且仅能有一个主聊会话 (单例约束)。
    */
   public getMainSession(botId: string, userId = 'system_proactive'): Session {
+    if (!botId) {
+      throw new Error('获取常驻主聊必须指定 bot_id');
+    }
     const effectiveUserId = userId || 'system_proactive';
     const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
 
-    for (const sess of sessionMap.values()) {
-      if (sess.bot_id === botId && (sess.kind === 'main' || sess.id.endsWith('_main') || sess.id === 'main')) {
-        sess.kind = 'main';
-        return sess;
+    const canonicalMainId = `sess_${botId}_main`;
+
+    let mainSession = sessionMap.get(canonicalMainId);
+
+    // 若尚未存在规范 ID，查找历史遗留的主聊会话
+    if (!mainSession) {
+      for (const sess of sessionMap.values()) {
+        if (
+          sess.bot_id === botId &&
+          (sess.kind === 'main' || sess.id.endsWith('_main') || sess.id === 'main')
+        ) {
+          mainSession = sess;
+          break;
+        }
       }
     }
 
-    const mainId = `sess_${botId}_main`;
-    return this.create(mainId, botId, '主要聊天', sanitized, 'main');
+    if (!mainSession) {
+      const now = Date.now();
+      mainSession = {
+        id: canonicalMainId,
+        bot_id: botId,
+        botId,
+        userId: sanitized,
+        title: '主要聊天',
+        kind: 'main',
+        created_at: now,
+        updated_at: now,
+        messages: []
+      };
+      sessionMap.set(canonicalMainId, mainSession);
+    } else {
+      mainSession.kind = 'main';
+      mainSession.title = '主要聊天';
+      if (mainSession.id !== canonicalMainId && !sessionMap.has(canonicalMainId)) {
+        // 平滑迁移旧 ID 到规范主聊 ID
+        sessionMap.delete(mainSession.id);
+        mainSession.id = canonicalMainId;
+        sessionMap.set(canonicalMainId, mainSession);
+      }
+    }
+
+    // 单例约束与数据清洗：移除重影空会话，确保同一 Bot 下其余会话均降级为旁聊
+    for (const [sId, sess] of Array.from(sessionMap.entries())) {
+      if (sess.bot_id === botId && sId !== mainSession.id) {
+        if (sess.kind === 'main') {
+          sess.kind = 'side';
+        }
+        if (sess.title === '主要聊天') {
+          if (!sess.messages || sess.messages.length === 0) {
+            sessionMap.delete(sId);
+          } else {
+            sess.title = '历史旁聊';
+            sess.kind = 'side';
+          }
+        }
+      }
+    }
+
+    this.saveUser(sanitized);
+    return mainSession;
   }
 
   public save(session: Session, userId?: string): void {
@@ -254,12 +321,21 @@ export class SessionStore {
     const sanitized = userId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
 
+    if (botId && incEmpty) {
+      this.getMainSession(botId, sanitized);
+    }
+
     const all = Array.from(sessionMap.values()).filter((s) => {
+      // 过滤掉非规范 ID 且无内容的重名“主要聊天”幽灵会话
+      const isCanonicalMain = s.id === `sess_${s.bot_id || s.botId}_main` || s.id.endsWith('_main') || s.id === 'main';
+      if (!isCanonicalMain && s.title === '主要聊天' && (!s.messages || s.messages.length === 0)) {
+        return false;
+      }
       const hasMsg = incEmpty || (s.messages && s.messages.length > 0);
       return hasMsg;
     });
 
-    const targetList = botId ? all.filter((s) => s.bot_id === botId) : all;
+    const targetList = botId ? all.filter((s) => s.bot_id === botId || s.botId === botId) : all;
 
     // 排序逻辑：常驻主聊 (kind: 'main') 始终置顶，其余旁聊按更新时间倒序排列
     return targetList.sort((a, b) => {

@@ -910,15 +910,20 @@ export function startGatewayServer(defaultPort = 8799) {
       let parsed: any = {};
       try { parsed = JSON.parse(body || '{}'); } catch {}
       botId = botId || parsed.botId || parsed.bot_id || 'muse';
-      const kind: 'main' | 'side' = parsed.kind || (parsed.id?.endsWith('_main') || parsed.id === 'main' ? 'main' : 'side');
-      const title = parsed.title || (kind === 'main' ? '主要聊天' : '新旁聊');
+      const isMain =
+        parsed.kind === 'main' ||
+        parsed.id?.endsWith('_main') ||
+        parsed.id === 'main' ||
+        parsed.title === '主要聊天';
       const targetUserId = currentUser ? currentUser.username : 'user_web';
 
       let session: Session;
-      if (kind === 'main') {
+      if (isMain) {
+        // 主聊严格保持单例，不新增重复会话，直接获取或就绪唯一的常驻主聊
         session = sessionStore.getMainSession(botId, targetUserId);
       } else {
         const sessionId = parsed.id || `sess_${botId}_${Date.now()}`;
+        const title = parsed.title && parsed.title !== '主要聊天' ? parsed.title : '新旁聊';
         session = sessionStore.create(sessionId, botId, title, targetUserId, 'side');
       }
 
@@ -1609,22 +1614,29 @@ export function startGatewayServer(defaultPort = 8799) {
       const includeEmpty = url.searchParams.get('include_empty') !== 'false';
       const targetUserId = currentUser ? currentUser.username : 'user_web';
 
-      // 当为前端工作台查询特定 Bot 且允许空会话时，自动就绪该 Bot 的常驻主聊
+      // 当为前端工作台查询特定 Bot 且允许空会话时，自动就绪该 Bot 的常驻主聊单例
       if (botIdParam && includeEmpty) {
         sessionStore.getMainSession(botIdParam, targetUserId);
       }
 
-      const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map(s => ({
-        id: s.id,
-        title: s.title,
-        kind: s.kind || (s.id.endsWith('_main') || s.id === 'main' ? 'main' : 'side'),
-        botId: s.bot_id || s.botId,
-        bot_id: s.bot_id || s.botId,
-        userId: s.userId,
-        createdAt: s.created_at || (s as any).createdAt,
-        updatedAt: s.updated_at || (s as any).updatedAt,
-        messageCount: s.messages ? s.messages.length : 0
-      }));
+      const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map((s) => {
+        const isCanonicalMain =
+          s.id === `sess_${s.bot_id || s.botId}_main` ||
+          s.id.endsWith('_main') ||
+          s.id === 'main';
+
+        return {
+          id: s.id,
+          title: isCanonicalMain ? '主要聊天' : (s.title === '主要聊天' ? '历史旁聊' : s.title),
+          kind: isCanonicalMain ? 'main' : 'side',
+          botId: s.bot_id || s.botId,
+          bot_id: s.bot_id || s.botId,
+          userId: s.userId,
+          createdAt: s.created_at || (s as any).createdAt,
+          updatedAt: s.updated_at || (s as any).updatedAt,
+          messageCount: s.messages ? s.messages.length : 0,
+        };
+      });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(list));
     }
@@ -1645,14 +1657,19 @@ export function startGatewayServer(defaultPort = 8799) {
         id = id.replace(/\/messages$/, '');
       }
       const targetUserId = currentUser ? currentUser.username : 'user_web';
-      const s = sessionStore.get(id, targetUserId);
+      let s = sessionStore.get(id, targetUserId);
+      const isMain = id.endsWith('_main') || id === 'main';
+      const botId = id.startsWith('sess_') ? (id.split('_')[1] || 'muse') : 'muse';
+
+      if (!s && isMain) {
+        s = sessionStore.getMainSession(botId, targetUserId);
+      }
+
       if (!s) {
         if (isMessagesRequest) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify([]));
         }
-        const botId = id.startsWith('sess_') ? (id.split('_')[1] || 'muse') : 'muse';
-        const isMain = id.endsWith('_main') || id === 'main';
         const fallbackSession = {
           id,
           title: isMain ? '主要聊天' : '新任务对话',
@@ -1669,7 +1686,8 @@ export function startGatewayServer(defaultPort = 8799) {
       }
       const output = {
         ...s,
-        kind: s.kind || (s.id.endsWith('_main') || s.id === 'main' ? 'main' : 'side')
+        kind: isMain || s.kind === 'main' ? 'main' : 'side',
+        title: isMain ? '主要聊天' : s.title
       };
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(isMessagesRequest ? (s.messages || []) : output));

@@ -35,6 +35,7 @@ import { ModelSettingsModal } from './components/modals/ModelSettingsModal';
 import { AddMachineModal } from './components/modals/AddMachineModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { BotProfileModal } from './components/modals/BotProfileModal';
+import { AvatarStudioModal } from './components/modals/AvatarStudioModal';
 
 function ViewLoading() {
   return (
@@ -109,7 +110,15 @@ const VIEWS: Record<Exclude<TabType, 'chat'>, React.LazyExoticComponent<React.FC
 };
 
 export const App: React.FC = () => {
-  const { tab, toasts, dismissToast } = useApp();
+  const {
+    tab,
+    toasts,
+    dismissToast,
+    isAvatarStudioOpen,
+    setIsAvatarStudioOpen,
+    activeBot,
+    loadBots,
+  } = useApp();
   const ActiveView = tab === 'chat' ? null : VIEWS[tab];
 
   return (
@@ -135,6 +144,15 @@ export const App: React.FC = () => {
       <AddMachineModal />
       <AuthModal />
       <BotProfileModal />
+      <AvatarStudioModal
+        isOpen={isAvatarStudioOpen}
+        onClose={() => {
+          setIsAvatarStudioOpen(false);
+          loadBots();
+        }}
+        targetBot={activeBot}
+        zIndex={2100}
+      />
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

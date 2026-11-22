@@ -92,6 +92,41 @@ async function testMainSideChat() {
   assert.strictEqual(store.get(side2.id, userId)!.messages.length, 0, '会话内容已被重置清空');
   console.log('  -> [PASS] 显式清空方法校验通过');
 
+  // 7. 验证主聊单例唯一约束与防重复创建 (Main Chat Singleton Guarantee)
+  console.log('\n[Test 7] 验证主聊单例唯一约束：严禁重复新增或泛滥创建');
+  const dup1 = store.create('sess_ops_bot_1795347000001', botId, '主要聊天', userId, 'main');
+  assert.strictEqual(dup1.id, `sess_${botId}_main`, '请求创建主聊必须直接返回规范主聊 ID');
+  assert.strictEqual(dup1.kind, 'main');
+
+  const dup2 = store.create('sess_ops_bot_1795347000002', botId, '主要聊天', userId);
+  assert.strictEqual(dup2.id, `sess_${botId}_main`, '以“主要聊天”名称创建会话自动收敛至规范主聊');
+
+  for (let i = 0; i < 5; i++) {
+    const loopMain = store.getMainSession(botId, userId);
+    assert.strictEqual(loopMain.id, `sess_${botId}_main`);
+  }
+
+  const listAfterDups = store.list(botId, userId, true);
+  const mainSessions = listAfterDups.filter((s) => s.kind === 'main' || s.id.endsWith('_main'));
+  assert.strictEqual(mainSessions.length, 1, '每个员工有且仅能有一个常驻主聊');
+  console.log('  -> [PASS] 主聊单例唯一约束校验通过');
+
+  // 8. 验证幽灵残留与重影数据自愈清理
+  console.log('\n[Test 8] 验证幽灵重影会话数据自愈与自动隔离');
+  // 模拟写入一个旧的空重名会话
+  const ghostSide = store.create('sess_ghost_empty', botId, '新任务', userId, 'side');
+  ghostSide.title = '主要聊天'; // 模拟旧版 Bug 遗留的同名空会话
+  store.save(ghostSide, userId);
+
+  // 执行 getMainSession 触发自愈治理
+  const healedMain = store.getMainSession(botId, userId);
+  assert.strictEqual(healedMain.id, `sess_${botId}_main`);
+
+  const listAfterHeal = store.list(botId, userId, true);
+  const sideTitles = listAfterHeal.filter((s) => s.id !== `sess_${botId}_main`).map((s) => s.title);
+  assert.ok(!sideTitles.includes('主要聊天'), '旁聊列表中严禁出现任何“主要聊天”同名重影');
+  console.log('  -> [PASS] 幽灵重影数据自愈与隔离治理校验通过');
+
   await store.flush(userId);
   if (fs.existsSync(testDir)) fs.rmSync(testDir, { recursive: true, force: true });
 

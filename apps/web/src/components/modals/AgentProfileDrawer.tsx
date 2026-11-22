@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import { BotAvatar } from '../common/BotAvatar';
 import { Modal } from '../common/Modal';
-import { AvatarStudioModal } from './AvatarStudioModal';
 import {
   List,
   Shield,
@@ -63,7 +62,18 @@ const SOUL_PRESETS = [
 ];
 
 export const AgentProfileDrawer: React.FC = () => {
-  const { isBotModalOpen, setIsBotModalOpen, activeBot, bots, loadBots, showToast, setTab, isTainted } = useApp();
+  const {
+    isBotModalOpen,
+    setIsBotModalOpen,
+    activeBot,
+    bots,
+    loadBots,
+    showToast,
+    setTab,
+    isTainted,
+    isAvatarStudioOpen,
+    setIsAvatarStudioOpen,
+  } = useApp();
   const [currentTab, setCurrentTab] = useState<'tasks' | 'security' | 'identity'>('tasks');
 
   // 基础信息编辑状态
@@ -75,7 +85,6 @@ export const AgentProfileDrawer: React.FC = () => {
 
   // 模态框状态
   const [isLookModalOpen, setIsLookModalOpen] = useState(false);
-  const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [isSoulModalOpen, setIsSoulModalOpen] = useState(false);
   const [soulPromptBuffer, setSoulPromptBuffer] = useState('');
 
@@ -164,6 +173,7 @@ export const AgentProfileDrawer: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isBotModalOpen) {
+        if (isAvatarStudioOpen) return;
         if (isLookModalOpen) setIsLookModalOpen(false);
         else if (isSoulModalOpen) setIsSoulModalOpen(false);
         else if (isEditingInfo) setIsEditingInfo(false);
@@ -172,7 +182,7 @@ export const AgentProfileDrawer: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isBotModalOpen, isLookModalOpen, isSoulModalOpen, isEditingInfo]);
+  }, [isBotModalOpen, isLookModalOpen, isSoulModalOpen, isAvatarStudioOpen, isEditingInfo]);
 
   if (!isBotModalOpen || !activeBot) return null;
 
@@ -341,7 +351,7 @@ export const AgentProfileDrawer: React.FC = () => {
       <div
         className="agent-drawer-backdrop"
         onClick={() => {
-          if (!isSoulModalOpen && !isLookModalOpen) setIsBotModalOpen(false);
+          if (!isSoulModalOpen && !isLookModalOpen && !isAvatarStudioOpen) setIsBotModalOpen(false);
         }}
       />
 
@@ -404,7 +414,7 @@ export const AgentProfileDrawer: React.FC = () => {
                 color: 'var(--om-accent, #3b82f6)',
                 border: '1px solid rgba(59, 130, 246, 0.25)',
               }}
-              onClick={() => setIsStudioModalOpen(true)}
+              onClick={() => setIsAvatarStudioOpen(true)}
               title="打开虚拟形象工坊，基于 AI 创作或定制全套姿态"
             >
               <Sparkles size={12} />
@@ -772,7 +782,7 @@ export const AgentProfileDrawer: React.FC = () => {
       <Modal
         isOpen={isSoulModalOpen}
         onClose={closeSoulModal}
-        zIndex={1060}
+        zIndex={2000}
         title="编辑 SOUL 核心人设"
         icon={<Sparkles size={18} className="agent-modal-soul-icon" />}
         maxWidth="680px"
@@ -837,7 +847,7 @@ export const AgentProfileDrawer: React.FC = () => {
       <Modal
         isOpen={isLookModalOpen}
         onClose={() => setIsLookModalOpen(false)}
-        zIndex={1060}
+        zIndex={2000}
         title="更换智能体外观形象"
         icon={<Pencil size={18} />}
         maxWidth="540px"
@@ -889,7 +899,7 @@ export const AgentProfileDrawer: React.FC = () => {
               }}
               onClick={() => {
                 setIsLookModalOpen(false);
-                setIsStudioModalOpen(true);
+                setIsAvatarStudioOpen(true);
               }}
             >
               <Sparkles size={12} />
@@ -959,20 +969,6 @@ export const AgentProfileDrawer: React.FC = () => {
           )}
         </div>
       </Modal>
-
-      {/* 虚拟形象工坊模态框 */}
-      <AvatarStudioModal
-        isOpen={isStudioModalOpen}
-        onClose={() => {
-          setIsStudioModalOpen(false);
-          loadBots();
-        }}
-        targetBot={activeBot}
-        onApplied={(b) => {
-          if (b.avatar) setAvatar(b.avatar);
-          loadBots();
-        }}
-      />
     </>
   );
 };

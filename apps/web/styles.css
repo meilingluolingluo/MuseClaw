@@ -2406,7 +2406,7 @@ html[data-theme="dark"] .approval-result-pill.rejected {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 2000;
   animation: modalOverlayFade 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -4501,8 +4501,24 @@ details[open] .thought-toggle::after {
   border-color: var(--om-accent);
 }
 
+/* 虚拟形象工坊响应式栅格布局 */
+.avatar-studio-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+  min-height: 520px;
+}
+
+@media (max-width: 768px) {
+  .avatar-studio-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    min-height: auto;
+  }
+}
+
 /* ============================================================================
-   9. nanoMuse 数字员工主档案卡片 (Bot Profile Modal)
+   9. 数字员工主档案卡片 (Bot Profile Modal)
 ============================================================================ */
 .bot-profile-modal-content {
   max-width: 480px;

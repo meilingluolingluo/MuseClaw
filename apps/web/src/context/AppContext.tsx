@@ -43,6 +43,8 @@ interface AppContextType {
   setIsAuthModalOpen: (open: boolean) => void;
   isBotModalOpen: boolean;
   setIsBotModalOpen: (open: boolean) => void;
+  isAvatarStudioOpen: boolean;
+  setIsAvatarStudioOpen: (open: boolean) => void;
   isAuditDrawerOpen: boolean;
   setIsAuditDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   focusApprovalId: string | null;
@@ -178,6 +180,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAddMachineModalOpen, setIsAddMachineModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isBotModalOpen, setIsBotModalOpen] = useState(false);
+  const [isAvatarStudioOpen, setIsAvatarStudioOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
   const [focusApprovalId, setFocusApprovalId] = useState<string | null>(null);
 
@@ -208,31 +211,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loadSessions = useCallback(
     async (botId: string, keepActiveId?: string) => {
       try {
+        const canonicalId = `sess_${botId}_main`;
         const s = await api.getSessions(botId);
-        const sessionList = Array.isArray(s) ? s : [];
-        if (sessionList.length > 0) {
-          setSessions(sessionList);
-          const currentActive = activeSessionIdRef.current;
-          if (keepActiveId && sessionList.some((it) => it.id === keepActiveId)) {
-            setActiveSessionId(keepActiveId);
-          } else if (!currentActive || !sessionList.some((it) => it.id === currentActive)) {
-            // 优先默认激活常驻主聊 (kind === 'main' 或以 _main 结尾)
-            const mainSess = sessionList.find((it) => it.kind === 'main' || it.id.endsWith('_main'));
-            setActiveSessionId(mainSess ? mainSess.id : sessionList[0].id);
-          }
-        } else {
-          // 当前 Bot 没有任何会话记录：以常驻主聊作为基座会话
-          const defaultSessionId = `sess_${botId}_main`;
+        let sessionList = Array.isArray(s) ? s : [];
+
+        // 清洗重影：过滤掉非规范主聊 ID 但名为“主要聊天”且无消息的无效残留会话
+        sessionList = sessionList.filter(
+          (it) => it.id === canonicalId || it.title !== '主要聊天' || (it.messageCount && it.messageCount > 0)
+        );
+
+        // 确保单例主聊必然存在于会话列表首位并规范化属性
+        const mainIdx = sessionList.findIndex((it) => it.id === canonicalId || it.kind === 'main');
+        if (mainIdx === -1) {
           const initSess: Session = {
-            id: defaultSessionId,
+            id: canonicalId,
             botId,
             title: '主要聊天',
             kind: 'main',
             createdAt: Date.now(),
             messageCount: 0,
           };
-          setSessions([initSess]);
-          setActiveSessionId(defaultSessionId);
+          sessionList = [initSess, ...sessionList];
+        } else {
+          sessionList[mainIdx] = {
+            ...sessionList[mainIdx],
+            id: canonicalId,
+            kind: 'main',
+            title: '主要聊天',
+          };
+        }
+
+        // 确保除主聊外所有会话的 kind 均为 side，且标题不与主聊冲突
+        sessionList = sessionList.map((it) => {
+          if (it.id === canonicalId) return it;
+          return {
+            ...it,
+            kind: 'side',
+            title: it.title === '主要聊天' ? '历史旁聊' : it.title,
+          };
+        });
+
+        setSessions(sessionList);
+
+        const currentActive = activeSessionIdRef.current;
+        if (keepActiveId && sessionList.some((it) => it.id === keepActiveId)) {
+          setActiveSessionId(keepActiveId);
+        } else if (!currentActive || !sessionList.some((it) => it.id === currentActive)) {
+          setActiveSessionId(canonicalId);
         }
       } catch (err) {
         console.error('Failed to load sessions:', err);
@@ -241,57 +266,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     []
   );
 
+  const canonicalMainId = useMemo(() => {
+    return activeBotId ? `sess_${activeBotId}_main` : null;
+  }, [activeBotId]);
+
   const mainSession = useMemo(() => {
-    if (!activeBotId) return null;
+    if (!activeBotId || !canonicalMainId) return null;
     return (
-      sessions.find(
-        (s) =>
-          s.botId === activeBotId &&
-          (s.kind === 'main' || s.id.endsWith('_main') || s.id === 'main')
-      ) || null
+      sessions.find((s) => s.id === canonicalMainId) ||
+      sessions.find((s) => s.botId === activeBotId && s.kind === 'main') ||
+      null
     );
-  }, [sessions, activeBotId]);
+  }, [sessions, activeBotId, canonicalMainId]);
 
   const sideSessions = useMemo(() => {
-    if (!activeBotId) return [];
+    if (!activeBotId || !canonicalMainId) return [];
     return sessions.filter(
       (s) =>
         s.botId === activeBotId &&
-        s.kind !== 'main' &&
+        s.id !== canonicalMainId &&
         !s.id.endsWith('_main') &&
-        s.id !== 'main'
+        s.id !== 'main' &&
+        s.kind !== 'main' &&
+        s.title !== '主要聊天'
     );
-  }, [sessions, activeBotId]);
+  }, [sessions, activeBotId, canonicalMainId]);
 
   const isMainChat = Boolean(
     activeSessionId &&
-      (activeSessionId === mainSession?.id ||
+      activeBotId &&
+      (activeSessionId === canonicalMainId ||
+        activeSessionId === mainSession?.id ||
         activeSessionId.endsWith('_main') ||
         activeSessionId === 'main' ||
         sessions.find((s) => s.id === activeSessionId)?.kind === 'main')
   );
 
   const switchToMainChat = useCallback(() => {
-    if (mainSession) {
-      setActiveSessionId(mainSession.id);
-    } else if (activeBotId) {
-      api
-        .createSession(activeBotId, '主要聊天', 'main')
-        .then((ms) => {
-          setSessions((prev) => [ms, ...prev.filter((s) => s.id !== ms.id)]);
-          setActiveSessionId(ms.id);
-        })
-        .catch(() => {
-          setActiveSessionId(`sess_${activeBotId}_main`);
-        });
-    }
-  }, [mainSession, activeBotId]);
+    if (!activeBotId) return;
+    const targetId = canonicalMainId || `sess_${activeBotId}_main`;
+    setActiveSessionId(targetId);
+
+    // 确保 sessions 列表中包含该主聊单例，无需网络请求即可直接激活
+    setSessions((prev) => {
+      if (prev.some((s) => s.id === targetId || (s.botId === activeBotId && s.kind === 'main'))) {
+        return prev;
+      }
+      const newMain: Session = {
+        id: targetId,
+        botId: activeBotId,
+        title: '主要聊天',
+        kind: 'main',
+        createdAt: Date.now(),
+        messageCount: 0,
+      };
+      return [newMain, ...prev];
+    });
+  }, [activeBotId, canonicalMainId]);
 
   const createNewSideChat = useCallback(
     async (title = '新旁聊'): Promise<Session | undefined> => {
       if (!activeBotId) return undefined;
+      // 避免重复创建多个无消息的空旁聊
+      const currentActiveId = activeSessionIdRef.current;
+      const currentSession = sessions.find((s) => s.id === currentActiveId);
+      if (
+        currentSession &&
+        currentSession.kind === 'side' &&
+        (!currentSession.messageCount || currentSession.messageCount === 0)
+      ) {
+        showToast('当前已处于空旁聊任务中', 'info');
+        return currentSession;
+      }
       try {
-        const newSession = await api.createSession(activeBotId, title, 'side');
+        const safeTitle = title && title !== '主要聊天' ? title : '新旁聊';
+        const newSession = await api.createSession(activeBotId, safeTitle, 'side');
         if (!newSession) throw new Error('服务端未返回会话');
         setSessions((prev) => [newSession, ...prev.filter((s) => s.id !== newSession.id)]);
         setActiveSessionId(newSession.id);
@@ -302,7 +351,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return undefined;
       }
     },
-    [activeBotId, showToast]
+    [activeBotId, sessions, showToast]
   );
 
   const selectBot = useCallback(
@@ -515,6 +564,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsAuthModalOpen,
         isBotModalOpen,
         setIsBotModalOpen,
+        isAvatarStudioOpen,
+        setIsAvatarStudioOpen,
         isAuditDrawerOpen,
         setIsAuditDrawerOpen,
         focusApprovalId,
