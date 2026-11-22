@@ -34,9 +34,11 @@ export interface Session {
   id: string;
   botId: string;
   title: string;
+  kind?: 'main' | 'side';
   lastMessageAt?: number;
   messageCount?: number;
   createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface MessageAttachment {

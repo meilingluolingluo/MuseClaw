@@ -172,14 +172,20 @@ function safeJsonParse<T = any>(str: string, fallback: T = {} as T): T {
 }
 
 function getOrCreateSession(sessionId?: string, botId?: string, userId = 'system'): Session {
-  const id = sessionId || `sess_${Date.now()}`;
-  let session = sessionStore.get(id, userId);
-  if (!session) {
-    const defaultBot = botRegistry.getCoordinator() || botRegistry.list()[0];
-    const targetBotId = botId || (defaultBot ? defaultBot.id : 'muse');
-    session = sessionStore.create(id, targetBotId, '新对话', userId);
+  const targetUserId = userId || 'system';
+  if (sessionId) {
+    let session = sessionStore.get(sessionId, targetUserId);
+    if (!session) {
+      const defaultBot = botRegistry.getCoordinator() || botRegistry.list()[0];
+      const targetBotId = botId || (defaultBot ? defaultBot.id : 'muse');
+      const kind = sessionId.endsWith('_main') || sessionId === 'main' ? 'main' : 'side';
+      session = sessionStore.create(sessionId, targetBotId, kind === 'main' ? '主要聊天' : '新对话', targetUserId, kind);
+    }
+    return session;
   }
-  return session;
+  const defaultBot = botRegistry.getCoordinator() || botRegistry.list()[0];
+  const targetBotId = botId || (defaultBot ? defaultBot.id : 'muse');
+  return sessionStore.getMainSession(targetBotId, targetUserId);
 }
 
 // 2. 初始化如流 (Infoflow) 通道配置 (未配置安全凭据时关闭通道)
@@ -797,10 +803,18 @@ export function startGatewayServer(defaultPort = 8799) {
       let parsed: any = {};
       try { parsed = JSON.parse(body || '{}'); } catch {}
       botId = botId || parsed.botId || parsed.bot_id || 'muse';
-      const title = parsed.title || '新任务对话';
+      const kind: 'main' | 'side' = parsed.kind || (parsed.id?.endsWith('_main') || parsed.id === 'main' ? 'main' : 'side');
+      const title = parsed.title || (kind === 'main' ? '主要聊天' : '新旁聊');
       const targetUserId = currentUser ? currentUser.username : 'user_web';
-      const sessionId = parsed.id || `sess_${botId}_${Date.now()}`;
-      const session = sessionStore.create(sessionId, botId, title, targetUserId);
+
+      let session: Session;
+      if (kind === 'main') {
+        session = sessionStore.getMainSession(botId, targetUserId);
+      } else {
+        const sessionId = parsed.id || `sess_${botId}_${Date.now()}`;
+        session = sessionStore.create(sessionId, botId, title, targetUserId, 'side');
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(session));
     }
@@ -1482,23 +1496,39 @@ export function startGatewayServer(defaultPort = 8799) {
       }
     }
 
-    // C. 会话列表接口 (按当前登录员工隔离，默认不过滤无消息的空会话以支持前端新建即时呈现)
+    // C. 会话列表接口 (按当前登录员工隔离，支持主聊置顶与旁聊管理)
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
       const includeEmpty = url.searchParams.get('include_empty') !== 'false';
       const targetUserId = currentUser ? currentUser.username : 'user_web';
+
+      // 当为前端工作台查询特定 Bot 且允许空会话时，自动就绪该 Bot 的常驻主聊
+      if (botIdParam && includeEmpty) {
+        sessionStore.getMainSession(botIdParam, targetUserId);
+      }
+
       const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map(s => ({
         id: s.id,
         title: s.title,
+        kind: s.kind || (s.id.endsWith('_main') || s.id === 'main' ? 'main' : 'side'),
         botId: s.bot_id || s.botId,
         bot_id: s.bot_id || s.botId,
         userId: s.userId,
-        createdAt: s.created_at || s.createdAt,
-        updatedAt: s.updated_at || s.updatedAt,
+        createdAt: s.created_at || (s as any).createdAt,
+        updatedAt: s.updated_at || (s as any).updatedAt,
         messageCount: s.messages ? s.messages.length : 0
       }));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(list));
+    }
+
+    // 会话内容清空接口 (针对常驻主聊清空或普通会话重置)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/sessions\/[^/]+\/clear$/)) {
+      const id = url.pathname.replace('/api/sessions/', '').replace('/clear', '');
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
+      const success = sessionStore.clear(id, targetUserId);
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success, id, cleared: true }));
     }
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/sessions/')) {
@@ -1515,9 +1545,11 @@ export function startGatewayServer(defaultPort = 8799) {
           return res.end(JSON.stringify([]));
         }
         const botId = id.startsWith('sess_') ? (id.split('_')[1] || 'muse') : 'muse';
+        const isMain = id.endsWith('_main') || id === 'main';
         const fallbackSession = {
           id,
-          title: '新任务对话',
+          title: isMain ? '主要聊天' : '新任务对话',
+          kind: isMain ? 'main' : 'side',
           botId,
           bot_id: botId,
           userId: targetUserId,
@@ -1528,16 +1560,28 @@ export function startGatewayServer(defaultPort = 8799) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(fallbackSession));
       }
+      const output = {
+        ...s,
+        kind: s.kind || (s.id.endsWith('_main') || s.id === 'main' ? 'main' : 'side')
+      };
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(isMessagesRequest ? (s.messages || []) : s));
+      return res.end(JSON.stringify(isMessagesRequest ? (s.messages || []) : output));
     }
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
       const targetUserId = currentUser ? currentUser.username : 'user_web';
+      const existing = sessionStore.get(id, targetUserId);
+      const isMain = Boolean(existing && (existing.kind === 'main' || existing.id.endsWith('_main') || existing.id === 'main'));
       const success = sessionStore.delete(id, targetUserId);
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success, id }));
+      return res.end(JSON.stringify({
+        success,
+        id,
+        cleared: isMain,
+        isMain,
+        message: isMain ? '主聊为常驻核心会话，已重置清空历史消息' : '旁聊已删除'
+      }));
     }
 
     // C2. 沙箱与技能阶梯状态接口 (Sandbox & Channel Ladder Status)

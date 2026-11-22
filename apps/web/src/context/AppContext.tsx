@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { TabType, User, Bot, Session, ModelsConfig } from '../types';
 import { api, setOnUnauthorizedCallback } from '../services/api';
 import { safeStorage } from '../utils/storage';
@@ -18,6 +18,11 @@ interface AppContextType {
   sessions: Session[];
   activeSessionId: string | null;
   activeSession: Session | null;
+  mainSession: Session | null;
+  sideSessions: Session[];
+  isMainChat: boolean;
+  switchToMainChat: () => void;
+  createNewSideChat: (title?: string) => Promise<Session | undefined>;
   setActiveBotId: (botId: string) => void;
   selectSession: (sessionId: string) => void;
   createNewSession: (silent?: boolean) => Promise<Session | undefined>;
@@ -211,36 +216,93 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (keepActiveId && sessionList.some((it) => it.id === keepActiveId)) {
             setActiveSessionId(keepActiveId);
           } else if (!currentActive || !sessionList.some((it) => it.id === currentActive)) {
-            setActiveSessionId(sessionList[0].id);
+            // 优先默认激活常驻主聊 (kind === 'main' 或以 _main 结尾)
+            const mainSess = sessionList.find((it) => it.kind === 'main' || it.id.endsWith('_main'));
+            setActiveSessionId(mainSess ? mainSess.id : sessionList[0].id);
           }
         } else {
-          // 当前 Bot 没有任何会话记录：保留现有的同 Bot 空会话草稿，避免反复生成 Date.now() ID 导致无限重复刷新
-          const currentActive = activeSessionIdRef.current;
-          const defaultSessionId = `sess_${botId}_init`;
-          const existingDraftId =
-            currentActive && currentActive.startsWith(`sess_${botId}_`) ? currentActive : defaultSessionId;
-
-          setSessions((prev) => {
-            if (prev.length === 1 && prev[0].id === existingDraftId && prev[0].botId === botId) {
-              return prev;
-            }
-            const initSess: Session = {
-              id: existingDraftId,
-              botId,
-              title: '新任务对话',
-              createdAt: Date.now(),
-              messageCount: 0,
-            };
-            return [initSess];
-          });
-
-          setActiveSessionId((prev) => (prev === existingDraftId ? prev : existingDraftId));
+          // 当前 Bot 没有任何会话记录：以常驻主聊作为基座会话
+          const defaultSessionId = `sess_${botId}_main`;
+          const initSess: Session = {
+            id: defaultSessionId,
+            botId,
+            title: '主要聊天',
+            kind: 'main',
+            createdAt: Date.now(),
+            messageCount: 0,
+          };
+          setSessions([initSess]);
+          setActiveSessionId(defaultSessionId);
         }
       } catch (err) {
         console.error('Failed to load sessions:', err);
       }
     },
     []
+  );
+
+  const mainSession = useMemo(() => {
+    if (!activeBotId) return null;
+    return (
+      sessions.find(
+        (s) =>
+          s.botId === activeBotId &&
+          (s.kind === 'main' || s.id.endsWith('_main') || s.id === 'main')
+      ) || null
+    );
+  }, [sessions, activeBotId]);
+
+  const sideSessions = useMemo(() => {
+    if (!activeBotId) return [];
+    return sessions.filter(
+      (s) =>
+        s.botId === activeBotId &&
+        s.kind !== 'main' &&
+        !s.id.endsWith('_main') &&
+        s.id !== 'main'
+    );
+  }, [sessions, activeBotId]);
+
+  const isMainChat = Boolean(
+    activeSessionId &&
+      (activeSessionId === mainSession?.id ||
+        activeSessionId.endsWith('_main') ||
+        activeSessionId === 'main' ||
+        sessions.find((s) => s.id === activeSessionId)?.kind === 'main')
+  );
+
+  const switchToMainChat = useCallback(() => {
+    if (mainSession) {
+      setActiveSessionId(mainSession.id);
+    } else if (activeBotId) {
+      api
+        .createSession(activeBotId, '主要聊天', 'main')
+        .then((ms) => {
+          setSessions((prev) => [ms, ...prev.filter((s) => s.id !== ms.id)]);
+          setActiveSessionId(ms.id);
+        })
+        .catch(() => {
+          setActiveSessionId(`sess_${activeBotId}_main`);
+        });
+    }
+  }, [mainSession, activeBotId]);
+
+  const createNewSideChat = useCallback(
+    async (title = '新旁聊'): Promise<Session | undefined> => {
+      if (!activeBotId) return undefined;
+      try {
+        const newSession = await api.createSession(activeBotId, title, 'side');
+        if (!newSession) throw new Error('服务端未返回会话');
+        setSessions((prev) => [newSession, ...prev.filter((s) => s.id !== newSession.id)]);
+        setActiveSessionId(newSession.id);
+        showToast('已开启新旁聊任务', 'success');
+        return newSession;
+      } catch (err: any) {
+        showToast(`新建旁聊失败: ${err.message || '网络异常'}`, 'error');
+        return undefined;
+      }
+    },
+    [activeBotId, showToast]
   );
 
   const selectBot = useCallback(
@@ -299,7 +361,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return currentSession;
       }
       try {
-        const newSession = await api.createSession(activeBotId, '新任务对话');
+        const newSession = await api.createSession(activeBotId, '新任务对话', 'side');
         if (!newSession) throw new Error('服务端未返回会话');
         setSessions((prev) => [newSession, ...prev.filter((s) => s.id !== newSession.id)]);
         setActiveSessionId(newSession.id);
@@ -316,25 +378,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteSession = useCallback(
     async (sessionId: string) => {
       try {
-        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', credentials: 'include' });
+        const target = sessions.find((s) => s.id === sessionId);
+        const isTargetMain = Boolean(
+          target && (target.kind === 'main' || target.id.endsWith('_main') || target.id === 'main')
+        );
+
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
         if (!res.ok) {
           throw new Error(res.status === 401 ? '登录已过期，请重新登录' : `HTTP ${res.status}`);
         }
-        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-        if (activeSessionId === sessionId) {
-          const remaining = sessions.filter((s) => s.id !== sessionId);
-          if (remaining.length > 0) {
-            setActiveSessionId(remaining[0].id);
-          } else {
-            createNewSession();
+        const data = await res.json().catch(() => ({}));
+
+        if (isTargetMain || data.cleared) {
+          // 主聊为常驻核心会话，保留会话骨架，清空消息计数
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, messageCount: 0 } : s))
+          );
+          showToast('主聊为常驻核心会话，已重置清空历史记录', 'info');
+        } else {
+          // 旁聊正常物理移除
+          setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+          if (activeSessionId === sessionId) {
+            // 切回当前 Bot 的主聊
+            if (mainSession && mainSession.id !== sessionId) {
+              setActiveSessionId(mainSession.id);
+            } else {
+              const remaining = sessions.filter((s) => s.id !== sessionId);
+              if (remaining.length > 0) {
+                setActiveSessionId(remaining[0].id);
+              } else {
+                switchToMainChat();
+              }
+            }
           }
+          showToast('旁聊已删除', 'success');
         }
-        showToast('会话已删除', 'success');
       } catch (err: any) {
         showToast(`删除会话失败: ${err.message}`, 'error');
       }
     },
-    [activeSessionId, sessions, createNewSession, showToast]
+    [activeSessionId, sessions, mainSession, switchToMainChat, showToast]
   );
 
   const cycleApprovalMode = useCallback(async () => {
@@ -405,6 +491,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sessions,
         activeSessionId,
         activeSession,
+        mainSession,
+        sideSessions,
+        isMainChat,
+        switchToMainChat,
+        createNewSideChat,
         selectSession,
         createNewSession,
         deleteSession,

@@ -30,6 +30,7 @@ MuseClaw 旨在为每位企业员工构建**“专属的 AI 虚拟团队”**。
 ### 1. 👥 通讯录式多数字员工协同 (Roster Mode & Multi-Agent)
 * **角色矩阵面板**：直观展示企业数字员工通讯录（数据分析助理、安全合规巡检员、运维工程师、代码审查员等）。
 * **专属身份设定 (SOUL)**：每个数字员工拥有完全独立的 System Prompt、专属形象（动画/静态头像与 Emoji 选择器）、模型路由及挂载技能库。
+* **主聊 / 旁聊分级架构 (Main Chat & Side Chats)**：为每位数字员工配备常驻置顶的「主聊」（Main Chat，常驻核心工作流，受保护免误删，持续沉淀会话记忆）与轻量隔离的「旁聊」（Side Chats，独立副任务并行处理，随时开启、搜索与销毁，彻底避免污染主任务上下文）。
 * **AgentCapsule 实时状态交互**：支持会话顶部常驻悬浮与大卡片居中两种形态，实时呈现思考进度、工具执行微徽章与健康状态。
 
 ### 2. 🛡️ 确定性安全哨兵与合规审计 (Deterministic Sentinel & Audit)
@@ -204,6 +205,9 @@ npx tsx tests/verify-thin-core.ts
 
 # 企业级安全加固与审计自检
 npx tsx tests/verify-enterprise-hardening.ts
+
+# 主聊 / 旁聊分级会话架构自检
+npx tsx tests/verify-main-side-chat.ts
 
 # 长期目标规划引擎自检
 npx tsx tests/verify-long-horizon-goals.ts

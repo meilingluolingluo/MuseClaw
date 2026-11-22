@@ -19,6 +19,8 @@ import {
   Package,
   Brain,
   User as UserIcon,
+  Home,
+  MessageSquare,
 } from 'lucide-react';
 
 export const TopBar: React.FC = () => {
@@ -27,6 +29,8 @@ export const TopBar: React.FC = () => {
     setIsDrawerCollapsed,
     setIsMobileDrawerOpen,
     activeBot,
+    isMainChat,
+    switchToMainChat,
     isTainted,
     taintReasons,
     modelsConfig,
@@ -148,6 +152,19 @@ export const TopBar: React.FC = () => {
             <span className="pill-badge pill-neutral top-bar-sandbox-pill" title="Linux Bubblewrap 内核级安全沙箱隔离">
               <Box size={12} /> bwrap 隔离
             </span>
+
+            {/* 会话类型指示胶囊 (主聊 vs 旁聊) */}
+            {tab === 'chat' && (
+              <button
+                type="button"
+                className={`pill-badge top-bar-thread-pill ${isMainChat ? 'pill-blue' : 'pill-purple'}`}
+                onClick={!isMainChat ? switchToMainChat : undefined}
+                title={isMainChat ? '当前为主聊（常驻核心工作流）' : '当前为独立旁聊，点击切回主聊'}
+              >
+                {isMainChat ? <Home size={11} /> : <MessageSquare size={11} />}
+                <span>{isMainChat ? '主聊' : '旁聊'}</span>
+              </button>
+            )}
 
             {tab === 'memory' && (
               <span className="pill-badge pill-blue">

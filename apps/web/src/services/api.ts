@@ -104,10 +104,14 @@ export const api = {
   // Sessions
   getSessions: (botId: string, _userId?: string) =>
     request<Session[]>(`/api/sessions?bot_id=${encodeURIComponent(botId)}&include_empty=true`),
-  createSession: (botId: string, title = '新任务对话', _userId?: string) =>
+  createSession: (botId: string, title = '新任务对话', kind: 'main' | 'side' = 'side', _userId?: string) =>
     request<Session>('/api/sessions', {
       method: 'POST',
-      body: JSON.stringify({ botId, title }),
+      body: JSON.stringify({ botId, title, kind }),
+    }),
+  clearSession: (sessionId: string) =>
+    request<{ success: boolean; cleared?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/clear`, {
+      method: 'POST',
     }),
   getMessages: async (sessionId: string, _userId?: string) => {
     const res = await request<any>(`/api/sessions/${encodeURIComponent(sessionId)}`);

@@ -137,7 +137,13 @@ export class SessionStore {
     this.saveTimers.set(sanitized, timer);
   }
 
-  public create(id: string, botId: string, title = '新会话', userId = 'system_proactive'): Session {
+  public create(
+    id: string,
+    botId: string,
+    title = '新会话',
+    userId = 'system_proactive',
+    kind?: 'main' | 'side'
+  ): Session {
     if (!botId) {
       throw new Error('创建会话必须指定归属的 bot_id');
     }
@@ -146,10 +152,16 @@ export class SessionStore {
     const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
 
+    const determinedKind: 'main' | 'side' =
+      kind || (id.endsWith('_main') || id === 'main' ? 'main' : 'side');
+
     const existing = sessionMap.get(id);
     if (existing) {
       if (existing.bot_id !== botId) {
         throw new Error(`禁止将会话换绑到另一 Bot (${existing.bot_id} -> ${botId})`);
+      }
+      if (!existing.kind) {
+        existing.kind = determinedKind;
       }
       return existing;
     }
@@ -161,6 +173,7 @@ export class SessionStore {
       botId,
       userId: sanitized,
       title,
+      kind: determinedKind,
       created_at: now,
       updated_at: now,
       messages: []
@@ -169,6 +182,25 @@ export class SessionStore {
     sessionMap.set(id, session);
     this.saveUser(sanitized);
     return session;
+  }
+
+  /**
+   * 获取或初始化指定 Bot 的常驻主聊 (Main Chat)
+   */
+  public getMainSession(botId: string, userId = 'system_proactive'): Session {
+    const effectiveUserId = userId || 'system_proactive';
+    const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
+    const sessionMap = this.loadUser(sanitized);
+
+    for (const sess of sessionMap.values()) {
+      if (sess.bot_id === botId && (sess.kind === 'main' || sess.id.endsWith('_main') || sess.id === 'main')) {
+        sess.kind = 'main';
+        return sess;
+      }
+    }
+
+    const mainId = `sess_${botId}_main`;
+    return this.create(mainId, botId, '主要聊天', sanitized, 'main');
   }
 
   public save(session: Session, userId?: string): void {
@@ -189,6 +221,9 @@ export class SessionStore {
     session.bot_id = targetBotId;
     session.botId = targetBotId;
     session.userId = effectiveUserId;
+    if (!session.kind) {
+      session.kind = existing?.kind || (session.id.endsWith('_main') || session.id === 'main' ? 'main' : 'side');
+    }
     session.updated_at = Date.now();
 
     sessionMap.set(session.id, session);
@@ -199,7 +234,11 @@ export class SessionStore {
     if (!userId) return undefined;
     const sanitized = userId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
-    return sessionMap.get(id);
+    const sess = sessionMap.get(id);
+    if (sess && !sess.kind) {
+      sess.kind = sess.id.endsWith('_main') || sess.id === 'main' ? 'main' : 'side';
+    }
+    return sess;
   }
 
   public list(botId?: string, userIdOrIncludeEmpty?: string | boolean, includeEmpty = false): Session[] {
@@ -220,10 +259,28 @@ export class SessionStore {
       return hasMsg;
     });
 
-    if (!botId) {
-      return all.sort((a, b) => b.updated_at - a.updated_at);
-    }
-    return all.filter((s) => s.bot_id === botId).sort((a, b) => b.updated_at - a.updated_at);
+    const targetList = botId ? all.filter((s) => s.bot_id === botId) : all;
+
+    // 排序逻辑：常驻主聊 (kind: 'main') 始终置顶，其余旁聊按更新时间倒序排列
+    return targetList.sort((a, b) => {
+      const aMain = a.kind === 'main' || a.id.endsWith('_main') || a.id === 'main';
+      const bMain = b.kind === 'main' || b.id.endsWith('_main') || b.id === 'main';
+      if (aMain && !bMain) return -1;
+      if (!aMain && bMain) return 1;
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    });
+  }
+
+  public clear(id: string, userId = 'system_proactive'): boolean {
+    const effectiveUserId = userId || 'system_proactive';
+    const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
+    const sessionMap = this.loadUser(sanitized);
+    const existing = sessionMap.get(id);
+    if (!existing) return false;
+    existing.messages = [];
+    existing.updated_at = Date.now();
+    this.saveUser(sanitized);
+    return true;
   }
 
   public delete(id: string, userId = 'system_proactive'): boolean {
@@ -233,6 +290,16 @@ export class SessionStore {
     const existing = sessionMap.get(id);
     if (!existing) return false;
 
+    // 常驻主聊 (main) 禁止物理删除，执行清空重置
+    const isMain = existing.kind === 'main' || existing.id.endsWith('_main') || existing.id === 'main';
+    if (isMain) {
+      existing.messages = [];
+      existing.updated_at = Date.now();
+      this.saveUser(sanitized);
+      return true;
+    }
+
+    // 旁聊 (side) 正常物理删除
     const res = sessionMap.delete(id);
     if (res) {
       this.saveUser(sanitized);

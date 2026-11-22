@@ -1,17 +1,21 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { BotAvatar } from '../common/BotAvatar';
-import { Plus, Trash2, MessageSquare, Search, X } from 'lucide-react';
+import { Plus, Trash2, MessageSquare, Search, X, Home, RotateCcw } from 'lucide-react';
 
 export const SideDrawer: React.FC = () => {
   const {
     bots,
     activeBotId,
+    activeBot,
     selectBot,
-    sessions,
+    mainSession,
+    sideSessions,
     activeSessionId,
     selectSession,
+    switchToMainChat,
     createNewSession,
+    createNewSideChat,
     deleteSession,
     isDrawerCollapsed,
     isMobileDrawerOpen,
@@ -33,11 +37,11 @@ export const SideDrawer: React.FC = () => {
     );
   }, [bots, searchQuery]);
 
-  const filteredSessions = useMemo(() => {
-    if (!searchQuery.trim()) return sessions;
+  const filteredSideSessions = useMemo(() => {
+    if (!searchQuery.trim()) return sideSessions;
     const q = searchQuery.toLowerCase().trim();
-    return sessions.filter((s) => s.title?.toLowerCase().includes(q));
-  }, [sessions, searchQuery]);
+    return sideSessions.filter((s) => s.title?.toLowerCase().includes(q));
+  }, [sideSessions, searchQuery]);
 
   if (tab !== 'chat' && tab !== 'memory') return null;
 
@@ -151,47 +155,114 @@ export const SideDrawer: React.FC = () => {
           )}
         </div>
 
-        {/* 会话历史列表 (仅对话 Tab 下呈现) */}
+        {/* 会话分区：主聊置顶常驻 + 独立旁聊列表 (仅对话 Tab 下呈现) */}
         {tab === 'chat' && (
           <div className="session-section">
-            <div className="session-header">
-              <span className="session-header-title">历史会话</span>
+            {/* 1. 常驻主聊 (Main Chat) 卡片 */}
+            <div className="main-chat-container">
+              <div className="section-label">核心工作流</div>
+              <div
+                className={`main-chat-card ${mainSession && activeSessionId === mainSession.id ? 'active' : ''}`}
+                onClick={() => {
+                  switchToMainChat();
+                  closeMobileDrawer();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    switchToMainChat();
+                    closeMobileDrawer();
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-label="主要常驻主聊会话"
+              >
+                <div className="main-chat-left">
+                  <div className="main-chat-icon-wrap">
+                    <Home size={15} />
+                  </div>
+                  <div className="main-chat-info">
+                    <div className="main-chat-title-row">
+                      <span className="main-chat-title">
+                        {activeBot?.name ? `${activeBot.name} · 主聊` : '主要聊天'}
+                      </span>
+                      <span className="pill-badge pill-blue thread-pill">主聊</span>
+                    </div>
+                    <span className="main-chat-desc">常驻上下文 · 核心任务推演</span>
+                  </div>
+                </div>
+
+                {mainSession && (
+                  <button
+                    type="button"
+                    className={`session-delete-btn ${confirmDeleteId === mainSession.id ? 'confirming' : ''}`}
+                    title={confirmDeleteId === mainSession.id ? '点击确认重置清空主聊历史' : '清空主聊历史'}
+                    aria-label={confirmDeleteId === mainSession.id ? '确认重置主聊' : '重置主聊'}
+                    onClick={(e) => handleDeleteClick(e, mainSession.id)}
+                  >
+                    {confirmDeleteId === mainSession.id ? (
+                      <span className="session-delete-confirm-text">清空?</span>
+                    ) : (
+                      <RotateCcw size={12} />
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 2. 旁聊区域 (Side Chats) */}
+            <div className="side-chats-header">
+              <div className="side-chats-header-left">
+                <span className="session-header-title">独立旁聊</span>
+                <span className="pill-badge pill-neutral side-count-badge">
+                  {sideSessions.length}
+                </span>
+              </div>
               <button
                 type="button"
                 className="btn-new-session"
                 onClick={() => {
-                  createNewSession();
+                  createNewSideChat();
                   closeMobileDrawer();
                 }}
-                title="创建新会话"
-                aria-label="创建新会话"
+                title="开启独立旁聊任务，不干扰主聊记忆"
+                aria-label="新建旁聊"
               >
                 <Plus size={13} />
-                <span>新建</span>
+                <span>新旁聊</span>
               </button>
             </div>
 
-            <div className="session-list" role="listbox" aria-label="会话历史">
-              {filteredSessions.length === 0 ? (
+            <div className="session-list" role="listbox" aria-label="旁聊会话列表">
+              {filteredSideSessions.length === 0 ? (
                 <div className="session-empty-state">
                   <div className="session-empty-icon">
                     <MessageSquare size={20} />
                   </div>
                   <div className="session-empty-text">
-                    {searchQuery ? '未找到相关会话' : '暂无历史会话'}
+                    {searchQuery ? '未找到相关旁聊' : '暂无独立旁聊'}
                   </div>
                   {!searchQuery && (
-                    <button
-                      type="button"
-                      className="session-empty-action"
-                      onClick={() => createNewSession()}
-                    >
-                      <Plus size={12} /> 发起对话
-                    </button>
+                    <>
+                      <div className="session-empty-sub">
+                        开启独立旁聊处理副任务，不污染主聊上下文与记忆。
+                      </div>
+                      <button
+                        type="button"
+                        className="session-empty-action"
+                        onClick={() => {
+                          createNewSideChat();
+                          closeMobileDrawer();
+                        }}
+                      >
+                        <Plus size={12} /> 发起旁聊
+                      </button>
+                    </>
                   )}
                 </div>
               ) : (
-                filteredSessions.map((sess) => {
+                filteredSideSessions.map((sess) => {
                   const isActive = sess.id === activeSessionId;
                   const isConfirming = confirmDeleteId === sess.id;
 
@@ -216,16 +287,16 @@ export const SideDrawer: React.FC = () => {
                     >
                       <div className="session-main">
                         <MessageSquare size={13} className="session-icon" aria-hidden="true" />
-                        <span className="session-title" title={sess.title || '新会话'}>
-                          {sess.title || '新会话'}
+                        <span className="session-title" title={sess.title || '新旁聊'}>
+                          {sess.title || '新旁聊'}
                         </span>
                       </div>
 
                       <button
                         type="button"
                         className={`session-delete-btn ${isConfirming ? 'confirming' : ''}`}
-                        title={isConfirming ? '点击确认删除' : '删除会话'}
-                        aria-label={isConfirming ? '确认删除会话' : '删除会话'}
+                        title={isConfirming ? '点击确认删除旁聊' : '删除旁聊'}
+                        aria-label={isConfirming ? '确认删除旁聊' : '删除旁聊'}
                         onClick={(e) => handleDeleteClick(e, sess.id)}
                       >
                         {isConfirming ? (

@@ -109,7 +109,9 @@ export interface Session {
   id: string;
   bot_id: string;                 // 会话归属的 Bot ID，创建后不可换绑
   botId?: string;                 // 兼容别名
+  userId?: string;                // 归属用户 ID
   title?: string;
+  kind?: 'main' | 'side';         // 会话类型：'main' 主聊 (常驻核心对话) | 'side' 旁聊 (独立隔离任务)
   created_at?: number;
   updated_at: number;
   messages?: Array<{

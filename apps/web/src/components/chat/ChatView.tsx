@@ -4,13 +4,17 @@ import { MessageBubble } from './MessageBubble';
 import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
-import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw } from 'lucide-react';
+import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw, Home, MessageSquare, Plus } from 'lucide-react';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
 export const ChatView: React.FC = () => {
   const {
     activeSessionId,
+    activeSession,
+    isMainChat,
+    switchToMainChat,
+    createNewSideChat,
     activeBot,
     showToast,
     setTainted,
@@ -537,6 +541,44 @@ export const ChatView: React.FC = () => {
             streamingToolsCount={streamingTools.length}
             onClick={() => setIsBotModalOpen(true)}
           />
+
+          {/* 主聊 / 旁聊模式指示器与分支切换入口 */}
+          <div className="chat-thread-bar">
+            {isMainChat ? (
+              <div className="chat-thread-pill is-main" title="当前位于常驻核心主聊，持续沉淀会话记忆">
+                <Home size={11} />
+                <span>主聊</span>
+              </div>
+            ) : (
+              <div className="chat-thread-pill is-side" title="当前位于独立副任务旁聊，不干扰主会话上下文">
+                <MessageSquare size={11} />
+                <span>旁聊</span>
+                <span className="chat-thread-title-inline">{activeSession?.title || '临时任务'}</span>
+              </div>
+            )}
+
+            {!isMainChat ? (
+              <button
+                type="button"
+                className="btn-thread-switch"
+                onClick={switchToMainChat}
+                title="一键切回主要常驻主聊"
+              >
+                <Home size={11} />
+                <span>切回主聊</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn-thread-switch"
+                onClick={() => createNewSideChat()}
+                title="开启一个独立副任务旁聊，不污染当前主聊"
+              >
+                <Plus size={11} />
+                <span>开启旁聊</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="chat-history" ref={chatContainerRef} onScroll={handleScroll}>

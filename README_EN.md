@@ -30,6 +30,7 @@ MuseClaw is built to provide every enterprise employee with a **"dedicated AI vi
 ### 1. 👥 Roster Mode & Multi-Agent Collaboration
 * **Digital Employee Roster**: Intuitive organizational matrix managing specialized digital employees (Data Analysis Assistant, Security & Compliance Inspector, Site Reliability Engineer, Code Reviewer, etc.).
 * **Dedicated Persona Configuration (SOUL)**: Each digital employee maintains an independent System Prompt (SOUL), custom avatars (animated/static webp & emoji selector), dynamic model routing, and dedicated skill bindings.
+* **Hierarchical Main Chat & Side Chats**: Equips each digital employee with a persistent pinned **Main Chat** (the core persistent ongoing workflow, protected from deletion, accumulating long-term memory) and isolated **Side Chats** (on-demand parallel sub-tasks that can be created, searched, and cleaned up without polluting the main context).
 * **AgentCapsule Dynamic Interaction**: Supports both a sticky top-bar status capsule and centered hero mode, displaying real-time reasoning progress, tool execution badges, and health states.
 
 ### 2. 🛡️ Deterministic Sentinel & Security Audit
@@ -204,6 +205,9 @@ npx tsx tests/verify-thin-core.ts
 
 # Enterprise security hardening & audit trail self-check
 npx tsx tests/verify-enterprise-hardening.ts
+
+# Main Chat & Side Chats hierarchical conversation self-check
+npx tsx tests/verify-main-side-chat.ts
 
 # Long-horizon goals engine self-check
 npx tsx tests/verify-long-horizon-goals.ts
