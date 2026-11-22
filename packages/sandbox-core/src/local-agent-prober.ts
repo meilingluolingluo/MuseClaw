@@ -8,6 +8,7 @@ export interface LocalAgentInfo {
   id: 'codex' | 'pi' | 'dsh' | 'ollama' | 'ducc' | 'ducx';
   name: string;
   installed: boolean;
+  isAvailable?: boolean;
   version?: string;
   executablePath?: string;
   protocol: 'acp-stdio' | 'json-rpc-stdio' | 'openai-http';
@@ -538,6 +539,7 @@ export async function probeLocalAgents(): Promise<LocalAgentInfo[]> {
     id: 'ollama',
     name: '本地 Ollama (Local)',
     installed: ollamaInstalled,
+    isAvailable: ollamaProbe.ok,
     version: ollamaProbe.ok ? 'HTTP Service Active' : ollamaBin ? 'Installed (Stopped)' : undefined,
     executablePath: ollamaBin || undefined,
     protocol: 'openai-http',
