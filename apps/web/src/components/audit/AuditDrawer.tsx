@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Radio,
 } from 'lucide-react';
 import type { Grant, AuditLog } from '../../types';
 import { api } from '../../services/api';

@@ -4,7 +4,6 @@ import { MessageBubble } from './MessageBubble';
 import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
-import { ClawLogo } from '../../utils/icons';
 import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck } from 'lucide-react';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';

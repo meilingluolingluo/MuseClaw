@@ -75,11 +75,11 @@ export function getDayGroup(ts: number): '今天' | '昨天' | '更早' {
 /**
  * 解析工具调用为清晰的自然语言
  */
-export function humanizeToolCall(tool: string, params: any = {}, result?: any): { title: string; subtitle: string; iconType: 'check' | 'memory' | 'search' | 'routine' } {
+export function humanizeToolCall(tool: string, params: any = {}, _result?: any): { title: string; subtitle: string; iconType: 'check' | 'memory' | 'search' | 'routine' } {
   const toolName = String(tool || '').toLowerCase();
   const command = String(params?.command || params?.cmd || '');
   const path = String(params?.path || params?.filePath || params?.targetPath || '');
-  const basename = path ? path.split(/[\/\\]/).pop() || path : '';
+  const basename = path ? path.split(/[/\\]/).pop() || path : '';
 
   if (toolName.includes('memory') || toolName.includes('recall') || basename.toUpperCase() === 'MEMORY.MD') {
     if (basename.toUpperCase() === 'MEMORY.MD') {

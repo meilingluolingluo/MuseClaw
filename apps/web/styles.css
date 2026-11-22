@@ -2891,8 +2891,8 @@ details[open] .thought-toggle::after {
   margin: 14px 0;
   padding: 10px 14px;
   border-radius: 8px;
-  border-left: 4px solid var(--om-accent);
-  background-color: rgba(59, 130, 246, 0.06);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface-2);
   font-size: 13.5px;
   line-height: 1.6;
 }
@@ -2909,7 +2909,7 @@ details[open] .thought-toggle::after {
 }
 
 .markdown-alert-note {
-  border-left-color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.3);
   background-color: rgba(59, 130, 246, 0.06);
 }
 .markdown-alert-note .markdown-alert-title {
@@ -2917,7 +2917,7 @@ details[open] .thought-toggle::after {
 }
 
 .markdown-alert-tip {
-  border-left-color: #10b981;
+  border-color: rgba(16, 185, 129, 0.3);
   background-color: rgba(16, 185, 129, 0.06);
 }
 .markdown-alert-tip .markdown-alert-title {
@@ -2925,7 +2925,7 @@ details[open] .thought-toggle::after {
 }
 
 .markdown-alert-important {
-  border-left-color: #8b5cf6;
+  border-color: rgba(139, 92, 246, 0.3);
   background-color: rgba(139, 92, 246, 0.06);
 }
 .markdown-alert-important .markdown-alert-title {
@@ -2933,7 +2933,7 @@ details[open] .thought-toggle::after {
 }
 
 .markdown-alert-warning {
-  border-left-color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.3);
   background-color: rgba(245, 158, 11, 0.06);
 }
 .markdown-alert-warning .markdown-alert-title {
@@ -2941,7 +2941,7 @@ details[open] .thought-toggle::after {
 }
 
 .markdown-alert-caution {
-  border-left-color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
   background-color: rgba(239, 68, 68, 0.06);
 }
 .markdown-alert-caution .markdown-alert-title {

@@ -11,7 +11,6 @@ import {
   Heart,
   Clock,
   Check,
-  CheckCircle2,
   AlertTriangle,
   Sparkles,
   Terminal,
@@ -86,7 +85,7 @@ export const AgentProfileDrawer: React.FC = () => {
 
   // 预定任务、动态轨迹、会话与审计流水
   const [routines, setRoutines] = useState<Routine[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [_auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [feedActivities, setFeedActivities] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
@@ -94,7 +93,7 @@ export const AgentProfileDrawer: React.FC = () => {
     '昨天': true,
     '更早': false,
   });
-  const [memoryStats, setMemoryStats] = useState<{ count: number }>({ count: 0 });
+  const [_memoryStats, setMemoryStats] = useState<{ count: number }>({ count: 0 });
   const [sandboxStatus, setSandboxStatus] = useState<{ available: boolean; engine: string } | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [loadError, setLoadError] = useState(false);

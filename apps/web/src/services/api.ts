@@ -1,7 +1,6 @@
 import type {
   Bot,
   Session,
-  Message,
   Goal,
   Routine,
   RoutineRun,

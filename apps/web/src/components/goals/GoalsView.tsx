@@ -6,9 +6,7 @@ import {
   Pause,
   CheckCircle2,
   Circle,
-  CircleSlash,
   AlertTriangle,
-  Clock,
   ChevronDown,
   ChevronUp,
   Trash2,
@@ -18,14 +16,10 @@ import {
   CalendarDays,
   Bell,
   Search,
-  RotateCcw,
   Square,
   SquareCheck,
   Edit3,
-  FileText,
-  ListTodo,
-  ArrowRight,
-  Send
+  ListTodo
 } from 'lucide-react';
 import type { Goal, GoalStep, StepStatus } from '../../types';
 import { api } from '../../services/api';
@@ -33,14 +27,9 @@ import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
 import {
   CATEGORIES,
-  CADENCES,
-  WEEKDAYS,
   categoryOf,
-  splitCadence,
-  joinCadence,
   describeCadence,
   dueLabel,
-  weekdayName,
   CATEGORY_PRESETS
 } from '../../utils/goals';
 

@@ -12,7 +12,6 @@ import {
   Code,
   Database,
   Search,
-  Cpu,
   Brain,
   Clock,
 } from 'lucide-react';
@@ -207,7 +206,7 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
   );
 };
 
-export const ToolTrace: React.FC<{ tools: ToolTraceItem[]; live?: boolean }> = ({ tools, live }) => {
+export const ToolTrace: React.FC<{ tools: ToolTraceItem[]; live?: boolean }> = ({ tools }) => {
   // 默认折叠工具调用过程，仅展示紧凑摘要栏，用户点击按需展开完整调用明细
   const [open, setOpen] = useState(false);
   if (!tools || tools.length === 0) return null;

@@ -210,15 +210,15 @@ function simpleCronMatch(expr: string, d: Date): boolean {
   const [minP, hourP, domP, monthP, dowP] = parts;
 
   return (
-    matchCronField(minP, d.getMinutes(), 0, 59) &&
-    matchCronField(hourP, d.getHours(), 0, 23) &&
-    matchCronField(domP, d.getDate(), 1, 31) &&
-    matchCronField(monthP, d.getMonth() + 1, 1, 12) &&
-    matchCronField(dowP, d.getDay(), 0, 6)
+    matchCronField(minP, d.getMinutes(), 0) &&
+    matchCronField(hourP, d.getHours(), 0) &&
+    matchCronField(domP, d.getDate(), 1) &&
+    matchCronField(monthP, d.getMonth() + 1, 1) &&
+    matchCronField(dowP, d.getDay(), 0)
   );
 }
 
-function matchCronField(pattern: string, val: number, min: number, max: number): boolean {
+function matchCronField(pattern: string, val: number, min: number): boolean {
   if (pattern === '*' || pattern === '?') return true;
   if (pattern.includes('/')) {
     const [rangePart, stepPart] = pattern.split('/');
@@ -229,7 +229,7 @@ function matchCronField(pattern: string, val: number, min: number, max: number):
     return val >= start && (val - start) % step === 0;
   }
   if (pattern.includes(',')) {
-    return pattern.split(',').some((p) => matchCronField(p.trim(), val, min, max));
+    return pattern.split(',').some((p) => matchCronField(p.trim(), val, min));
   }
   if (pattern.includes('-')) {
     const [start, end] = pattern.split('-').map(Number);

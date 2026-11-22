@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Paperclip, Slash, ArrowUp, Square, X, Image as ImageIcon, FileText, Package } from 'lucide-react';
+import { Paperclip, Slash, ArrowUp, Square, X, Image as ImageIcon, FileText } from 'lucide-react';
 import type { MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
