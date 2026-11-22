@@ -12,6 +12,7 @@ export const SideDrawer: React.FC = () => {
     mainSession,
     sideSessions,
     activeSessionId,
+    isMainChat,
     selectSession,
     switchToMainChat,
     createNewSession,
@@ -162,7 +163,7 @@ export const SideDrawer: React.FC = () => {
             <div className="main-chat-container">
               <div className="section-label">核心工作流</div>
               <div
-                className={`main-chat-card ${mainSession && activeSessionId === mainSession.id ? 'active' : ''}`}
+                className={`main-chat-card ${isMainChat ? 'active' : ''}`}
                 onClick={() => {
                   switchToMainChat();
                   closeMobileDrawer();

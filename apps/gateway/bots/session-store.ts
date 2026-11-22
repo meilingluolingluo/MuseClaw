@@ -321,10 +321,6 @@ export class SessionStore {
     const sanitized = userId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
 
-    if (botId && incEmpty) {
-      this.getMainSession(botId, sanitized);
-    }
-
     const all = Array.from(sessionMap.values()).filter((s) => {
       // 过滤掉非规范 ID 且无内容的重名“主要聊天”幽灵会话
       const isCanonicalMain = s.id === `sess_${s.bot_id || s.botId}_main` || s.id.endsWith('_main') || s.id === 'main';
