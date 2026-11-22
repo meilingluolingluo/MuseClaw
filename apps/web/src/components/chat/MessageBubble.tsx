@@ -212,7 +212,6 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
                   onClick={() => window.open(att.url, '_blank')}
                   title="点击查看原图"
                   aria-label={`查看附图: ${att.name || '图片'}`}
-                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                 >
                   <img
                     src={att.url}

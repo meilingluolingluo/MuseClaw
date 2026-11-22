@@ -613,15 +613,14 @@ export const ChatView: React.FC = () => {
               </div>
             </div>
           ) : sessionLoadError ? (
-            <div className="chat-load-error-state" role="alert" style={{ textAlign: 'center', padding: '60px 20px' }}>
-              <AlertCircle size={32} style={{ color: 'var(--accent-red)', marginBottom: '12px' }} />
-              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>会话历史加载失败</h3>
-              <p style={{ color: 'var(--text-dim)', fontSize: '13px', marginBottom: '16px' }}>{sessionLoadError}</p>
+            <div className="chat-load-error-state" role="alert">
+              <AlertCircle size={32} className="chat-load-error-icon" />
+              <h3 className="chat-load-error-title">会话历史加载失败</h3>
+              <p className="chat-load-error-desc">{sessionLoadError}</p>
               <button
                 type="button"
-                className="btn-secondary"
+                className="btn-secondary chat-load-error-retry"
                 onClick={retryLoadSession}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
                 <RotateCcw size={13} /> 重新加载
               </button>

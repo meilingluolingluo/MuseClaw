@@ -175,31 +175,28 @@ const FeedActivityRow = React.memo<{
         {isApproval && (
           <div
             className="feed-act-approval-bar"
-            style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}
             onClick={(e) => e.stopPropagation()}
           >
             {act.status === 'approved' ? (
-              <span className="pill-badge pill-green" style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span className="pill-badge pill-green feed-act-pill-approved">
                 <Check size={12} /> 已批准执行
               </span>
             ) : act.status === 'rejected' ? (
-              <span className="pill-badge pill-red" style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span className="pill-badge pill-red feed-act-pill-rejected">
                 <X size={12} /> 已驳回
               </span>
             ) : (
               <>
                 <button
                   type="button"
-                  className="btn-reject"
-                  style={{ padding: '3px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  className="btn-reject feed-act-btn-reject"
                   onClick={() => onDecision?.(act, false)}
                 >
                   <X size={12} /> 驳回
                 </button>
                 <button
                   type="button"
-                  className="btn-approve"
-                  style={{ padding: '3px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  className="btn-approve feed-act-btn-approve"
                   onClick={() => onDecision?.(act, true)}
                 >
                   <Check size={12} /> 授权批准
@@ -376,7 +373,7 @@ export const FeedView: React.FC = () => {
       </div>
 
       {loadError && (
-        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+        <div className="view-load-error is-spaced" role="alert">
           <AlertTriangle size={14} />
           <span>动态数据加载失败：{loadError}</span>
           <button type="button" onClick={loadFeed} disabled={loading}>重试</button>

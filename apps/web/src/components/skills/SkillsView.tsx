@@ -545,7 +545,7 @@ export const SkillsView: React.FC = () => {
       </div>
 
       {loadError && (
-        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+        <div className="view-load-error is-spaced" role="alert">
           <AlertTriangle size={14} />
           <span>技能规程加载失败：{loadError}</span>
           <button type="button" onClick={loadData} disabled={loading}>重试</button>
@@ -1171,7 +1171,7 @@ export const SkillsView: React.FC = () => {
                 accept=".zip,application/zip"
                 aria-label="选择技能 ZIP 包"
                 ref={fileInputRef}
-                style={{ display: 'none' }}
+                className="hidden-file-input"
                 onChange={(e) => acceptZipFile(e.target.files?.[0])}
               />
             </div>

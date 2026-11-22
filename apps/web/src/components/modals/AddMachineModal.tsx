@@ -100,10 +100,10 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
       }
     >
       {!user ? (
-        <div className="add-machine-login-prompt" style={{ padding: '24px', textAlign: 'center', background: 'var(--om-surface)', borderRadius: '8px', border: '1px solid var(--om-border)' }}>
-          <AlertTriangle size={24} style={{ color: 'var(--accent-orange)', marginBottom: '8px' }} />
-          <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>尚未登录员工身份</h3>
-          <p style={{ color: 'var(--text-dim)', fontSize: '13px', marginBottom: '16px' }}>
+        <div className="add-machine-login-prompt">
+          <AlertTriangle size={24} className="add-machine-login-icon" />
+          <h3 className="add-machine-login-title">尚未登录员工身份</h3>
+          <p className="add-machine-login-desc">
             接入的个人电脑计算节点将严格绑定至你的个人隔离空间。请先登录员工账号后再获取接入命令。
           </p>
           <button
@@ -152,14 +152,13 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
               </>
             ) : pollError ? (
               <>
-                <AlertTriangle size={16} className="add-machine-status-icon is-failed" style={{ color: 'var(--accent-red)' }} />
-                <div className="add-machine-status-text is-failed" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <AlertTriangle size={16} className="add-machine-status-icon is-failed" />
+                <div className="add-machine-status-text is-failed">
                   <span>{pollError}</span>
                   <button
                     type="button"
-                    className="btn-secondary"
+                    className="btn-secondary add-machine-retry-btn"
                     onClick={() => setRetryKey((k) => k + 1)}
-                    style={{ padding: '2px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                   >
                     <RotateCcw size={11} /> 重试
                   </button>

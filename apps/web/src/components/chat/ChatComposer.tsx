@@ -150,14 +150,14 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
       <input
         type="file"
         ref={fileInputRef}
-        style={{ display: 'none' }}
+        className="hidden-file-input"
         multiple
         onChange={(e) => handleFileUpload(e.target.files)}
       />
       <input
         type="file"
         ref={imageInputRef}
-        style={{ display: 'none' }}
+        className="hidden-file-input"
         accept="image/*"
         multiple
         onChange={(e) => handleFileUpload(e.target.files)}

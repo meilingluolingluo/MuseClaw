@@ -474,7 +474,9 @@ function checkRateLimit(ip: string, maxRequests = 60, windowMs = 60000): boolean
 export function startGatewayServer(defaultPort = 8799) {
   const port = Number(process.env.PORT) || defaultPort;
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+    try {
+      const host = req.headers.host || `localhost:${port}`;
+      const url = new URL(req.url || '/', `http://${host}`);
 
     // 对企业 IM Webhook 入口加限流保护
     if (url.pathname.startsWith('/api/channels/')) {
@@ -3204,7 +3206,14 @@ fi
 
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Route not found' }));
-  });
+  } catch (unhandledErr: any) {
+    console.error('[Gateway] 未捕获请求处理异常:', unhandledErr);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, code: 500, error: unhandledErr?.message || 'Internal Server Error' }));
+    }
+  }
+});
 
   server.listen(port, async () => {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);

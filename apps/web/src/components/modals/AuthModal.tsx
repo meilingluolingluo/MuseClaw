@@ -156,7 +156,7 @@ export const AuthModal: React.FC = () => {
               aria-live="polite"
               className="auth-alert is-error auth-error-alert"
             >
-              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              <AlertCircle size={15} className="flex-shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}

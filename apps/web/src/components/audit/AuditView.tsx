@@ -79,7 +79,7 @@ export const AuditView: React.FC = () => {
       </div>
 
       {loadError && (
-        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+        <div className="view-load-error is-spaced" role="alert">
           <AlertTriangle size={14} />
           <span>审计数据加载失败：{loadError}</span>
           <button type="button" onClick={loadData} disabled={loading}>重试</button>
@@ -123,10 +123,9 @@ export const AuditView: React.FC = () => {
                       className={`audit-grant-revoke-btn ${revokingGrantId === grant.id ? 'is-confirming' : ''}`}
                       title={revokingGrantId === grant.id ? '再次点击确认撤销' : '撤销授权'}
                       aria-label="撤销授权"
-                      style={revokingGrantId === grant.id ? { width: 'auto', padding: '0 6px', display: 'flex', alignItems: 'center', gap: '3px' } : undefined}
                     >
                       <Trash2 size={13} />
-                      {revokingGrantId === grant.id && <span style={{ fontSize: '11px', color: 'var(--accent-red)' }}>确认？</span>}
+                      {revokingGrantId === grant.id && <span className="audit-grant-confirm-tag">确认？</span>}
                     </button>
                   </div>
                 );

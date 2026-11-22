@@ -146,7 +146,7 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
     if (ev === 'APPROVAL_DECISION') {
       const isApproved = String(log.decision).toLowerCase().includes('approved');
       return (
-        <span className={`pill-badge ${isApproved ? 'pill-green' : 'pill-red'}`} style={{ fontSize: '10.5px' }}>
+        <span className={`pill-badge ${isApproved ? 'pill-green' : 'pill-red'}`}>
           {isApproved ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
           {isApproved ? '审批批准' : '审批驳回'}
         </span>
@@ -154,20 +154,20 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
     }
     if (ev === 'SENTINEL_INTERCEPT') {
       return (
-        <span className="pill-badge pill-amber" style={{ fontSize: '10.5px' }}>
+        <span className="pill-badge pill-amber">
           <ShieldAlert size={11} /> 门禁拦截
         </span>
       );
     }
     if (ev === 'TAINT_EVENT') {
       return (
-        <span className="pill-badge pill-red" style={{ fontSize: '10.5px' }}>
+        <span className="pill-badge pill-red">
           <AlertTriangle size={11} /> 污染阻断
         </span>
       );
     }
     return (
-      <span className="pill-badge pill-blue" style={{ fontSize: '10.5px' }}>
+      <span className="pill-badge pill-blue">
         {ev}
       </span>
     );
@@ -178,17 +178,16 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
       {/* 1. Header */}
       <div className="audit-drawer-header">
         <div className="audit-drawer-title">
-          <ShieldCheck size={17} style={{ color: 'var(--om-accent)' }} />
+          <ShieldCheck size={17} className="audit-drawer-policy-icon" />
           <span>安全合规与审计 (Audit)</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="flex-center-gap-8">
           <button
             type="button"
             className="btn-icon"
             onClick={loadData}
             disabled={loading}
             title="刷新安全审计数据"
-            style={{ padding: '5px' }}
           >
             <RefreshCw size={13} className={loading ? 'tool-spin' : ''} />
           </button>
@@ -197,7 +196,6 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
             className="btn-icon"
             onClick={onClose}
             title="收起审计抽屉 (Esc)"
-            style={{ padding: '5px' }}
           >
             <X size={15} />
           </button>
@@ -231,20 +229,9 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
 
       {/* 3. Taint Alert Banner if present */}
       {isTainted && (
-        <div
-          style={{
-            padding: '8px 14px',
-            background: 'color-mix(in srgb, var(--accent-red) 10%, var(--om-surface))',
-            borderBottom: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '11.5px',
-            color: 'var(--accent-red)',
-          }}
-        >
-          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className="audit-taint-banner">
+          <AlertTriangle size={14} className="flex-shrink-0" />
+          <div className="audit-taint-text">
             <strong>当前处于敏感污染态：</strong>
             {taintReasons.join('; ') || '已触及受控数据源'}
           </div>
@@ -257,15 +244,14 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
         {activeTab === 'trail' && (
           <>
             {activeSessionId && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px 4px' }}>
-                <span style={{ fontSize: '11.5px', color: 'var(--text-dim)' }}>
+              <div className="audit-filter-bar">
+                <span className="audit-filter-label">
                   {filterSessionOnly ? '仅展示当前会话记录' : '展示全部会话流水'}
                 </span>
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="btn-secondary audit-filter-btn"
                   onClick={() => setFilterSessionOnly((v) => !v)}
-                  style={{ fontSize: '11px', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
                 >
                   <ListFilter size={11} /> {filterSessionOnly ? '查看全局流水' : '只看当前会话'}
                 </button>
@@ -273,10 +259,10 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
             )}
 
             {displayedLogs.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-dim)' }}>
-                <ShieldCheck size={32} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
-                <div style={{ fontSize: '13px', fontWeight: 600 }}>暂无审计流水记录</div>
-                <div style={{ fontSize: '11.5px', marginTop: '4px' }}>
+              <div className="audit-drawer-empty">
+                <ShieldCheck size={32} className="audit-drawer-empty-icon" />
+                <div className="audit-drawer-empty-title">暂无审计流水记录</div>
+                <div className="audit-drawer-empty-sub">
                   {filterSessionOnly ? '本会话暂未触发安全判定或工具调用' : '系统尚无敏感动作产生'}
                 </div>
               </div>
@@ -311,72 +297,40 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
                     id={`audit-card-${logKey}`}
                     className={`audit-card ${isMatchedFocus ? 'audit-card-highlighted' : ''}`}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div className="audit-drawer-row">
+                      <div className="flex-center-gap-6">
                         {getEventBadge(log)}
                         {log.tool && (
-                          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-main)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span className="audit-drawer-tool-tag">
                             {log.tool}
                           </span>
                         )}
                       </div>
-                      <span style={{ fontSize: '11px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }} title={exactTime}>
+                      <span className="audit-drawer-time" title={exactTime}>
                         {timeText}
                       </span>
                     </div>
 
                     {log.target && (
-                      <div
-                        style={{
-                          fontSize: '11.5px',
-                          fontFamily: 'var(--font-mono, monospace)',
-                          background: 'var(--om-surface)',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          border: '1px solid var(--om-border)',
-                          marginBottom: '6px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          color: 'var(--text-main)',
-                        }}
-                        title={log.target}
-                      >
+                      <div className="audit-drawer-target" title={log.target}>
                         {log.target}
                       </div>
                     )}
 
                     {summary && (
-                      <div
-                        style={{
-                          fontSize: '12px',
-                          color: 'var(--text-muted)',
-                          lineHeight: 1.45,
-                          marginBottom: '6px',
-                        }}
-                      >
+                      <div className="audit-drawer-summary">
                         {summary}
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                      <span style={{ fontSize: '10.5px', color: 'var(--text-dim)' }}>
+                    <div className="audit-drawer-meta-bar">
+                      <span className="audit-drawer-meta-session">
                         {log.sessionId ? `会话: ${log.sessionId.slice(-6)}` : '全局系统'}
                       </span>
                       <button
                         type="button"
                         onClick={() => toggleExpand(logKey)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--om-accent)',
-                          fontSize: '11px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '2px',
-                          padding: '2px 4px',
-                        }}
+                        className="audit-drawer-expand-btn"
                       >
                         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                         {isExpanded ? '收起详情' : '展开 Payload'}
@@ -384,20 +338,7 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
                     </div>
 
                     {isExpanded && (
-                      <pre
-                        style={{
-                          marginTop: '8px',
-                          padding: '8px',
-                          borderRadius: '6px',
-                          background: 'var(--om-bg)',
-                          border: '1px solid var(--om-border)',
-                          fontSize: '10.5px',
-                          lineHeight: 1.4,
-                          color: 'var(--text-dim)',
-                          overflowX: 'auto',
-                          maxHeight: '200px',
-                        }}
-                      >
+                      <pre className="audit-drawer-payload-pre">
                         {JSON.stringify(log, null, 2)}
                       </pre>
                     )}
@@ -411,54 +352,41 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
         {/* TAB 2: 活跃复用授权 (Grants) */}
         {activeTab === 'grants' && (
           <>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '6px' }}>
+            <div className="audit-drawer-tab-desc">
               当前记住的免审批授权规则。撤销后，对应操作将恢复 Sentinel 门禁人工逐次审批。
             </div>
 
             {grants.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-dim)' }}>
-                <Lock size={30} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
-                <div style={{ fontSize: '13px', fontWeight: 600 }}>暂无活跃免密授权</div>
-                <div style={{ fontSize: '11.5px', marginTop: '4px' }}>所有敏感操作将按当前门禁策略进行审核</div>
+              <div className="audit-drawer-empty">
+                <Lock size={30} className="audit-drawer-empty-icon" />
+                <div className="audit-drawer-empty-title">暂无活跃免密授权</div>
+                <div className="audit-drawer-empty-sub">所有敏感操作将按当前门禁策略进行审核</div>
               </div>
             ) : (
               grants.map((grant: any, idx: number) => {
                 const permText = typeof grant.permission === 'object' ? JSON.stringify(grant.permission) : String(grant.permission || '');
                 return (
                   <div key={grant.id || idx} className="audit-card">
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span className="pill-badge pill-blue" style={{ fontSize: '11px' }}>
+                    <div className="audit-drawer-row">
+                      <span className="pill-badge pill-blue">
                         {grant.scope || 'general'}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleRevokeGrant(grant.id)}
-                        className={`btn-reject ${revokingGrantId === grant.id ? 'is-confirming' : ''}`}
-                        style={{ padding: '3px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}
+                        className={`btn-reject audit-grant-revoke-btn ${revokingGrantId === grant.id ? 'is-confirming' : ''}`}
                         title={revokingGrantId === grant.id ? '再次点击确认撤销' : '撤销此免审批授权'}
                       >
                         <Trash2 size={11} /> {revokingGrantId === grant.id ? '确认撤销？' : '撤销授权'}
                       </button>
                     </div>
 
-                    <div
-                      style={{
-                        fontSize: '11.5px',
-                        fontFamily: 'var(--font-mono, monospace)',
-                        background: 'var(--om-surface)',
-                        padding: '6px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--om-border)',
-                        color: 'var(--text-main)',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-all',
-                      }}
-                    >
+                    <div className="audit-drawer-perm-box">
                       {permText}
                     </div>
 
                     {grant.grantedAt && (
-                      <div style={{ fontSize: '10.5px', color: 'var(--text-dim)', marginTop: '6px' }}>
+                      <div className="audit-drawer-perm-time">
                         授权时间: {formatTime(grant.grantedAt)}
                       </div>
                     )}
@@ -472,48 +400,35 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
         {/* TAB 3: 声明式安全策略 (Policy) */}
         {activeTab === 'policy' && (
           <>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '6px' }}>
+            <div className="audit-drawer-tab-desc">
               由安全管理内核挂载的声明式防护策略（sentinel-policy.json），定义了黑名单工具与严格阻断规则。
             </div>
 
             <div className="audit-card">
-              <div style={{ fontWeight: 600, fontSize: '12.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <FileCode size={14} style={{ color: 'var(--om-accent)' }} /> 策略规则概览
+              <div className="audit-drawer-policy-title">
+                <FileCode size={14} className="audit-drawer-policy-icon" /> 策略规则概览
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>默认审批动作:</span>
-                  <span style={{ fontWeight: 600 }}>{policy.default_action || policy.defaultAction || 'ASK'}</span>
+              <div className="audit-drawer-stat-list">
+                <div className="audit-drawer-stat-row">
+                  <span className="text-muted">默认审批动作:</span>
+                  <span className="font-semibold">{policy.default_action || policy.defaultAction || 'ASK'}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>全局禁用工具数:</span>
-                  <span style={{ fontWeight: 600 }}>{policy.deny_tools?.length || policy.denyTools?.length || 0} 个</span>
+                <div className="audit-drawer-stat-row">
+                  <span className="text-muted">全局禁用工具数:</span>
+                  <span className="font-semibold">{policy.deny_tools?.length || policy.denyTools?.length || 0} 个</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>强制确认命令数:</span>
-                  <span style={{ fontWeight: 600 }}>{policy.ask_commands?.length || policy.askCommands?.length || 0} 项</span>
+                <div className="audit-drawer-stat-row">
+                  <span className="text-muted">强制确认命令数:</span>
+                  <span className="font-semibold">{policy.ask_commands?.length || policy.askCommands?.length || 0} 项</span>
                 </div>
               </div>
             </div>
 
             <div className="audit-card">
-              <div style={{ fontWeight: 600, fontSize: '12px', marginBottom: '6px' }}>
+              <div className="audit-drawer-json-title">
                 原始策略配置 (JSON)
               </div>
-              <pre
-                style={{
-                  margin: 0,
-                  fontSize: '11px',
-                  lineHeight: 1.45,
-                  color: 'var(--text-dim)',
-                  maxHeight: '280px',
-                  overflow: 'auto',
-                  background: 'var(--om-surface)',
-                  padding: '8px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--om-border)',
-                }}
-              >
+              <pre className="audit-drawer-json-pre">
                 {JSON.stringify(policy, null, 2)}
               </pre>
             </div>

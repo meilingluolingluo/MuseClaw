@@ -20,7 +20,6 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismis
           key={toast.id}
           className={`toast toast-${toast.type}`}
           role={toast.type === 'error' ? 'alert' : 'status'}
-          style={{ cursor: 'default', userSelect: 'text' }}
         >
           <span className="toast-icon" aria-hidden="true">
             {toast.type === 'success' && '✓'}
@@ -28,23 +27,12 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onDismis
             {toast.type === 'warning' && '⚠'}
             {toast.type === 'info' && 'ℹ'}
           </span>
-          <span className="toast-text" style={{ userSelect: 'text' }}>{toast.message}</span>
+          <span className="toast-text">{toast.message}</span>
           <button
             type="button"
             className="toast-close-btn"
             onClick={() => onDismiss(toast.id)}
             aria-label="关闭提示"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'currentColor',
-              padding: '2px 4px',
-              marginLeft: '8px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              opacity: 0.7,
-            }}
           >
             <X size={13} />
           </button>

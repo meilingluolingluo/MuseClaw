@@ -129,34 +129,18 @@ export const BotAvatar: React.FC<BotAvatarProps> = ({
     innerContent = <img src={stillUrl} alt={bot?.name || ''} draggable={false} className="avatar-media" />;
   } else {
     const emoji = avatarVal.length <= 4 ? avatarVal : '🤖';
-    const color = '#0064d4';
-    const bgGradient = `linear-gradient(135deg, ${color}, color-mix(in srgb, ${color} 65%, #ffffff))`;
     innerContent = (
       <span
-        className="avatar-emoji-text"
-        style={{
-          background: bgGradient,
-          fontSize: `${Math.round(size * 0.52)}px`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '100%',
-          height: '100%',
-          borderRadius: '50%',
-        }}
+        className="bot-avatar-emoji-text"
+        style={{ fontSize: `${Math.round(size * 0.52)}px` }}
       >
         {emoji}
       </span>
     );
   }
 
-  // 状态指示器颜色
-  let statusBg = '';
-  if (mood === 'working') statusBg = '#f59e0b';
-  else if (mood === 'waiting') statusBg = '#3b82f6';
-  else if (mood === 'error') statusBg = '#ef4444';
-
   const dotSize = Math.max(8, Math.round(size * 0.26));
+  const hasStatus = mood === 'working' || mood === 'waiting' || mood === 'error';
 
   return (
     <div
@@ -172,19 +156,12 @@ export const BotAvatar: React.FC<BotAvatarProps> = ({
       <div className={`nanomuse-avatar-circle ${motionClass}`}>
         {innerContent}
       </div>
-      {statusBg && (
+      {hasStatus && (
         <span
+          className={`bot-avatar-status-dot is-${mood}`}
           style={{
-            position: 'absolute',
-            bottom: '-1px',
-            right: '-1px',
             width: `${dotSize}px`,
             height: `${dotSize}px`,
-            borderRadius: '50%',
-            backgroundColor: statusBg,
-            border: '2px solid var(--om-surface, #ffffff)',
-            boxShadow: '0 0 4px rgba(0,0,0,0.2)',
-            zIndex: 2,
           }}
         />
       )}

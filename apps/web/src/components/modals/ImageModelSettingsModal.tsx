@@ -191,36 +191,14 @@ export const ImageModelSettingsModal: React.FC = () => {
       </div>
 
       {/* 说明横幅 */}
-      <div
-        style={{
-          padding: '12px 14px',
-          background: 'rgba(139, 92, 246, 0.08)',
-          border: '1px solid rgba(139, 92, 246, 0.25)',
-          borderRadius: '8px',
-          marginBottom: '16px',
-          fontSize: '12.5px',
-          color: '#6d28d9',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
+      <div className="image-model-header-banner">
         <div>
-          <span style={{ fontWeight: 600 }}>专属于虚拟形象与绘图工坊的生图模型管理</span>
-          <div style={{ fontSize: '11.5px', color: 'var(--om-text-secondary, #6b7280)', marginTop: '2px' }}>
+          <span className="image-model-header-title">专属于虚拟形象与绘图工坊的生图模型管理</span>
+          <div className="image-model-header-desc">
             与对话推理模型完全物理隔离，独立设定绘图 API Key、模型与服务商。
           </div>
         </div>
-        <span
-          style={{
-            fontSize: '11px',
-            padding: '2px 8px',
-            borderRadius: '12px',
-            background: '#8b5cf6',
-            color: '#fff',
-            fontWeight: 600,
-          }}
-        >
+        <span className="image-model-active-badge">
           当前生效: {providers.find((p) => p.id === activeProviderId)?.name || activeProviderId}
         </span>
       </div>
@@ -300,44 +278,43 @@ export const ImageModelSettingsModal: React.FC = () => {
           border: '1px solid var(--om-border, #e5e7eb)',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+        <div className="flex-between-center mb-14">
           <div>
-            <span style={{ fontSize: '14px', fontWeight: 600 }}>
+            <span className="font-semibold text-sm">
               {currentProvider.name} 参数设定
             </span>
-            <span style={{ fontSize: '12px', color: 'var(--om-muted, #6b7280)', marginLeft: '8px' }}>
+            <span className="text-muted text-xs ml-2">
               ({currentProvider.id})
             </span>
           </div>
           {isCurrentActive ? (
-            <span style={{ fontSize: '12px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="image-model-status-ready">
               <CheckCircle size={14} /> 当前生图引擎
             </span>
           ) : (
-            <span style={{ fontSize: '12px', color: 'var(--om-muted, #6b7280)' }}>
+            <span className="image-model-status-unready">
               未激活（点击保存可激活此引擎）
             </span>
           )}
         </div>
 
         {currentProvider.id === 'builtin' ? (
-          <div style={{ padding: '12px', background: 'var(--om-bg-subtle, #f9fafb)', borderRadius: '6px', fontSize: '13px' }}>
+          <div className="callout-card text-sm">
             内置离线自适应矢量引擎无需配置 API Key 或网络地址，可在离线环境下秒级生成风格化角色形象。
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="image-model-form-group">
             {/* 模型选择 */}
             <div>
-              <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <label className="image-model-form-label">
                 图像生成模型 (Model ID):
               </label>
               {currentProvider.candidateModels && currentProvider.candidateModels.length > 0 ? (
-                <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="flex-gap-8">
                   <select
-                    className="input-text"
+                    className="input-text flex-1"
                     value={modelId}
                     onChange={(e) => setModelId(e.target.value)}
-                    style={{ flex: 1, padding: '7px 10px', fontSize: '13px' }}
                   >
                     {currentProvider.candidateModels.map((m) => (
                       <option key={m} value={m}>
@@ -347,83 +324,67 @@ export const ImageModelSettingsModal: React.FC = () => {
                   </select>
                   <input
                     type="text"
-                    className="input-text"
+                    className="input-text flex-1"
                     placeholder="或直接输入自定义模型标识"
                     value={modelId}
                     onChange={(e) => setModelId(e.target.value)}
-                    style={{ flex: 1, padding: '7px 10px', fontSize: '13px' }}
                   />
                 </div>
               ) : (
                 <input
                   type="text"
-                  className="input-text"
+                  className="input-text w-full"
                   value={modelId}
                   onChange={(e) => setModelId(e.target.value)}
-                  style={{ width: '100%', padding: '7px 10px', fontSize: '13px' }}
                 />
               )}
             </div>
 
             {/* Base URL */}
             <div>
-              <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <label className="image-model-form-label">
                 服务接口端点 (Base URL):
               </label>
-              <div style={{ position: 'relative' }}>
+              <div className="image-model-input-wrap">
                 <input
                   type="text"
-                  className="input-text"
+                  className="input-text image-model-input-field"
                   value={endpoint}
                   onChange={(e) => setEndpoint(e.target.value)}
                   placeholder="https://..."
-                  style={{ width: '100%', padding: '7px 10px', fontSize: '13px', paddingLeft: '32px' }}
                 />
-                <Globe size={15} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--om-muted, #9ca3af)' }} />
+                <Globe size={15} className="image-model-input-icon" />
               </div>
             </div>
 
             {/* API Key */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <label style={{ fontSize: '12.5px', fontWeight: 600 }}>
+              <div className="flex-between-center mb-6">
+                <label className="image-model-form-label">
                   API 访问密钥 (API Key):
                 </label>
                 {currentProvider.hasKey && (
-                  <span style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span className="image-model-status-ready text-xs">
                     <Shield size={12} /> 环境中已配置秘钥 ({currentProvider.maskedKey})
                   </span>
                 )}
               </div>
-              <div style={{ position: 'relative' }}>
+              <div className="image-model-input-wrap">
                 <input
                   type="password"
-                  className="input-text"
+                  className="input-text image-model-input-field"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={currentProvider.hasKey ? '已读取环境变量/本地凭据 (留空保持原秘钥)' : '请输入 API 密钥 (如 sk-...)'}
-                  style={{ width: '100%', padding: '7px 10px', fontSize: '13px', paddingLeft: '32px' }}
                 />
-                <Key size={15} style={{ position: 'absolute', left: '10px', top: '10px', color: 'var(--om-muted, #9ca3af)' }} />
+                <Key size={15} className="image-model-input-icon" />
               </div>
             </div>
 
             {/* 连通性测试结果面板 */}
             {testResult && (
-              <div
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12.5px',
-                  background: testResult.ok ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                  border: testResult.ok ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                  color: testResult.ok ? '#065f46' : '#991b1b',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className={`image-model-test-panel ${testResult.ok ? 'is-success' : 'is-fail'}`}>
+                <div className="flex-center-gap-8">
                   {testResult.ok ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
                   <span>
                     {testResult.ok
@@ -432,7 +393,7 @@ export const ImageModelSettingsModal: React.FC = () => {
                   </span>
                 </div>
                 {testResult.models && (
-                  <span style={{ fontSize: '11px', color: '#047857' }}>
+                  <span className="text-xs color-green-700">
                     探测到 {testResult.models.length} 个可用生图模型
                   </span>
                 )}
@@ -442,21 +403,13 @@ export const ImageModelSettingsModal: React.FC = () => {
         )}
 
         {/* 底部按钮栏 */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
+        <div className="flex-end-gap-10 mt-18">
           {currentProvider.id !== 'builtin' && (
             <button
               type="button"
-              className="btn-secondary"
+              className="btn-secondary btn-sm"
               onClick={handleTest}
               disabled={isTesting}
-              style={{
-                padding: '7px 14px',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                cursor: isTesting ? 'not-allowed' : 'pointer',
-              }}
             >
               <RefreshCw size={14} className={isTesting ? 'spin' : ''} />
               {isTesting ? '正在测试连通性...' : '测试连通性'}
@@ -465,17 +418,9 @@ export const ImageModelSettingsModal: React.FC = () => {
 
           <button
             type="button"
-            className="btn-primary"
+            className="btn-primary btn-sm"
             onClick={handleSave}
             disabled={saving}
-            style={{
-              padding: '7px 18px',
-              fontSize: '13px',
-              fontWeight: 600,
-              background: '#8b5cf6',
-              borderColor: '#7c3aed',
-              cursor: saving ? 'not-allowed' : 'pointer',
-            }}
           >
             {saving ? '正在保存...' : '设为默认生图引擎'}
           </button>

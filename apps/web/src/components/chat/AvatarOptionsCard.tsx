@@ -52,7 +52,7 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
           <div className="avatar-card-icon-circle">
             <Sparkles size={16} />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="avatar-card-header-info">
             <div className="avatar-card-stage-title">
               {stage === 'estimate' && `为 ${botName} 创作新虚拟形象`}
               {stage === 'drawing' && '正在生成 4 组候选方案...'}
@@ -71,25 +71,16 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
         {/* Stage 1: Estimate */}
         {stage === 'estimate' && (
           <div className="avatar-card-body">
-            <div style={{ fontSize: '12.5px', color: 'var(--om-muted)', marginBottom: '14px', lineHeight: 1.5 }}>
+            <div className="avatar-card-estimate-desc">
               预计生成 {cost.pictures || 8} 张高保真切图（4 组多角度候选方案 + 4 种情绪动作姿态）。
               {cost.clip_model && ' 支持视频动态转绘。'}
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="avatar-card-btn-row">
               <button
                 type="button"
                 disabled={busyAction !== null}
                 onClick={() => act('start', () => api.avatarStart(event.id))}
-                className="btn-primary"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '7px 16px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  borderRadius: '8px',
-                }}
+                className="btn-primary avatar-card-btn-action"
               >
                 {busyAction === 'start' ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                 开始绘制形象
@@ -98,15 +89,7 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
                 type="button"
                 disabled={busyAction !== null}
                 onClick={() => act('cancel', () => api.avatarCancel(event.id))}
-                className="btn-secondary"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '7px 14px',
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                }}
+                className="btn-secondary avatar-card-btn-action"
               >
                 <X size={14} /> 暂不需要
               </button>
@@ -126,7 +109,6 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
                   <div
                     key={idx}
                     className={`avatar-card-candidate-cell ${isSelected ? 'is-selected' : ''}`}
-                    style={{ cursor: stage === 'choose' && imgUrl ? 'pointer' : 'default' }}
                     onClick={() => {
                       if (stage === 'choose' && imgUrl && busyAction === null) {
                         act(`choose-${idx}`, () => api.avatarChoose(event.id, idx));
@@ -137,23 +119,12 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
                       <img
                         src={imgUrl}
                         alt={`候选 ${idx + 1}`}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        className="avatar-card-candidate-img"
                       />
                     ) : (
-                      <div
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          color: 'var(--om-muted)',
-                        }}
-                      >
+                      <div className="avatar-card-candidate-empty">
                         <Loader2 size={20} className="animate-spin" />
-                        <span style={{ fontSize: '11px' }}>生成中...</span>
+                        <span className="font-size-11">生成中...</span>
                       </div>
                     )}
 
@@ -180,24 +151,16 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
             </div>
 
             {stage === 'choose' && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: 'var(--om-muted)' }}>
+              <div className="avatar-card-bottom-bar">
+                <span className="avatar-card-bottom-text">
                   可在输入框中直接说「第2个」或「左上角」
                 </span>
-                <div style={{ display: 'flex', gap: '6px' }}>
+                <div className="flex-center-gap-6">
                   <button
                     type="button"
                     disabled={busyAction !== null}
                     onClick={() => act('regenerate', () => api.avatarStart(event.id))}
-                    className="btn-secondary"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '5px 10px',
-                      fontSize: '12px',
-                      borderRadius: '6px',
-                    }}
+                    className="btn-secondary btn-sm"
                   >
                     <RefreshCw size={12} className={busyAction === 'regenerate' ? 'animate-spin' : ''} />
                     再来一组
@@ -206,15 +169,7 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
                     type="button"
                     disabled={busyAction !== null}
                     onClick={() => act('cancel', () => api.avatarCancel(event.id))}
-                    className="btn-secondary"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '5px 8px',
-                      fontSize: '12px',
-                      borderRadius: '6px',
-                    }}
+                    className="btn-secondary btn-sm"
                   >
                     <X size={12} />
                   </button>
@@ -227,20 +182,20 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
         {/* Stage 4: Posing */}
         {stage === 'posing' && (
           <div className="avatar-card-body">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div className="avatar-card-done-preview">
               {typeof event.chosen === 'number' && event.candidates[event.chosen] && (
                 <img
                   src={event.candidates[event.chosen]!}
                   alt="选定候选"
-                  style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover' }}
+                  className="avatar-card-done-avatar"
                 />
               )}
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600 }}>
+              <div className="flex-1">
+                <div className="avatar-card-done-name-line">
                   <Loader2 size={14} className="animate-spin text-accent" />
                   <span>正在渲染全套姿态 (工作、等待、喜悦、错误)...</span>
                 </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--om-muted)', marginTop: '2px' }}>
+                <div className="avatar-card-done-sub">
                   保持人设面容与配色一致，自动赋予情绪特有道具
                 </div>
               </div>
@@ -251,30 +206,21 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
         {/* Stage 5: Done */}
         {stage === 'done' && event.moods && (
           <div className="avatar-card-body">
-            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '6px', marginBottom: '12px' }}>
+            <div className="avatar-card-moods-scroll">
               {(['idle', 'working', 'waiting', 'happy', 'error'] as AvatarMood[]).map((m) => {
                 const moodImg = event.moods?.[m];
                 return (
-                  <div key={m} style={{ flexShrink: 0, textAlign: 'center', width: '58px' }}>
-                    <div
-                      style={{
-                        width: '56px',
-                        height: '56px',
-                        borderRadius: '10px',
-                        overflow: 'hidden',
-                        background: 'var(--om-surface-2)',
-                        border: '1px solid var(--om-border)',
-                      }}
-                    >
+                  <div key={m} className="avatar-card-mood-item">
+                    <div className="avatar-card-mood-box">
                       {moodImg ? (
-                        <img src={moodImg} alt={m} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <img src={moodImg} alt={m} className="avatar-card-candidate-img" />
                       ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div className="avatar-card-candidate-empty">
                           -
                         </div>
                       )}
                     </div>
-                    <span style={{ fontSize: '10px', color: 'var(--om-muted)', display: 'block', marginTop: '3px' }}>
+                    <span className="avatar-card-mood-label">
                       {MOOD_LABELS[m]}
                     </span>
                   </div>
@@ -282,23 +228,15 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
               })}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', color: 'var(--accent-green, #10b981)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <div className="avatar-card-bottom-bar">
+              <span className="avatar-card-status-success">
                 <Check size={14} /> 已作为当前 Bot 形象生效
               </span>
               {onOpenStudio && (
                 <button
                   type="button"
                   onClick={onOpenStudio}
-                  className="btn-secondary"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '4px 10px',
-                    fontSize: '12px',
-                    borderRadius: '6px',
-                  }}
+                  className="btn-secondary btn-sm"
                 >
                   <Eye size={12} /> 在工坊中预览
                 </button>
@@ -309,23 +247,15 @@ export const AvatarOptionsCard: React.FC<AvatarOptionsCardProps> = ({
 
         {/* Cancelled or Failed */}
         {(stage === 'cancelled' || stage === 'failed') && (
-          <div className="avatar-card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '12.5px', color: 'var(--om-muted)' }}>
+          <div className="avatar-card-body avatar-card-bottom-bar">
+            <span className="avatar-card-bottom-text">
               {event.message || (stage === 'cancelled' ? '形象创建已取消' : '生成失败，请重试')}
             </span>
             <button
               type="button"
               disabled={busyAction !== null}
               onClick={() => act('retry', () => api.avatarBegin({ description: event.description, style: event.style }))}
-              className="btn-secondary"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '4px 10px',
-                fontSize: '12px',
-                borderRadius: '6px',
-              }}
+              className="btn-secondary btn-sm"
             >
               <RefreshCw size={12} /> 重新发起
             </button>

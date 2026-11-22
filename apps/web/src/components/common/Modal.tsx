@@ -100,7 +100,7 @@ export const Modal: React.FC<ModalProps> = ({
         {!hideHeader && (
           <div className="modal-header">
             <div className="modal-title-wrap">
-              {icon && <span className="modal-header-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>{icon}</span>}
+              {icon && <span className="modal-header-icon">{icon}</span>}
               <h3 className="modal-title" id={titleId}>
                 {title}
               </h3>
@@ -116,7 +116,7 @@ export const Modal: React.FC<ModalProps> = ({
           </div>
         )}
 
-        <div className="modal-body-scroll" style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="modal-body-scroll">
           {children}
         </div>
 

@@ -119,7 +119,7 @@ export const ArtifactsView: React.FC = () => {
       </div>
 
       {loadError && (
-        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+        <div className="view-load-error is-spaced" role="alert">
           <AlertTriangle size={14} />
           <span>工件列表加载失败：{loadError}</span>
           <button type="button" onClick={loadArtifacts} disabled={loading}>重试</button>

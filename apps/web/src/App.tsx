@@ -32,13 +32,27 @@ const ArtifactsView = lazy(() =>
   import('./components/artifacts/ArtifactsView').then((m) => ({ default: m.ArtifactsView }))
 );
 
-import { ModelSettingsModal } from './components/modals/ModelSettingsModal';
-import { ImageModelSettingsModal } from './components/modals/ImageModelSettingsModal';
-import { AddMachineModal } from './components/modals/AddMachineModal';
-import { AuthModal } from './components/modals/AuthModal';
-import { BotProfileModal } from './components/modals/BotProfileModal';
-import { AvatarStudioModal } from './components/modals/AvatarStudioModal';
-import { SettingsModal } from './components/modals/SettingsModal';
+const ModelSettingsModal = lazy(() =>
+  import('./components/modals/ModelSettingsModal').then((m) => ({ default: m.ModelSettingsModal }))
+);
+const ImageModelSettingsModal = lazy(() =>
+  import('./components/modals/ImageModelSettingsModal').then((m) => ({ default: m.ImageModelSettingsModal }))
+);
+const AddMachineModal = lazy(() =>
+  import('./components/modals/AddMachineModal').then((m) => ({ default: m.AddMachineModal }))
+);
+const AuthModal = lazy(() =>
+  import('./components/modals/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
+const BotProfileModal = lazy(() =>
+  import('./components/modals/BotProfileModal').then((m) => ({ default: m.BotProfileModal }))
+);
+const AvatarStudioModal = lazy(() =>
+  import('./components/modals/AvatarStudioModal').then((m) => ({ default: m.AvatarStudioModal }))
+);
+const SettingsModal = lazy(() =>
+  import('./components/modals/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
 
 function ViewLoading() {
   return (
@@ -70,10 +84,10 @@ class ViewBoundary extends React.Component<
     if (this.state.error) {
       return (
         <div className="view-crash" role="alert">
-          <AlertTriangle size={24} style={{ color: 'var(--accent-red)' }} />
+          <AlertTriangle size={24} className="view-crash-icon" />
           <h2>页面暂时无法显示</h2>
           <p>模块加载或视图组件渲染时遇到意外错误，已为您保护其它工作区正常运行。</p>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+          <div className="view-crash-actions">
             <button
               type="button"
               className="btn-primary"
@@ -89,9 +103,9 @@ class ViewBoundary extends React.Component<
               刷新页面
             </button>
           </div>
-          <details style={{ marginTop: '16px', fontSize: '11px', color: 'var(--text-dim)', textAlign: 'left', maxWidth: '520px', width: '100%' }}>
-            <summary style={{ cursor: 'pointer', userSelect: 'none' }}>查看技术诊断信息</summary>
-            <pre style={{ marginTop: '8px', padding: '8px', background: 'var(--om-surface)', borderRadius: '6px', overflowX: 'auto', maxHeight: '160px' }}>
+          <details className="view-crash-details">
+            <summary className="view-crash-summary">查看技术诊断信息</summary>
+            <pre className="view-crash-pre">
               {this.state.error.stack || this.state.error.message || '未知异常'}
             </pre>
           </details>
@@ -174,21 +188,23 @@ export const App: React.FC = () => {
       </main>
 
       {/* Modals & Toasts */}
-      <ModelSettingsModal />
-      <ImageModelSettingsModal />
-      <AddMachineModal />
-      <AuthModal />
-      <BotProfileModal />
-      <AvatarStudioModal
-        isOpen={isAvatarStudioOpen}
-        onClose={() => {
-          setIsAvatarStudioOpen(false);
-          loadBots();
-        }}
-        targetBot={activeBot}
-        zIndex={2100}
-      />
-      <SettingsModal />
+      <Suspense fallback={null}>
+        <ModelSettingsModal />
+        <ImageModelSettingsModal />
+        <AddMachineModal />
+        <AuthModal />
+        <BotProfileModal />
+        <AvatarStudioModal
+          isOpen={isAvatarStudioOpen}
+          onClose={() => {
+            setIsAvatarStudioOpen(false);
+            loadBots();
+          }}
+          targetBot={activeBot}
+          zIndex={2100}
+        />
+        <SettingsModal />
+      </Suspense>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
