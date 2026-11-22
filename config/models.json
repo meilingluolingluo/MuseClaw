@@ -86,6 +86,7 @@
       "baseUrl": "local://pi",
       "model": "Opus 5.5-baidu-oneapi",
       "candidateModels": [
+        "anthropic/claude-3-7-sonnet",
         "Opus 5.5-baidu-oneapi",
         "Claude Sonnet 5.5-baidu-oneapi",
         "Claude Haiku 5.5-baidu-oneapi",
@@ -95,12 +96,15 @@
         "DeepSeek-V4.1-Flash-baidu-oneapi",
         "DeepSeek-V4-Flash-baidu-oneapi",
         "DeepSeek-V4-Pro-baidu-oneapi",
+        "Kimi-K2.7-Code-baidu-oneapi",
+        "openai/gpt-4o",
+        "deepseek/deepseek-chat",
+        "gpt-5.6-sol",
+        "GLM-5.3-Flash",
         "ERNIE-5.5-Flash-Preview-baidu-oneapi",
         "gpt-6.1-sol-baidu-oneapi",
         "gpt-5.6-sol-baidu-oneapi",
-        "anthropic/claude-3-7-sonnet",
         "anthropic/claude-3-5-sonnet",
-        "openai/gpt-4o",
         "openai/o3-mini"
       ],
       "isLocalAgent": true,
@@ -228,12 +232,12 @@
     {
       "id": "custom",
       "name": "企业内部专有网关 (Custom)",
-      "baseUrl": "https://internal-ai.corp/v1/chat/completions",
+      "baseUrl": "https://api.example.com/v1/chat/completions",
       "model": "",
       "candidateModels": [],
       "isCustom": true,
       "description": "支持任意企业内网代理、中转或私有大模型网关"
     }
   ],
-  "updatedAt": 1795006000000
+  "updatedAt": 1795324709814
 }

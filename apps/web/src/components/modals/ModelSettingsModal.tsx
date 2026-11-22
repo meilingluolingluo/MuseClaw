@@ -55,7 +55,7 @@ export const ModelSettingsModal: React.FC = () => {
   };
 
   const isLocalAgent = Boolean(
-    currentProvider.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(currentProvider.id)
+    currentProvider.isLocalAgent || ['codex', 'pi', 'dsh', 'ollama', 'ducc', 'ducx'].includes(currentProvider.id)
   );
 
   const candidateModels = (currentProvider.candidateModels && currentProvider.candidateModels.length > 0)
@@ -113,7 +113,7 @@ export const ModelSettingsModal: React.FC = () => {
 
   const isCurrentActive = selectedProviderId === modelsConfig?.activeProviderId;
   const isCurrentReady = isLocalAgent
-    ? Boolean(currentProvider.installed || currentProvider.isAvailable)
+    ? Boolean(currentProvider.installed && currentProvider.isAvailable !== false)
     : Boolean(currentProvider.hasKey || currentProvider.apiKey || currentProvider.isAvailable);
 
   return (
@@ -155,8 +155,8 @@ export const ModelSettingsModal: React.FC = () => {
         {modelsConfig?.providers.map((p) => {
           const isSelected = p.id === selectedProviderId;
           const isActive = p.id === modelsConfig.activeProviderId;
-          const isLocal = Boolean(p.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(p.id));
-          const isReady = isLocal ? Boolean(p.installed || p.isAvailable) : Boolean(p.hasKey || p.apiKey || p.isAvailable);
+          const isLocal = Boolean(p.isLocalAgent || ['codex', 'pi', 'dsh', 'ollama', 'ducc', 'ducx'].includes(p.id));
+          const isReady = isLocal ? Boolean(p.installed && p.isAvailable !== false) : Boolean(p.hasKey || p.apiKey || p.isAvailable);
 
           let badgeText = '待配置';
           let isBadgeGreen = false;
@@ -167,6 +167,9 @@ export const ModelSettingsModal: React.FC = () => {
             if (isReady) {
               badgeText = '💻 本地已就绪';
               isBadgeGreen = true;
+            } else if (p.installed && p.isAvailable === false) {
+              badgeText = '未运行';
+              isBadgeGreen = false;
             } else {
               badgeText = '未检测到';
               isBadgeGreen = false;
@@ -211,7 +214,9 @@ export const ModelSettingsModal: React.FC = () => {
           <span
             className={`pill-badge ${isCurrentReady ? 'pill-green' : 'pill-neutral'} model-config-badge`}
           >
-            {isCurrentReady ? (isLocalAgent ? '✅ 本地环境就绪' : '✅ 环境就绪') : '待配置'}
+            {isCurrentReady
+              ? (isLocalAgent ? '✅ 本地环境就绪' : '✅ 环境就绪')
+              : (currentProvider.installed && currentProvider.isAvailable === false ? '⚠️ 服务未启动' : '未检测到')}
           </span>
         </div>
 
@@ -271,6 +276,21 @@ export const ModelSettingsModal: React.FC = () => {
               </div>
             </div>
 
+            {currentProvider.id === 'ollama' && (
+              <div className="model-field">
+                <label className="model-field-label">
+                  服务接入点 (Base URL / Endpoint):
+                </label>
+                <input
+                  type="text"
+                  className="form-control model-input"
+                  placeholder="http://localhost:11434"
+                  value={endpoint}
+                  onChange={(e) => setEndpoint(e.target.value)}
+                />
+              </div>
+            )}
+
             {testResult ? (
               testResult.success ? (
                 <div className="model-test-banner is-success">
@@ -313,7 +333,11 @@ export const ModelSettingsModal: React.FC = () => {
               <div className="model-test-banner is-warning">
                 <AlertCircle size={16} className="model-test-icon is-warning" />
                 <div className="model-test-heading is-warning">
-                  未检测到本地 {currentProvider.name} 程序。请在终端安装或连接个人电脑伴侣。
+                  {currentProvider.id === 'ollama'
+                    ? (currentProvider.installed && currentProvider.isAvailable === false
+                      ? '已检测到本地 ollama 程序，但后台服务未运行。请在终端执行 ollama serve 启动服务。'
+                      : '未检测到本地 Ollama 运行服务。请在终端执行 brew install ollama && ollama serve 安装启动。')
+                    : `未检测到本地 ${currentProvider.name} 程序。请在终端安装或连接个人电脑伴侣。`}
                 </div>
                 <button
                   type="button"

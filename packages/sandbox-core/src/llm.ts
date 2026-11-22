@@ -141,10 +141,8 @@ export function resolveApiKey(explicitKey?: string, providerId?: string): string
   if (providerId === 'moonshot' && process.env.MOONSHOT_API_KEY) {
     return process.env.MOONSHOT_API_KEY.trim();
   }
-
-  // 本地 Ollama 默认不需要实际 Key
-  if (providerId === 'ollama') {
-    return 'ollama';
+  if (providerId === 'ollama' && process.env.OLLAMA_API_KEY) {
+    return process.env.OLLAMA_API_KEY.trim();
   }
 
   // 兜底扫描常见候选本地文件
@@ -435,7 +433,7 @@ export async function testProviderConnection(config: ModelProviderConfig & { use
   model?: string;
   error?: string;
 }> {
-  if (config.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(config.id)) {
+  if ((config.isLocalAgent && config.id !== 'ollama') || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(config.id)) {
     const res = await testLocalAgent(config.id, config.model, config.userId);
     return {
       ok: res.ok,
@@ -443,6 +441,17 @@ export async function testProviderConnection(config: ModelProviderConfig & { use
       model: res.version || config.model,
       error: res.error
     };
+  }
+
+  if (config.id === 'ollama') {
+    const probe = await probeOllamaModels(config.baseUrl || 'http://localhost:11434');
+    if (!probe.ok) {
+      return {
+        ok: false,
+        latencyMs: 0,
+        error: probe.error || '未检测到本地正在运行的 Ollama 服务 (端口 11434 未响应)'
+      };
+    }
   }
 
   const start = Date.now();
@@ -595,7 +604,10 @@ export async function probeOllamaModels(baseUrl = 'http://localhost:11434'): Pro
     }
     return { ok: true, models: [] };
   } catch (err: any) {
-    return { ok: false, models: [], error: err.message || '未检测到本地正在运行的 Ollama 服务' };
+    const errorMsg = (err.message && err.message !== 'fetch failed')
+      ? err.message
+      : '未检测到本地正在运行的 Ollama 服务 (端口 11434 未响应)';
+    return { ok: false, models: [], error: errorMsg };
   }
 }
 

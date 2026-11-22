@@ -53,6 +53,8 @@ const DEFAULT_PRESETS: ModelProviderConfig[] = [
     baseUrl: 'http://localhost:11434/v1/chat/completions',
     model: 'llama3.2',
     candidateModels: ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral'],
+    isLocalAgent: true,
+    protocol: 'openai-http',
     description: '无需联网与 API Key，完全在本地硬件私有化运行'
   },
   {
@@ -377,7 +379,8 @@ export class ModelProviderStore {
 
   public getActiveCaller(options?: { userId?: string }): LLMCaller {
     const active = this.getActiveProvider(options?.userId);
-    if (active.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(active.id)) {
+    const isStdioAgent = ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(active.id);
+    if (isStdioAgent || (active.isLocalAgent && active.id !== 'ollama')) {
       if (options?.userId) {
         return createLocalAgentCaller(active, { userId: options.userId });
       }
@@ -402,7 +405,8 @@ export class ModelProviderStore {
       if (botModelConfig.model) {
         provider.model = botModelConfig.model;
       }
-      if (provider.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(provider.id)) {
+      const isStdioAgent = ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(provider.id);
+      if (isStdioAgent || (provider.isLocalAgent && provider.id !== 'ollama')) {
         return createLocalAgentCaller(this.resolveEffectiveLocalModel(provider));
       }
       return createOpenAICompatibleCaller(provider);
@@ -429,7 +433,7 @@ export class ModelProviderStore {
 
     const list = await Promise.all(
       Array.from(this.providers.values()).map(async (p) => {
-        const isLocal = Boolean(p.isLocalAgent || ['codex', 'pi', 'dsh', 'ducc', 'ducx'].includes(p.id));
+        const isLocal = Boolean(p.isLocalAgent || ['codex', 'pi', 'dsh', 'ollama', 'ducc', 'ducx'].includes(p.id));
         const localInfo = localMap.get(p.id);
         const resolved = resolveApiKey(p.apiKey, p.id);
 
@@ -437,7 +441,14 @@ export class ModelProviderStore {
         const remoteAgents = isLocal ? globalRunnerMesh.getAggregatedRemoteAgents(userId) : [];
         const remote = remoteAgents.find((r) => r.id === p.id);
 
-        if (isLocal) {
+        if (p.id === 'ollama') {
+          const detectedModels = localInfo?.candidateModels && localInfo.candidateModels.length > 0 ? localInfo.candidateModels : [];
+          const remoteModels = remote?.candidateModels && remote.candidateModels.length > 0 ? remote.candidateModels : [];
+          candidateModels = remoteModels.length > 0
+            ? remoteModels
+            : (detectedModels.length > 0 ? detectedModels : (p.candidateModels || ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral']));
+          p.candidateModels = candidateModels;
+        } else if (isLocal) {
           let models: string[] = [];
           if (remote?.candidateModels && remote.candidateModels.length > 0) {
             models = remote.candidateModels;
@@ -456,8 +467,6 @@ export class ModelProviderStore {
           }
           candidateModels = models;
           p.candidateModels = models;
-        } else if (p.id === 'ollama') {
-          candidateModels = p.candidateModels && p.candidateModels.length > 0 ? p.candidateModels : ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral'];
         } else {
           const cached = this.getRemoteModelsCache(p.id, p.baseUrl, resolved || '');
           if (cached && cached.length > 0) {
@@ -484,13 +493,37 @@ export class ModelProviderStore {
           ? (p.model && candidateModels.includes(p.model) ? p.model : candidateModels[0])
           : p.model;
 
-        const isInstalled = isLocal ? Boolean(localInfo?.installed || remote?.installed) : undefined;
-        const hasKey = isLocal ? Boolean(isInstalled) : Boolean(resolved);
+        let isInstalled: boolean | undefined = undefined;
+        let isAvailable: boolean | undefined = undefined;
+        let hasKey = false;
         const effectiveVersion = localInfo?.version || remote?.version || p.version;
         const effectiveExecutable = localInfo?.executablePath || remote?.executablePath || p.executablePath;
-        const maskedKey = isLocal
-          ? (isInstalled ? (effectiveVersion || (localInfo?.installed ? '本地就绪' : '远程就绪')) : '未检测到')
-          : this.maskKey(resolved);
+        let maskedKey = '';
+
+        if (p.id === 'ollama') {
+          const isHttpActive = localInfo?.version === 'HTTP Service Active' || Boolean(remote?.installed);
+          const isBinInstalled = Boolean(localInfo?.installed || remote?.installed);
+          isInstalled = isBinInstalled;
+          isAvailable = isHttpActive;
+          hasKey = isHttpActive;
+          if (isHttpActive) {
+            maskedKey = remote?.installed ? '远程节点已就绪' : '本地服务已就绪';
+          } else if (isBinInstalled) {
+            maskedKey = '服务未运行 (请执行 ollama serve)';
+          } else {
+            maskedKey = '未检测到';
+          }
+        } else if (isLocal) {
+          isInstalled = Boolean(localInfo?.installed || remote?.installed);
+          isAvailable = isInstalled;
+          hasKey = Boolean(isInstalled);
+          maskedKey = isInstalled
+            ? (effectiveVersion || (localInfo?.installed ? '本地就绪' : '远程就绪'))
+            : '未检测到';
+        } else {
+          hasKey = Boolean(resolved);
+          maskedKey = this.maskKey(resolved);
+        }
 
         return {
           ...p,
@@ -498,6 +531,7 @@ export class ModelProviderStore {
           candidateModels,
           isLocalAgent: isLocal,
           installed: isInstalled,
+          isAvailable,
           version: effectiveVersion,
           executablePath: effectiveExecutable,
           hasKey,
