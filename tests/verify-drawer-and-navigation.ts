@@ -6,61 +6,59 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 
-function testDrawerAndNavigation() {
-  console.log('--- 验证抽屉与多 Agent 产品交互逻辑优化 ---');
+console.log('===============================================================');
+console.log('   MUSECLAW 侧边抽屉、导航轨与 SPA 路由系统验收测试');
+console.log('===============================================================\n');
 
-  // 1. 验证 HTML 结构
-  const htmlPath = path.join(rootDir, 'apps/web/index.html');
-  const html = fs.readFileSync(htmlPath, 'utf-8');
-  assert.ok(html.includes('id="side-drawer"'), 'index.html 需包含 side-drawer 标识');
-  assert.ok(html.includes('id="btn-toggle-drawer"'), 'index.html 需包含抽屉折叠/展开按钮');
-  assert.ok(html.includes('id="global-view-title-container"'), 'index.html 需包含全局视图标题栏');
-  assert.ok(html.includes('id="global-top-status"'), 'index.html 需包含全局顶部状态容器');
-  assert.ok(html.includes('id="memory-active-bot-name"'), 'index.html 需包含记忆归属 Bot 标识');
-  console.log('✅ [1/5] index.html 抽屉与顶栏解耦结构校验通过');
-
-  // 2. 验证 CSS 样式
-  const cssPath = path.join(rootDir, 'apps/web/styles.css');
-  const css = fs.readFileSync(cssPath, 'utf-8');
-  assert.ok(css.includes('.drawer-hidden'), 'styles.css 需包含 .drawer-hidden 样式规则');
-  assert.ok(css.includes('.drawer-collapsed'), 'styles.css 需包含 .drawer-collapsed 折叠动画');
-  assert.ok(css.includes('.btn-toggle-drawer'), 'styles.css 需包含 .btn-toggle-drawer 按钮样式');
-  console.log('✅ [2/5] styles.css 自适应抽屉折叠与动效规则校验通过');
-
-  // 3. 验证 app.js 交互逻辑
-  const jsPath = path.join(rootDir, 'apps/web/app.js');
-  const js = fs.readFileSync(jsPath, 'utf-8');
-  assert.ok(js.includes('function updateDrawerForTab'), 'app.js 需包含 updateDrawerForTab 抽屉派发逻辑');
-  assert.ok(js.includes('function updateTopBarForTab'), 'app.js 需包含 updateTopBarForTab 顶栏解耦逻辑');
-  assert.ok(js.includes('function toggleDrawer'), 'app.js 需包含 toggleDrawer 手动折叠方法');
-  assert.ok(js.includes("state.currentTab === 'memory'"), 'app.js selectBot 需联动 loadMemory');
-  assert.ok(js.includes("switchTab('chat')"), 'app.js 非对话/记忆下选中 Bot 需平滑切回对话');
-  console.log('✅ [3/5] app.js 上下文派发与 Bot 切换联动逻辑校验通过');
-
-  // 4. 验证 server.ts 静态目录优先级
-  const serverPath = path.join(rootDir, 'apps/gateway/src/server.ts');
-  const serverCode = fs.readFileSync(serverPath, 'utf-8');
-  assert.ok(serverCode.includes("path.resolve(__dirname, '../../web/index.html')"), 'server.ts 优先加载 apps/web/index.html');
-  assert.ok(serverCode.includes("path.resolve(__dirname, '../../web')"), 'server.ts 优先挂载 apps/web 静态目录');
-  console.log('✅ [4/5] server.ts 前端静态目录单源化优先级校验通过');
-
-  // 5. 验证 Vite 代理配置
-  const vitePath = path.join(rootDir, 'apps/web/vite.config.ts');
-  assert.ok(fs.existsSync(vitePath), 'apps/web/vite.config.ts 需存在');
-  const viteCode = fs.readFileSync(vitePath, 'utf-8');
-  assert.ok(viteCode.includes("target: 'http://localhost:8799'"), 'Vite 需正确代理 /api 到后端网关端口');
-  console.log('✅ [5/6] vite.config.ts 开发热更反向代理配置校验通过');
-
-  // 6. 验证 SPA 路由状态同步与刷新持久化逻辑
-  assert.ok(js.includes('function getTabFromLocation'), 'app.js 需包含 getTabFromLocation 路由状态恢复函数');
-  assert.ok(js.includes('window.history.pushState'), 'switchTab 需同步更新浏览器 URL 路径');
-  assert.ok(js.includes("localStorage.setItem('museclaw_active_tab'"), 'Tab 切换需落盘保存用户当前所在视窗');
-  assert.ok(js.includes("localStorage.setItem('museclaw_active_bot'"), 'Bot 选择需落盘保存');
-  assert.ok(js.includes("localStorage.setItem('museclaw_active_session'"), 'Session 选择需落盘保存');
-  assert.ok(js.includes("window.addEventListener('popstate'"), '需监听 popstate 支持浏览器前进后退');
-  console.log('✅ [6/6] SPA History 路径同步与页面刷新状态自恢复校验通过');
-
-  console.log('🎉 所有抽屉与交互优化全项验收 100% 通过！\n');
+// 1. 验证 NavRail.tsx 核心导航架构与可访问性
+console.log('[Test 1] 验证 NavRail.tsx 主导航轨 (8 大核心视窗) 与 A11y 语义');
+const navRailPath = path.join(rootDir, 'apps/web/src/components/layout/NavRail.tsx');
+const navRailCode = fs.readFileSync(navRailPath, 'utf-8');
+const requiredTabs = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
+for (const t of requiredTabs) {
+  assert.ok(navRailCode.includes(`id: '${t}'`), `NavRail 必须包含 ${t} 视窗导航项`);
 }
+assert.ok(navRailCode.includes('aria-label="主工作台导航"'), 'NavRail 必须包含无障碍导航标签');
+assert.ok(navRailCode.includes('aria-current={isActive ? \'page\' : undefined}'), 'NavRail 选中项必须包含 aria-current="page"');
+console.log('  -> [PASS] NavRail 导航轨 8 大核心视窗与 A11y 规范齐备');
 
-testDrawerAndNavigation();
+// 2. 验证 SideDrawer.tsx 会话管理、Bot 切换与折叠动效
+console.log('\n[Test 2] 验证 SideDrawer.tsx 侧边抽屉、会话管理与键盘交互');
+const drawerPath = path.join(rootDir, 'apps/web/src/components/layout/SideDrawer.tsx');
+const drawerCode = fs.readFileSync(drawerPath, 'utf-8');
+assert.ok(drawerCode.includes('createNewSession'), 'SideDrawer 必须包含新建会话交互');
+assert.ok(drawerCode.includes('deleteSession'), 'SideDrawer 必须包含会话删除功能');
+assert.ok(drawerCode.includes('isDrawerCollapsed') || drawerCode.includes('drawer-collapsed'), 'SideDrawer 必须支持抽屉展开折叠状态');
+assert.ok(drawerCode.includes('onKeyDown'), 'SideDrawer 会话列表项必须支持键盘 Enter/Space 选定');
+console.log('  -> [PASS] SideDrawer 会话生命周期与键盘无障碍交互完备');
+
+// 3. 验证 AppContext.tsx 导航状态机与 History 同步
+console.log('\n[Test 3] 验证 AppContext.tsx 路由持久化与 popstate 浏览器导航联动');
+const contextPath = path.join(rootDir, 'apps/web/src/context/AppContext.tsx');
+const contextCode = fs.readFileSync(contextPath, 'utf-8');
+assert.ok(contextCode.includes('setTab'), 'AppContext 必须提供全局 tab 切换方法');
+assert.ok(contextCode.includes('window.history.pushState'), 'Tab 切换需同步更新浏览器 URL 路径');
+assert.ok(contextCode.includes("addEventListener('popstate'"), '需监听 popstate 支持浏览器前进后退');
+assert.ok(contextCode.includes('safeStorage'), '存储操作必须通过 safeStorage 安全兜底');
+console.log('  -> [PASS] 全局路由状态机、浏览器前进后退与 safeStorage 存储联动正常');
+
+// 4. 验证 styles.css 导航轨与抽屉布局样式
+console.log('\n[Test 4] 验证 styles.css 侧边栏与抽屉布局样式');
+const cssPath = path.join(rootDir, 'apps/web/styles.css');
+const cssCode = fs.readFileSync(cssPath, 'utf-8');
+assert.ok(cssCode.includes('.nav-rail'), 'styles.css 需包含 .nav-rail 样式');
+assert.ok(cssCode.includes('.side-drawer') || cssCode.includes('.drawer-collapsed'), 'styles.css 需包含抽屉布局样式');
+assert.ok(cssCode.includes('.session-item'), 'styles.css 需包含 .session-item 会话项样式');
+console.log('  -> [PASS] 现代化侧边栏与自适应抽屉样式规则齐备');
+
+// 5. 验证 server.ts 静态托管与 SPA History 模式 Fallback
+console.log('\n[Test 5] 验证 server.ts SPA History 降级回退机制');
+const serverPath = path.join(rootDir, 'apps/gateway/src/server.ts');
+const serverCode = fs.readFileSync(serverPath, 'utf-8');
+assert.ok(serverCode.includes('resolveWebDist'), 'server.ts 优先挂载 apps/web/dist');
+assert.ok(serverCode.includes('isSpaRoute'), 'server.ts 支持所有 SPA 声明路由 fallback 到 index.html');
+console.log('  -> [PASS] 服务端 SPA History 回退机制正常');
+
+console.log('\n===============================================================');
+console.log('   🎉 抽屉、导航轨与 SPA 路由系统 100% 验收通过！');
+console.log('===============================================================\n');

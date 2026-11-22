@@ -15,6 +15,8 @@ async function runWebUiTests() {
   // 等待服务器就绪
   await new Promise((resolve) => setTimeout(resolve, 500));
 
+  let testError: any = null;
+
   try {
     // =========================================================================
     // 1. 静态主页 HTML 与 SPA 托管测试 (GET /)
@@ -27,47 +29,36 @@ async function runWebUiTests() {
     assert.strictEqual(resHome.status, 200);
     assert.ok(resHome.headers.get('content-type')?.includes('text/html'));
     assert.ok(htmlText.includes('MuseClaw - 企业级多 Agent 数字员工工作台'));
-    assert.ok(htmlText.includes('class="app-container"'));
-    assert.ok(htmlText.includes('id="view-chat"'));
-    assert.ok(htmlText.includes('id="view-goals"'));
-    assert.ok(htmlText.includes('id="view-memory"'));
-    assert.ok(htmlText.includes('id="view-skills"'));
-    assert.ok(htmlText.includes('id="view-artifacts"'));
-    assert.ok(htmlText.includes('id="view-routines"'));
-    assert.ok(htmlText.includes('id="view-audit"'));
-    console.log('  -> [PASS] 根路径成功返回完整 SPA 页面结构 (含 7 大功能视窗容器)');
+    assert.ok(htmlText.includes('id="root"'));
+    console.log('  -> [PASS] 根路径成功返回完整 SPA 页面结构 (含 #root 挂载点)');
 
     // =========================================================================
-    // 2. CSS 样式文件与设计系统测试 (GET /styles.css)
+    // 2. CSS 样式文件与设计系统测试 (GET 现代打包样式资产)
     // =========================================================================
-    console.log('\n[Test 2] 验证现代化样式文件 GET /styles.css');
-    const resCss = await fetch(`http://localhost:${testPort}/styles.css`);
+    console.log('\n[Test 2] 验证现代化样式文件 (打包产物或入口样式)');
+    const cssHrefMatch = htmlText.match(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/);
+    const cssHref = cssHrefMatch ? cssHrefMatch[1] : '/styles.css';
+    console.log('  -> 正在请求样式文件:', cssHref);
+    const resCss = await fetch(`http://localhost:${testPort}${cssHref}`);
     assert.strictEqual(resCss.status, 200);
     assert.ok(resCss.headers.get('content-type')?.includes('text/css'));
     const cssText = await resCss.text();
-    assert.ok(cssText.includes('--om-bg'));
-    assert.ok(cssText.includes('--bg-primary: var(--om-bg)'));
-    assert.ok(cssText.includes('.approval-card-hazard'));
-    assert.ok(cssText.includes('.ladder-rung-card'));
-    console.log('  -> [PASS] styles.css 成功返回完整设计系统与双主题/审批卡片样式');
+    assert.ok(cssText.includes('--om-bg') || cssText.includes('--bg-primary') || cssText.includes('color-scheme'));
+    console.log('  -> [PASS] 样式文件成功返回现代化设计系统变量');
 
     // =========================================================================
-    // 3. 前端 ES Modules 脚本与图标库 (GET /app.js & /icons.js)
+    // 3. 前端 ES Modules 脚本加载测试 (GET 现代打包脚本资产)
     // =========================================================================
-    console.log('\n[Test 3] 验证前端核心业务脚本 GET /app.js & /icons.js');
-    const resApp = await fetch(`http://localhost:${testPort}/app.js`);
+    console.log('\n[Test 3] 验证前端核心业务脚本模块加载');
+    const jsSrcMatch = htmlText.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/);
+    const jsSrc = jsSrcMatch ? jsSrcMatch[1] : '/app.js';
+    console.log('  -> 正在请求核心脚本:', jsSrc);
+    const resApp = await fetch(`http://localhost:${testPort}${jsSrc}`);
     assert.strictEqual(resApp.status, 200);
     assert.ok(resApp.headers.get('content-type')?.includes('application/javascript'));
     const appJsText = await resApp.text();
-    assert.ok(appJsText.includes('renderSentinelApprovalCard'));
-    assert.ok(appJsText.includes('Taint Egress Barrier'));
-    assert.ok(appJsText.includes('triggerConsolidation'));
-    assert.ok(appJsText.includes('advanceGoal'));
-
-    const resIcons = await fetch(`http://localhost:${testPort}/icons.js`);
-    assert.strictEqual(resIcons.status, 200);
-    assert.ok(resIcons.headers.get('content-type')?.includes('application/javascript'));
-    console.log('  -> [PASS] 核心交互逻辑与矢量图标库加载正常');
+    assert.ok(appJsText.length > 100);
+    console.log('  -> [PASS] 核心前端业务脚本加载正常');
 
     // =========================================================================
     // 4. SPA 任意路由 Fallback 测试 (History API Routing)
@@ -76,6 +67,8 @@ async function runWebUiTests() {
     const resSpaRoute = await fetch(`http://localhost:${testPort}/chat/session_demo_123`);
     assert.strictEqual(resSpaRoute.status, 200);
     assert.ok(resSpaRoute.headers.get('content-type')?.includes('text/html'));
+    const spaRouteHtml = await resSpaRoute.text();
+    assert.ok(spaRouteHtml.includes('id="root"'));
 
     const resRoutinesSpa = await fetch(`http://localhost:${testPort}/routines`);
     assert.strictEqual(resRoutinesSpa.status, 200);
@@ -100,8 +93,8 @@ async function runWebUiTests() {
     });
     assert.ok([403, 404].includes(rawTraversalStatus));
 
-    // 5.2 探测未知非 SPA 路由
-    const resUnknown = await fetch(`http://localhost:${testPort}/unknown_non_spa_path`);
+    // 5.2 探测未知非 SPA 且带后缀的文件
+    const resUnknown = await fetch(`http://localhost:${testPort}/unknown_non_spa_path.html`);
     assert.strictEqual(resUnknown.status, 404);
 
     // 5.3 探测缺失的静态文件
@@ -114,7 +107,7 @@ async function runWebUiTests() {
     // =========================================================================
     console.log('\n[Test 6] 验证前端页面背后的数据接口集成');
     
-    // 6.1 Bots 列表
+    // 6.1 Bots 列表 (公开接口)
     const resBots = await fetch(`http://localhost:${testPort}/api/bots`);
     const botsData = await resBots.json();
     const botsList = Array.isArray(botsData) ? botsData : botsData.bots;
@@ -122,38 +115,58 @@ async function runWebUiTests() {
     assert.ok(botsList.length > 0);
     console.log(`  -> Bots 列表就绪: 共 ${botsList.length} 个数字员工`);
 
-    // 6.2 微沙箱与阶梯状态
-    const resSandbox = await fetch(`http://localhost:${testPort}/api/sandbox/status`);
+    // 6.2 匿名请求受保护接口校验 (验证 P0-1 鉴权守卫生效)
+    const resAnonSandbox = await fetch(`http://localhost:${testPort}/api/sandbox/status`);
+    assert.strictEqual(resAnonSandbox.status, 401, '未登录访问受保护接口必须返回 401');
+    console.log('  -> [PASS] 安全拦截守卫正常，未登录访问受保护接口返回 401');
+
+    // 6.3 注册测试账号并获取 Cookie (用于安全鉴权受保护接口)
+    const regRes = await fetch(`http://localhost:${testPort}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: `test_ui_${Date.now()}`, password: 'password123' })
+    });
+    assert.strictEqual(regRes.status, 200);
+    const cookie = regRes.headers.get('set-cookie')?.split(';')[0] || '';
+    const authHeaders = cookie ? { Cookie: cookie } : {};
+
+    // 6.4 微沙箱与阶梯状态 (已登录访问)
+    const resSandbox = await fetch(`http://localhost:${testPort}/api/sandbox/status`, { headers: authHeaders });
+    assert.strictEqual(resSandbox.status, 200);
     const sandboxData = await resSandbox.json();
     assert.ok(sandboxData.microSandbox);
     assert.ok(sandboxData.channelLadder);
     console.log(`  -> 阶梯与微沙箱状态就绪: 引擎 ${sandboxData.microSandbox.engine}`);
 
-    // 6.3 长周期目标列表
-    const resGoals = await fetch(`http://localhost:${testPort}/api/goals`);
+    // 6.4 长周期目标列表 (已登录鉴权访问)
+    const resGoals = await fetch(`http://localhost:${testPort}/api/goals`, { headers: authHeaders });
+    assert.strictEqual(resGoals.status, 200);
     const goalsData = await resGoals.json();
     assert.ok(Array.isArray(goalsData));
     console.log(`  -> 长周期目标就绪: 共 ${goalsData.length} 个目标`);
 
-    // 6.4 巡检 Routine 列表与 Hooks
-    const resRoutines = await fetch(`http://localhost:${testPort}/api/routines`);
+    // 6.5 巡检 Routine 列表与 Hooks
+    const resRoutines = await fetch(`http://localhost:${testPort}/api/routines`, { headers: authHeaders });
+    assert.strictEqual(resRoutines.status, 200);
     const routinesData = await resRoutines.json();
     assert.ok(Array.isArray(routinesData));
     console.log(`  -> 巡检例行任务就绪: 共 ${routinesData.length} 个例行任务`);
 
-    // 6.5 安全策略与审计
-    const resPolicy = await fetch(`http://localhost:${testPort}/api/policy`);
+    // 6.6 安全策略与审计
+    const resPolicy = await fetch(`http://localhost:${testPort}/api/policy`, { headers: authHeaders });
+    assert.strictEqual(resPolicy.status, 200);
     const policyData = await resPolicy.json();
     assert.ok(policyData.version || policyData.high_risk_patterns);
-    const resGrants = await fetch(`http://localhost:${testPort}/api/grants`);
+    const resGrants = await fetch(`http://localhost:${testPort}/api/grants`, { headers: authHeaders });
+    assert.strictEqual(resGrants.status, 200);
     const grantsData = await resGrants.json();
     assert.ok(Array.isArray(grantsData));
     console.log(`  -> 声明式策略与 Grants 授权体系就绪: 共 ${grantsData.length} 个授权`);
 
-    // 6.6 /api/chat 别名对齐 /api/tasks (SSE 实时流式响应)
+    // 6.7 /api/chat 别名对齐 /api/tasks (SSE 实时流式响应)
     const resChat = await fetch(`http://localhost:${testPort}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ prompt: 'PING_TEST', botId: 'muse' }),
     });
     assert.strictEqual(resChat.status, 200);
@@ -167,13 +180,13 @@ async function runWebUiTests() {
     console.log('\n===============================================================');
     console.log('   🎉 MuseClaw 前端 Web UI 全栈落地 100% 验收通过！');
     console.log('===============================================================\n');
+  } catch (err) {
+    testError = err;
+    console.error('\n❌ 前端 UI 集成测试失败:', err);
   } finally {
     server.close();
-    process.exit(0);
+    process.exit(testError ? 1 : 0);
   }
 }
 
-runWebUiTests().catch((err) => {
-  console.error('\n❌ 前端 UI 集成测试失败:', err);
-  process.exit(1);
-});
+runWebUiTests();

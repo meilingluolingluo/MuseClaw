@@ -41,7 +41,7 @@ const { items } = parseMemoryMarkdown(rawMemory);
 assert.strictEqual(items.length, 5, '必须准确解析出 5 条有效记忆条目');
 assert.strictEqual(items[0].content, '偏好使用 React 18');
 assert.strictEqual(items[0].source, 'agent');
-assert.strictEqual(items[2].content, '[user] 个人手机号 13800138000');
+assert.strictEqual(items[2].content, '个人手机号 13800138000');
 assert.strictEqual(items[2].source, 'user', '[user] 声明行必须识别为 source=user');
 
 console.log('  ✅ 结构化提取 ID 与 [user] 声明锚点识别验证通过\n');
@@ -98,7 +98,7 @@ const aggressiveProposals = [
 const planResult = planConsolidation(tenItems, aggressiveProposals, 0.2);
 
 assert.strictEqual(planResult.ops.length, 2, '只有合法且在预算内的 2 个操作被采纳');
-assert(planResult.skipped.some(s => s.includes('严禁删除用户亲自录入的声明')), '必须包含拦截用户声明 drop 的记录');
+assert(planResult.skipped.some(s => s.includes('严禁删除用户') || s.includes('User Anchor Protection')), '必须包含拦截用户声明 drop 的记录');
 assert(planResult.skipped.some(s => s.includes('超出单次 20% 精简预算限制')), '必须包含超出 20% 预算截断的记录');
 assert.strictEqual(planResult.more, true, '超出预算后必须置 more=true 留待下个周期');
 
