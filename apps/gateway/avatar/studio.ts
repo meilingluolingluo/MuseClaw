@@ -714,7 +714,7 @@ export class AvatarStudio {
   }
 
   /**
-   * 姿态图生成管道：针对情绪特有道具与动作进行个性化渲染
+   * 姿态图生成管道：优先基于已选中的高保真基准形象派生 100% 角色一致性情绪切图
    */
   private async renderMoodImage(
     ep: ReturnType<typeof this.getImageEndpointConfig>,
@@ -724,19 +724,122 @@ export class AvatarStudio {
     style: string,
     variantIndex = 0
   ): Promise<Buffer> {
-    if (
-      (ep.provider === 'google' || ep.provider === 'openai' || ep.provider === 'siliconflow' || ep.provider === 'dashscope') &&
-      ep.apiKey
-    ) {
+    // 优先从已选中的基准待机形象 (baseIdlePath) 派生一致性情绪姿态
+    if (fs.existsSync(baseIdlePath)) {
       try {
-        const buf = await this.renderImage(ep, prompt, baseIdlePath, variantIndex);
-        if (buf && buf.length > 0) return buf;
-      } catch (e) {
-        console.warn(`[AvatarStudio] 姿态 ${mood} 远程生成失败，回退内置:`, e);
+        const baseBuffer = fs.readFileSync(baseIdlePath);
+        return this.generateMoodComposite(baseBuffer, mood);
+      } catch (err) {
+        console.warn(`[AvatarStudio] 派生 ${mood} 姿态失败，回退原生复制:`, err);
+        return fs.readFileSync(baseIdlePath);
       }
     }
 
     return this.generateProceduralAvatar(prompt, mood, variantIndex);
+  }
+
+  /**
+   * 基于已选中的高清晰基准形象，派生 100% 角色一致性情绪姿态
+   */
+  public generateMoodComposite(baseBuffer: Buffer, mood: Exclude<AvatarMood, 'idle'>): Buffer {
+    let mime = 'image/png';
+    if (baseBuffer.length >= 3 && baseBuffer[0] === 0xFF && baseBuffer[1] === 0xD8) {
+      mime = 'image/jpeg';
+    } else if (baseBuffer.length >= 12 && baseBuffer.subarray(0, 4).toString('ascii') === 'RIFF') {
+      mime = 'image/webp';
+    } else if (baseBuffer.toString('utf-8', 0, 100).includes('<svg')) {
+      mime = 'image/svg+xml';
+    }
+
+    const b64 = baseBuffer.toString('base64');
+    let overlay = '';
+
+    switch (mood) {
+      case 'working':
+        overlay = `
+          <!-- 专注工作角标与环境光环 -->
+          <g transform="translate(420, 420)">
+            <circle cx="0" cy="0" r="46" fill="#f59e0b" filter="drop-shadow(0 4px 12px rgba(245,158,11,0.5))"/>
+            <circle cx="0" cy="0" r="40" fill="#d97706"/>
+            <!-- 齿轮与工作专注符号 -->
+            <path d="M-14 -14 L14 14 M-14 14 L14 -14" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+            <circle cx="0" cy="0" r="15" fill="#ffffff"/>
+            <circle cx="0" cy="0" r="8" fill="#d97706"/>
+          </g>
+          <!-- 顶部专注射线 -->
+          <g opacity="0.9">
+            <path d="M256 16 L256 48" stroke="#fbbf24" stroke-width="7" stroke-linecap="round"/>
+            <path d="M214 26 L232 54" stroke="#fbbf24" stroke-width="6" stroke-linecap="round"/>
+            <path d="M298 26 L280 54" stroke="#fbbf24" stroke-width="6" stroke-linecap="round"/>
+          </g>
+        `;
+        break;
+
+      case 'waiting':
+        overlay = `
+          <!-- 思考中气泡与省略号 -->
+          <g transform="translate(396, 96)">
+            <ellipse cx="0" cy="0" rx="64" ry="46" fill="#3b82f6" filter="drop-shadow(0 6px 14px rgba(59,130,246,0.45))"/>
+            <ellipse cx="0" cy="0" rx="58" ry="40" fill="#2563eb"/>
+            <!-- 气泡小尾巴 -->
+            <circle cx="-40" cy="44" r="12" fill="#2563eb"/>
+            <circle cx="-54" cy="60" r="7" fill="#2563eb"/>
+            <!-- 三个发光思考点 -->
+            <circle cx="-25" cy="0" r="7" fill="#ffffff"/>
+            <circle cx="0" cy="0" r="7" fill="#ffffff"/>
+            <circle cx="25" cy="0" r="7" fill="#ffffff"/>
+          </g>
+        `;
+        break;
+
+      case 'happy':
+        overlay = `
+          <!-- 喜悦星芒与庆典花球 -->
+          <g transform="translate(420, 84)">
+            <circle cx="0" cy="0" r="38" fill="#ec4899" filter="drop-shadow(0 4px 12px rgba(236,72,153,0.5))"/>
+            <path d="M0 -24 L6 -7 L24 0 L6 7 L0 24 L-6 7 L-24 0 L-6 -7 Z" fill="#ffffff"/>
+          </g>
+          <g transform="translate(84, 80)">
+            <circle cx="0" cy="0" r="28" fill="#f59e0b" filter="drop-shadow(0 3px 8px rgba(245,158,11,0.4))"/>
+            <path d="M0 -18 L4 -5 L18 0 L4 5 L0 18 L-4 5 L-18 0 L-4 -5 Z" fill="#ffffff"/>
+          </g>
+          <!-- 欢快音符 -->
+          <g transform="translate(434, 224)">
+            <circle cx="0" cy="0" r="24" fill="#10b981" filter="drop-shadow(0 2px 6px rgba(16,185,129,0.4))"/>
+            <path d="M-6 4 A5 4 0 1 0 0 1 L0 -10 L10 -6 L10 0 A5 4 0 1 0 16 -3 L16 -12 L-6 -8 Z" fill="#ffffff"/>
+          </g>
+        `;
+        break;
+
+      case 'error':
+        overlay = `
+          <!-- 纠错提示与俏皮汗滴 -->
+          <g transform="translate(426, 90)">
+            <path d="M0 -38 C20 -18 26 2 26 16 A26 26 0 1 1 -26 16 C-26 2 -20 -18 0 -38 Z" fill="#06b6d4" filter="drop-shadow(0 4px 10px rgba(6,182,212,0.45))"/>
+            <ellipse cx="-6" cy="10" rx="6" ry="12" fill="#ffffff" opacity="0.6"/>
+          </g>
+          <g transform="translate(86, 426)">
+            <circle cx="0" cy="0" r="34" fill="#ef4444" filter="drop-shadow(0 4px 10px rgba(239,68,68,0.4))"/>
+            <path d="M-13 -13 L13 13 M-13 13 L13 -13" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
+          </g>
+        `;
+        break;
+    }
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <clipPath id="circleClip">
+      <rect x="0" y="0" width="512" height="512" rx="48"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#circleClip)">
+    <image href="data:${mime};base64,${b64}" width="512" height="512" preserveAspectRatio="xMidYMid slice" />
+  </g>
+  ${overlay}
+</svg>`;
+
+    return Buffer.from(svg, 'utf-8');
   }
 
   /**
