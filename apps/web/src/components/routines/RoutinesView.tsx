@@ -27,6 +27,7 @@ import { Modal } from '../common/Modal';
 import { formatTime } from '../../utils/format';
 import { formatCronZh, previewNextRuns, SCHEDULE_PRESETS } from '../../utils/cronHelper';
 import { ToolTrace } from '../chat/ToolTrace';
+import { SchedulePicker } from './SchedulePicker';
 
 /** 剪贴板 API 不可用时的降级复制 */
 function fallbackCopy(text: string, done: () => void): void {
@@ -946,63 +947,15 @@ export const RoutinesView: React.FC = () => {
           {/* Tab 2: 调度周期与预设 */}
           {modalTab === 'schedule' && (
             <div className="routine-modal-form-group">
-              <div className="form-group">
-                <label className="form-label">
-                  常用业务预设 (一键填入)
-                </label>
-                <div className="routine-preset-grid">
-                  {SCHEDULE_PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setFormCron(p.cronExpr);
-                        setFormScheduleKind(p.kind);
-                      }}
-                      className={`routine-preset-btn ${formCron === p.cronExpr ? 'is-active' : ''}`}
-                    >
-                      <span className="routine-preset-label">{p.label}</span>
-                      <span className="routine-preset-cron">{p.cronExpr}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  调度表达式 (标准 5 段式 Cron / @every 间隔 / @at 单次)
-                </label>
-                <input
-                  type="text"
-                  className="form-control font-mono"
-                  placeholder="如: 0 9 * * 1-5 或 */15 * * * * 或 @every 15m"
-                  value={formCron}
-                  onChange={(e) => setFormCron(e.target.value)}
-                />
-              </div>
-
-              {/* 实时自然语言解析提示 */}
-              <div className="routine-cron-feedback-box">
-                <div className="routine-cron-feedback-title">
-                  智能中文识别:
-                </div>
-                <div className="routine-cron-feedback-zh">
-                  📅 {formatCronZh(formCron)}
-                </div>
-
-                {previewRuns.length > 0 && (
-                  <div className="routine-cron-preview-runs">
-                    <div className="routine-cron-preview-heading">接下来 3 次运行预估:</div>
-                    <div className="routine-cron-preview-items">
-                      {previewRuns.map((r, i) => (
-                        <div key={i} className="routine-cron-preview-item">
-                          • {r}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <SchedulePicker
+                value={formCron}
+                onChange={(nextCron, kind) => {
+                  setFormCron(nextCron);
+                  if (kind) {
+                    setFormScheduleKind(kind);
+                  }
+                }}
+              />
             </div>
           )}
 
