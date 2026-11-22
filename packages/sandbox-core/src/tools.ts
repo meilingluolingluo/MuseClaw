@@ -816,25 +816,118 @@ export function createDefaultTools(options?: {
       }
     },
 
-    // 阶梯 1 (API/Local): 文件安全读取
+    // 阶梯 1 (API/Local): 文件安全读取（支持路径自动解析与图片/二进制安全提示）
     {
       name: 'read_file',
-      description: '读取沙箱或工作区中的指定文件内容（具备安全路径保护，敏感文件读取后将标记会话为 Tainted 污点状态）',
+      description: '读取沙箱或工作区中的指定文件内容（具备安全路径保护与图片格式防误读提示）',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: '文件相对路径或绝对路径' }
+          path: { type: 'string', description: '文件相对路径、绝对路径或 /uploads/ 地址' }
         },
         required: ['path']
       },
       execute: async (args) => {
-        const filePath = String(args.path || '');
-        console.log(`[Tool:read_file] 读取文件: ${filePath}`);
+        const rawPath = String(args.path || '');
+        console.log(`[Tool:read_file] 读取文件: ${rawPath}`);
+        const resolvedPath = resolveUploadOrWorkspacePath(rawPath);
+        const ext = path.extname(resolvedPath).toLowerCase();
+        const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']);
+
+        if (imageExts.has(ext)) {
+          let size = 0;
+          try {
+            size = fs.statSync(resolvedPath).size;
+          } catch {}
+          return {
+            isImage: true,
+            filename: path.basename(resolvedPath),
+            path: resolvedPath,
+            sizeBytes: size,
+            notice: '该文件为图片格式。若需提取图中的文字、表格、界面字段或报错内容，请直接调用 ocr_document 工具进行高精度图文识别。'
+          };
+        }
+
         try {
-          const content = await environment.readFile(filePath);
+          const content = await environment.readFile(resolvedPath);
           return { content, sizeBytes: Buffer.byteLength(content, 'utf-8') };
         } catch (error: any) {
           return { error: error.message };
+        }
+      }
+    },
+
+    // 阶梯 1 (API/Local): 文档与图像云端 OCR 识别（官方接口规范）
+    {
+      name: 'ocr_document',
+      description: '识别图片、屏幕截图、PDF、Word 或 PPT 文档中的文字、表格与版面结构（支持按页解析与文字定位，适用于用户上传的附件图片、单据、扫描件或复杂文档）',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '文件相对路径、绝对路径或 /uploads/ 附件地址' },
+          purpose: {
+            type: 'string',
+            enum: ['text_recognition', 'rich_layout_recognition'],
+            description: '解析模式：text_recognition（标准提取文字，默认）或 rich_layout_recognition（富版面与结构化解析）'
+          }
+        },
+        required: ['path']
+      },
+      execute: async (args) => {
+        const rawPath = String(args.path || '');
+        const purpose = (args.purpose as string) || 'text_recognition';
+        const resolvedPath = resolveUploadOrWorkspacePath(rawPath);
+
+        if (!fs.existsSync(resolvedPath)) {
+          return { error: `文件未找到: ${rawPath}` };
+        }
+
+        const apiKey = process.env.DEEPSEEK_API_KEY;
+        if (!apiKey) {
+          return {
+            error: '未配置 DEEPSEEK_API_KEY，无法调用云端文档/图片 OCR 解析服务。请在系统环境变量或设置中配置 API Key。'
+          };
+        }
+
+        try {
+          const fileBuffer = fs.readFileSync(resolvedPath);
+          const blob = new Blob([fileBuffer]);
+          const formData = new FormData();
+          formData.append('file', blob, path.basename(resolvedPath));
+          formData.append('purpose', purpose);
+
+          const res = await fetch('https://api.deepseek.com/v1/tools/ocr', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey.replace(/[^\x00-\x7F]/g, '').trim()}`
+            },
+            body: formData
+          });
+
+          if (!res.ok) {
+            const errBody = await res.text();
+            return {
+              error: `OCR 服务调用异常 (HTTP ${res.status}): ${errBody}`
+            };
+          }
+
+          const data: any = await res.json();
+          if (data.error) {
+            return { error: `OCR 识别失败: ${data.error.message || JSON.stringify(data.error)}` };
+          }
+
+          const formattedPages = (data.pages || []).map((p: any) => `--- 第 ${p.index + 1} 页 ---\n${p.text}`).join('\n\n');
+          return {
+            success: true,
+            id: data.id,
+            purpose: data.purpose,
+            pageCount: data.page_count,
+            text: formattedPages,
+            pages: data.pages,
+            usage: data.usage
+          };
+        } catch (err: any) {
+          return { error: `OCR 执行发生异常: ${err.message || String(err)}` };
         }
       }
     },
