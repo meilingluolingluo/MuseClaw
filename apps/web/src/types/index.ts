@@ -483,5 +483,6 @@ export interface AvatarStudioView {
   current: AvatarSession | null;
   face: AvatarFaceMeta | null;
   presets: AvatarPreset[];
+  customFaces?: AvatarFaceMeta[];
 }
 

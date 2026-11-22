@@ -89,62 +89,6 @@ export const AVATAR_PRESETS: AvatarPreset[] = [
       error: '/avatars/presets/haibara/error.webp',
     },
   },
-  {
-    id: 'moss-courier',
-    name: '苔藓邮差 (Moss Courier)',
-    description: '绿叶耳朵与布制信件包的森林小小信使',
-    style: 'muse',
-    emoji: '🍀',
-    moods: {
-      idle: '/avatars/presets/moss-courier/idle.webp',
-      working: '/avatars/presets/moss-courier/working.webp',
-      waiting: '/avatars/presets/moss-courier/waiting.webp',
-      happy: '/avatars/presets/moss-courier/happy.webp',
-      error: '/avatars/presets/moss-courier/error.webp',
-    },
-  },
-  {
-    id: 'tide-tinker',
-    name: '潮汐工匠 (Tide Tinker)',
-    description: '海沫色蝾螈工匠，佩戴珊瑚触角与工具囊',
-    style: 'clay',
-    emoji: '🫧',
-    moods: {
-      idle: '/avatars/presets/tide-tinker/idle.webp',
-      working: '/avatars/presets/tide-tinker/working.webp',
-      waiting: '/avatars/presets/tide-tinker/waiting.webp',
-      happy: '/avatars/presets/tide-tinker/happy.webp',
-      error: '/avatars/presets/tide-tinker/error.webp',
-    },
-  },
-  {
-    id: 'dusk-moth',
-    name: '暮光飞蛾 (Dusk Moth)',
-    description: '深靛蓝飞蛾学者，配有复古圆眼镜与水彩双翼',
-    style: 'watercolor',
-    emoji: '🌙',
-    moods: {
-      idle: '/avatars/presets/dusk-moth/idle.webp',
-      working: '/avatars/presets/dusk-moth/working.webp',
-      waiting: '/avatars/presets/dusk-moth/waiting.webp',
-      happy: '/avatars/presets/dusk-moth/happy.webp',
-      error: '/avatars/presets/dusk-moth/error.webp',
-    },
-  },
-  {
-    id: 'copper-acorn',
-    name: '纯铜橡果 (Copper Acorn)',
-    description: '纯铜机械橡果小助手，带有温润齿轮与青灰防风围巾',
-    style: 'line',
-    emoji: '🦊',
-    moods: {
-      idle: '/avatars/presets/copper-acorn/idle.webp',
-      working: '/avatars/presets/copper-acorn/working.webp',
-      waiting: '/avatars/presets/copper-acorn/waiting.webp',
-      happy: '/avatars/presets/copper-acorn/happy.webp',
-      error: '/avatars/presets/copper-acorn/error.webp',
-    },
-  },
 ];
 
 export class AvatarStudio {
@@ -195,6 +139,46 @@ export class AvatarStudio {
 
   public getPresets(): AvatarPreset[] {
     return AVATAR_PRESETS;
+  }
+
+  /**
+   * 获取所有已生成的自定义专属形象 (按创建时间升序排列，新的排在后面)
+   */
+  public getCustomFaces(): AvatarFaceMeta[] {
+    if (!fs.existsSync(this.customDir)) return [];
+    try {
+      const dirs = fs.readdirSync(this.customDir);
+      const faces: AvatarFaceMeta[] = [];
+      for (const d of dirs) {
+        const metaPath = path.join(this.customDir, d, 'face.json');
+        if (fs.existsSync(metaPath)) {
+          try {
+            const raw = fs.readFileSync(metaPath, 'utf-8');
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.id) {
+              if (!parsed.moods || !parsed.moods.idle) {
+                parsed.moods = {
+                  idle: `/avatars/custom/${parsed.id}/idle.webp`,
+                  working: `/avatars/custom/${parsed.id}/working.webp`,
+                  waiting: `/avatars/custom/${parsed.id}/waiting.webp`,
+                  happy: `/avatars/custom/${parsed.id}/happy.webp`,
+                  error: `/avatars/custom/${parsed.id}/error.webp`,
+                };
+              }
+              faces.push(parsed);
+            }
+          } catch (err) {
+            console.warn(`[AvatarStudio] 解析自定义形象 ${d} 失败: ${err}`);
+          }
+        }
+      }
+      // 新的排在后面 (创建时间升序排列)
+      faces.sort((a, b) => (a.created || 0) - (b.created || 0));
+      return faces;
+    } catch (err) {
+      console.warn(`[AvatarStudio] 获取自定义形象列表异常: ${err}`);
+      return [];
+    }
   }
 
   /**

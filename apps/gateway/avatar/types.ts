@@ -27,4 +27,5 @@ export interface AvatarStudioView {
   currentSession: AvatarSession | null;
   activeFace: AvatarFaceMeta | null;
   presets: AvatarPreset[];
+  customFaces?: AvatarFaceMeta[];
 }

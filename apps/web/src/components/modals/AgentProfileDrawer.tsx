@@ -29,10 +29,6 @@ import {
 
 const AVATAR_PRESETS = [
   { id: 'haibara', name: '小哀 (Haibara)', desc: '沉静目光与浅蓝针织', emoji: '🌸' },
-  { id: 'moss-courier', name: '苔藓邮差 (Moss)', desc: '绿叶耳朵与布制信件包', emoji: '🍀' },
-  { id: 'tide-tinker', name: '潮汐工匠 (Tide)', desc: '海沫色蝾螈工匠与工具囊', emoji: '🫧' },
-  { id: 'dusk-moth', name: '暮光飞蛾 (Dusk)', desc: '圆眼镜与水彩双翼', emoji: '🌙' },
-  { id: 'copper-acorn', name: '纯铜橡果 (Copper)', desc: '纯铜齿轮与保暖围巾', emoji: '🦊' },
   { id: 'dragon', name: '巨龙灵兽 (Dragon)', desc: '守护灵与深蓝鳞片', emoji: '🐉' },
 ];
 

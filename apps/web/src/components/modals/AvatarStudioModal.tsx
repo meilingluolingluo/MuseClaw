@@ -24,6 +24,7 @@ import type {
   AvatarSession,
   AvatarPreset,
   AvatarStudioView,
+  AvatarFaceMeta,
 } from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
@@ -52,37 +53,6 @@ const PROMPT_SUGGESTIONS = [
   '圆滚滚的赛博朋克机械小猫，带有发光霓虹护目镜',
   '一只系着铃铛的可爱奶油水豚，头顶顶着一颗小橘子',
   '身穿航天服与小喷气背包的星际宇航员小兔子',
-];
-
-const INSPIRATION_PRESETS = [
-  {
-    id: 'moss-courier',
-    name: '苔邮使',
-    desc: '戴叶子耳朵和信件包的迷你邮差',
-    style: 'muse' as AvatarStyle,
-    img: '/avatars/presets/moss-courier/idle.webp',
-  },
-  {
-    id: 'tide-tinker',
-    name: '潮汐巧匠',
-    desc: '海沫色带珊瑚边缘的蝾螈工匠，带有简易工具袋',
-    style: 'clay' as AvatarStyle,
-    img: '/avatars/presets/tide-tinker/idle.webp',
-  },
-  {
-    id: 'dusk-moth',
-    name: '暮光蛾',
-    desc: '戴圆眼镜与靛蓝水彩双翼的思考飞蛾，带浅米色领圈',
-    style: 'watercolor' as AvatarStyle,
-    img: '/avatars/presets/dusk-moth/idle.webp',
-  },
-  {
-    id: 'copper-acorn',
-    name: '铜果',
-    desc: '橡果形纯铜机器人与鼠尾草色面板，围着沉静蓝色围巾',
-    style: 'line' as AvatarStyle,
-    img: '/avatars/presets/copper-acorn/idle.webp',
-  },
 ];
 
 const MOODS_LIST: AvatarMood[] = ['idle', 'working', 'waiting', 'happy', 'error'];
@@ -252,6 +222,26 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
         avatarType: preset.id === 'dragon' ? 'dragon' : 'preset',
       });
       showToast(`已装配形象「${preset.name}」！`, 'info');
+      await loadBots();
+      onApplied?.(updated);
+      fetchStatus();
+    } catch (e: any) {
+      showToast(`装配失败: ${e.message}`, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 一键应用自定义专属形象
+  const handleApplyCustomFace = async (face: AvatarFaceMeta) => {
+    if (!currentBot) return;
+    setBusy(`face-${face.id}`);
+    try {
+      const updated = await api.updateBot(currentBot.id, {
+        avatar: face.id,
+        avatarType: 'custom',
+      });
+      showToast(`已成功装配形象！`, 'info');
       await loadBots();
       onApplied?.(updated);
       fetchStatus();
@@ -511,7 +501,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 padding: '4px 6px',
               }}
             >
-              <Compass size={16} /> 预设形象馆
+              <Compass size={16} /> 形象图库 (预设与历史)
             </button>
           </div>
 
@@ -581,48 +571,175 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 </button>
               </div>
 
-              {/* AI 灵感预设卡片 (4 款代表性风格效果预览) */}
+              {/* 最近生成的专属形象 (新的排在后面) */}
               <div>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
-                  AI 灵感卡片 (点击自动填充描述与风格):
-                </span>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                  {INSPIRATION_PRESETS.map((p) => {
-                    const isSelected = description === p.desc && selectedStyle === p.style;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setDescription(p.desc);
-                          setSelectedStyle(p.style);
-                        }}
-                        style={{
-                          overflow: 'hidden',
-                          borderRadius: '12px',
-                          border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                          background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'var(--om-surface, #ffffff)',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                          padding: '0',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        <div style={{ aspectRatio: '1/1', background: '#f1efeb', overflow: 'hidden' }}>
-                          <img src={p.img} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        </div>
-                        <div style={{ padding: '6px 8px' }}>
-                          <div style={{ fontSize: '11.5px', fontWeight: 650, color: 'var(--om-fg, #111827)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {p.name}
-                          </div>
-                          <div style={{ fontSize: '10px', color: 'var(--om-muted, #6b7280)' }}>
-                            {STYLES_CATALOG.find((s) => s.id === p.style)?.label.split(' ')[0]}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase' }}>
+                    最近生成的形象 (点击卡片填充描述，或直接「立即装配」· 新的排在后面):
+                  </span>
+                  {studioStatus?.customFaces && studioStatus.customFaces.length > 0 && (
+                    <span style={{ fontSize: '10.5px', color: 'var(--om-muted, #9ca3af)' }}>
+                      共 {studioStatus.customFaces.length} 款历史创作
+                    </span>
+                  )}
                 </div>
+
+                {(!studioStatus?.customFaces || studioStatus.customFaces.length === 0) ? (
+                  <div
+                    style={{
+                      padding: '16px',
+                      textAlign: 'center',
+                      borderRadius: '10px',
+                      background: 'var(--om-surface, #f9fafb)',
+                      border: '1px dashed var(--om-border, #e5e7eb)',
+                      fontSize: '12px',
+                      color: 'var(--om-muted, #6b7280)',
+                    }}
+                  >
+                    暂无历史生成的形象。在下方输入描述并点击「开始绘制」，生成的形象将自动陈列于此。
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '10px',
+                      overflowX: 'auto',
+                      paddingBottom: '8px',
+                      paddingTop: '2px',
+                      scrollbarWidth: 'thin',
+                    }}
+                  >
+                    {[...(studioStatus?.customFaces || [])]
+                      .sort((a, b) => (a.created || 0) - (b.created || 0))
+                      .map((face) => {
+                        const isEquipped = currentBot?.avatar === face.id;
+                        const isDescSelected = description === face.description;
+                        const styleInfo = STYLES_CATALOG.find((s) => s.id === face.style);
+                        const imgUrl = face.moods?.idle || `/avatars/custom/${face.id}/idle.webp`;
+
+                        return (
+                          <div
+                            key={face.id}
+                            onClick={() => {
+                              if (face.description) setDescription(face.description);
+                              if (face.style) setSelectedStyle(face.style as AvatarStyle);
+                            }}
+                            style={{
+                              flex: '0 0 152px',
+                              width: '152px',
+                              overflow: 'hidden',
+                              borderRadius: '12px',
+                              border: isEquipped
+                                ? '2px solid #10b981'
+                                : isDescSelected
+                                ? '2px solid var(--om-accent, #3b82f6)'
+                                : '1px solid var(--om-border, #e5e7eb)',
+                              background: isEquipped
+                                ? 'rgba(16, 185, 129, 0.05)'
+                                : isDescSelected
+                                ? 'rgba(59, 130, 246, 0.05)'
+                                : 'var(--om-surface, #ffffff)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              cursor: 'pointer',
+                              position: 'relative',
+                              transition: 'all 0.15s ease',
+                              boxShadow: isEquipped ? '0 2px 6px rgba(16,185,129,0.15)' : 'none',
+                            }}
+                            title={`点击填充描述: ${face.description}`}
+                          >
+                            {/* 缩略图 */}
+                            <div style={{ aspectRatio: '1/1', background: '#f3f4f6', overflow: 'hidden', position: 'relative' }}>
+                              <img
+                                src={imgUrl}
+                                alt={face.description || face.id}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).src = '/avatars/dragon-idle.webp';
+                                }}
+                              />
+                              {isEquipped && (
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    top: '4px',
+                                    right: '4px',
+                                    background: '#10b981',
+                                    color: '#fff',
+                                    fontSize: '9.5px',
+                                    fontWeight: 700,
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                                  }}
+                                >
+                                  使用中
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 描述与风格 */}
+                            <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: '62px' }}>
+                              <div
+                                style={{
+                                  fontSize: '11px',
+                                  color: 'var(--om-fg, #111827)',
+                                  lineHeight: '1.3',
+                                  maxHeight: '2.6em',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  marginBottom: '4px',
+                                }}
+                              >
+                                {face.description || '自定义形象'}
+                              </div>
+
+                              <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '9.5px',
+                                    color: 'var(--om-muted, #6b7280)',
+                                    background: 'rgba(0,0,0,0.04)',
+                                    padding: '1px 4px',
+                                    borderRadius: '3px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {styleInfo?.label.split(' ')[0] || face.style || '默认'}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  disabled={isEquipped || busy !== null}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleApplyCustomFace(face);
+                                  }}
+                                  style={{
+                                    padding: '2px 7px',
+                                    fontSize: '10.5px',
+                                    fontWeight: 600,
+                                    borderRadius: '5px',
+                                    border: 'none',
+                                    cursor: isEquipped ? 'default' : 'pointer',
+                                    background: isEquipped ? '#10b981' : 'var(--om-accent, #3b82f6)',
+                                    color: '#fff',
+                                    whiteSpace: 'nowrap',
+                                    opacity: busy && busy.startsWith('face-') ? 0.6 : 1,
+                                  }}
+                                >
+                                  {isEquipped ? '已装配' : '立即装配'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
 
               {/* 描述输入框 */}
@@ -919,59 +1036,184 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
             </div>
           )}
 
-          {/* Tab 2: 预设形象馆 */}
+          {/* Tab 2: 形象图库 (预设与历史) */}
           {activeTab === 'presets' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px', overflowY: 'auto' }}>
-              {(studioStatus?.presets || []).map((preset) => {
-                const isSelected = currentBot?.avatar === preset.id;
-                return (
-                  <div
-                    key={preset.id}
-                    style={{
-                      display: 'flex',
-                      gap: '12px',
-                      padding: '12px',
-                      borderRadius: '12px',
-                      border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                      background: isSelected ? 'rgba(59, 130, 246, 0.06)' : 'var(--om-surface, #ffffff)',
-                    }}
-                  >
-                    <div style={{ flexShrink: 0 }}>
-                      <BotAvatar bot={{ avatar: preset.id } as any} size={52} motion="avatar-idle" />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 650, color: 'var(--om-fg, #111827)' }}>
-                          {preset.name}
-                        </span>
-                        {preset.clips && (
-                          <span style={{ fontSize: '10px', color: '#3b82f6', background: 'rgba(59,130,246,0.1)', padding: '1px 5px', borderRadius: '4px' }}>
-                            含视频动态
-                          </span>
-                        )}
-                      </div>
-                      <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)', marginTop: '2px', lineHeight: 1.3 }}>
-                        {preset.description}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={isSelected || busy !== null}
-                        onClick={() => handleApplyPreset(preset)}
-                        className={isSelected ? 'btn-secondary' : 'btn-primary'}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', overflowY: 'auto', maxHeight: '540px', paddingRight: '4px' }}>
+              {/* 系统内置预设 */}
+              <div>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--om-fg, #111827)', display: 'block', marginBottom: '8px' }}>
+                  系统内置预设
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                  {(studioStatus?.presets || []).map((preset) => {
+                    const isSelected = currentBot?.avatar === preset.id;
+                    return (
+                      <div
+                        key={preset.id}
                         style={{
-                          marginTop: 'auto',
-                          padding: '4px 10px',
-                          fontSize: '11.5px',
-                          borderRadius: '6px',
-                          alignSelf: 'flex-start',
+                          display: 'flex',
+                          gap: '12px',
+                          padding: '12px',
+                          borderRadius: '12px',
+                          border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.06)' : 'var(--om-surface, #ffffff)',
                         }}
                       >
-                        {isSelected ? '当前使用中' : '立即装配'}
-                      </button>
-                    </div>
+                        <div style={{ flexShrink: 0 }}>
+                          <BotAvatar bot={{ avatar: preset.id } as any} size={52} motion="avatar-idle" />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 650, color: 'var(--om-fg, #111827)' }}>
+                              {preset.name}
+                            </span>
+                            {preset.clips && (
+                              <span style={{ fontSize: '10px', color: '#3b82f6', background: 'rgba(59,130,246,0.1)', padding: '1px 5px', borderRadius: '4px' }}>
+                                含视频动态
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)', marginTop: '2px', lineHeight: 1.3 }}>
+                            {preset.description}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={isSelected || busy !== null}
+                            onClick={() => handleApplyPreset(preset)}
+                            className={isSelected ? 'btn-secondary' : 'btn-primary'}
+                            style={{
+                              marginTop: 'auto',
+                              padding: '4px 10px',
+                              fontSize: '11.5px',
+                              borderRadius: '6px',
+                              alignSelf: 'flex-start',
+                            }}
+                          >
+                            {isSelected ? '当前使用中' : '立即装配'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 最近生成的专属形象 (新的排在后面) */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--om-fg, #111827)' }}>
+                    最近生成的专属形象 (新的排在后面)
+                  </span>
+                  {studioStatus?.customFaces && studioStatus.customFaces.length > 0 && (
+                    <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
+                      共 {studioStatus.customFaces.length} 款历史创作
+                    </span>
+                  )}
+                </div>
+
+                {(!studioStatus?.customFaces || studioStatus.customFaces.length === 0) ? (
+                  <div
+                    style={{
+                      padding: '24px',
+                      textAlign: 'center',
+                      borderRadius: '10px',
+                      background: 'var(--om-surface, #f9fafb)',
+                      border: '1px dashed var(--om-border, #e5e7eb)',
+                      fontSize: '12px',
+                      color: 'var(--om-muted, #6b7280)',
+                    }}
+                  >
+                    暂无生成的自定义专属形象。可在「AI 智能创作」中输入提示词绘制。
                   </div>
-                );
-              })}
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                    {[...(studioStatus?.customFaces || [])]
+                      .sort((a, b) => (a.created || 0) - (b.created || 0))
+                      .map((face) => {
+                        const isEquipped = currentBot?.avatar === face.id;
+                        const styleInfo = STYLES_CATALOG.find((s) => s.id === face.style);
+                        return (
+                          <div
+                            key={face.id}
+                            style={{
+                              display: 'flex',
+                              gap: '12px',
+                              padding: '12px',
+                              borderRadius: '12px',
+                              border: isEquipped ? '2px solid #10b981' : '1px solid var(--om-border, #e5e7eb)',
+                              background: isEquipped ? 'rgba(16, 185, 129, 0.06)' : 'var(--om-surface, #ffffff)',
+                            }}
+                          >
+                            <div style={{ flexShrink: 0 }}>
+                              <BotAvatar bot={{ avatar: face.id, avatarType: 'custom' } as any} size={52} motion="avatar-idle" />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6366f1', background: 'rgba(99,102,241,0.08)', padding: '1px 5px', borderRadius: '4px' }}>
+                                  {styleInfo?.label.split(' ')[0] || face.style || '自定义'}
+                                </span>
+                                {isEquipped && (
+                                  <span style={{ fontSize: '10.5px', color: '#10b981', fontWeight: 650 }}>
+                                    当前佩戴中
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: '11.5px',
+                                  color: 'var(--om-fg, #111827)',
+                                  marginTop: '4px',
+                                  lineHeight: 1.35,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                }}
+                              >
+                                {face.description || '自定义形象'}
+                              </span>
+                              <div style={{ marginTop: 'auto', paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '10px', color: 'var(--om-muted, #9ca3af)' }}>
+                                  {face.created ? new Date(face.created).toLocaleDateString() : ''}
+                                </span>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (face.description) setDescription(face.description);
+                                      if (face.style) setSelectedStyle(face.style as AvatarStyle);
+                                      setActiveTab('create');
+                                    }}
+                                    className="btn-secondary"
+                                    style={{ padding: '3px 8px', fontSize: '11px', borderRadius: '6px' }}
+                                  >
+                                    复用描述
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isEquipped || busy !== null}
+                                    onClick={() => handleApplyCustomFace(face)}
+                                    className={isEquipped ? 'btn-secondary' : 'btn-primary'}
+                                    style={{
+                                      padding: '3px 9px',
+                                      fontSize: '11px',
+                                      borderRadius: '6px',
+                                      background: isEquipped ? undefined : '#10b981',
+                                      borderColor: isEquipped ? undefined : '#10b981',
+                                    }}
+                                  >
+                                    {isEquipped ? '已装配' : '立即装配'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

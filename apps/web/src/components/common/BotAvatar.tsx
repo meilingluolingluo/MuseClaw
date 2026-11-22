@@ -35,7 +35,7 @@ export const BotAvatar: React.FC<BotAvatarProps> = ({
 
   const avatarVal = (bot?.avatar || 'haibara').trim();
   const isCustomFace = avatarVal.startsWith('face_') || avatarVal.startsWith('face-');
-  const isPreset = ['haibara', 'moss-courier', 'tide-tinker', 'dusk-moth', 'copper-acorn'].includes(avatarVal);
+  const isPreset = ['haibara'].includes(avatarVal);
   const isDragon = avatarVal === 'dragon';
   const isImageUrl = avatarVal.startsWith('/') || avatarVal.startsWith('http') || avatarVal.startsWith('data:image/');
 

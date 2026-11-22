@@ -766,13 +766,19 @@ export function startGatewayServer(defaultPort = 8799) {
         host: ep.provider,
         current: avatarStudio.getCurrentSession(),
         face: face,
-        presets: avatarStudio.getPresets()
+        presets: avatarStudio.getPresets(),
+        customFaces: avatarStudio.getCustomFaces()
       }));
     }
 
     if (req.method === 'GET' && url.pathname === '/api/avatar/presets') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(avatarStudio.getPresets()));
+    }
+
+    if (req.method === 'GET' && (url.pathname === '/api/avatar/custom' || url.pathname === '/api/avatar/history')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(avatarStudio.getCustomFaces()));
     }
 
     // B1.3 独立生图大模型配置接口 (Image Generation Model Providers API)
