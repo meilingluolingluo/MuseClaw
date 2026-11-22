@@ -390,6 +390,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ botId }),
     }),
+  deleteCustomAvatar: (faceId: string) =>
+    request<{ success: boolean; id: string }>(`/api/avatar/custom/${encodeURIComponent(faceId)}`, {
+      method: 'DELETE',
+    }),
 
   // Artifacts
   getArtifacts: () => request<Artifact[]>('/api/artifacts'),

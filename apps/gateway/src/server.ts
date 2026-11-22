@@ -781,6 +781,13 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(avatarStudio.getCustomFaces()));
     }
 
+    if (req.method === 'DELETE' && (url.pathname.startsWith('/api/avatar/custom/') || url.pathname.startsWith('/api/avatar/'))) {
+      const faceId = url.pathname.replace(/^\/api\/avatar\/(custom\/)?/, '');
+      const success = avatarStudio.deleteCustomFace(faceId);
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success, id: faceId }));
+    }
+
     // B1.3 独立生图大模型配置接口 (Image Generation Model Providers API)
     if (req.method === 'GET' && url.pathname === '/api/avatar/models/config') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

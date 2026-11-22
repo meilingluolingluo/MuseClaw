@@ -14,6 +14,7 @@ import {
   Play,
   RotateCcw,
   Settings,
+  Trash2,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { BotAvatar } from '../common/BotAvatar';
@@ -252,6 +253,25 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
     }
   };
 
+  // 删除指定的自定义专属形象
+  const handleDeleteCustomFace = async (faceId: string, desc?: string) => {
+    const hint = desc ? `「${desc.slice(0, 12)}...」` : '';
+    if (!window.confirm(`确定要彻底删除该历史形象 ${hint} 吗？此操作无法撤销。`)) {
+      return;
+    }
+    setBusy(`del-${faceId}`);
+    try {
+      await api.deleteCustomAvatar(faceId);
+      showToast('形象已成功删除', 'info');
+      await fetchStatus();
+      await loadBots();
+    } catch (e: any) {
+      showToast(`删除失败: ${e.message}`, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // 重绘姿态
   const handleRedrawMoods = async () => {
     if (!currentBot) return;
@@ -456,7 +476,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
         </div>
 
         {/* 右侧：创作工作区与形象馆 Tabs */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%', overflow: 'hidden' }}>
           {/* Tab 导航栏 */}
           <div
             style={{
@@ -507,7 +527,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
 
           {/* Tab 1: AI 智能创作 */}
           {activeTab === 'create' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minWidth: 0, width: '100%', overflowY: 'auto', maxHeight: '560px', paddingRight: '4px' }}>
               {/* 独立生图引擎状态指示栏 & 快捷配置入口 */}
               <div
                 style={{
@@ -571,11 +591,11 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 </button>
               </div>
 
-              {/* 最近生成的专属形象 (新的排在后面) */}
-              <div>
+              {/* 最近生成的专属形象 */}
+              <div style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase' }}>
-                    最近生成的形象 (点击卡片填充描述，或直接「立即装配」· 新的排在后面):
+                    最近生成的形象 (点击卡片填充描述，或直接「立即装配」):
                   </span>
                   {studioStatus?.customFaces && studioStatus.customFaces.length > 0 && (
                     <span style={{ fontSize: '10.5px', color: 'var(--om-muted, #9ca3af)' }}>
@@ -607,6 +627,9 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                       paddingBottom: '8px',
                       paddingTop: '2px',
                       scrollbarWidth: 'thin',
+                      width: '100%',
+                      minWidth: 0,
+                      maxWidth: '100%',
                     }}
                   >
                     {[...(studioStatus?.customFaces || [])]
@@ -625,8 +648,8 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                               if (face.style) setSelectedStyle(face.style as AvatarStyle);
                             }}
                             style={{
-                              flex: '0 0 152px',
-                              width: '152px',
+                              flex: '0 0 148px',
+                              width: '148px',
                               overflow: 'hidden',
                               borderRadius: '12px',
                               border: isEquipped
@@ -648,7 +671,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                             }}
                             title={`点击填充描述: ${face.description}`}
                           >
-                            {/* 缩略图 */}
+                            {/* 缩略图与操作按钮 */}
                             <div style={{ aspectRatio: '1/1', background: '#f3f4f6', overflow: 'hidden', position: 'relative' }}>
                               <img
                                 src={imgUrl}
@@ -676,10 +699,40 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                                   使用中
                                 </span>
                               )}
+                              {/* 删除按钮 */}
+                              <button
+                                type="button"
+                                title="删除该形象"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteCustomFace(face.id, face.description);
+                                }}
+                                style={{
+                                  position: 'absolute',
+                                  top: '4px',
+                                  left: '4px',
+                                  width: '22px',
+                                  height: '22px',
+                                  borderRadius: '50%',
+                                  background: 'rgba(0,0,0,0.45)',
+                                  color: '#fff',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  transition: 'all 0.15s ease',
+                                  zIndex: 3,
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.background = '#ef4444')}
+                                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.45)')}
+                              >
+                                <Trash2 size={11} />
+                              </button>
                             </div>
 
                             {/* 描述与风格 */}
-                            <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: '62px' }}>
+                            <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: '60px' }}>
                               <div
                                 style={{
                                   fontSize: '11px',
@@ -789,7 +842,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
                   艺术风格体系 (7 种):
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px', width: '100%' }}>
                   {STYLES_CATALOG.map((s) => {
                     const isSelected = selectedStyle === s.id;
                     return (
@@ -797,25 +850,31 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                         key={s.id}
                         type="button"
                         onClick={() => setSelectedStyle(s.id)}
+                        title={`${s.label}：${s.desc}`}
                         style={{
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'flex-start',
-                          padding: '8px 10px',
+                          padding: '6px 8px',
                           borderRadius: '8px',
                           border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
                           background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'var(--om-surface, #ffffff)',
                           cursor: 'pointer',
                           textAlign: 'left',
                           transition: 'all 0.15s ease',
+                          minHeight: '48px',
+                          minWidth: 0,
+                          width: '100%',
+                          overflow: 'hidden',
+                          boxSizing: 'border-box',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 650 }}>
-                          <span>{s.icon}</span>
-                          <span>{s.label}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 650, width: '100%', minWidth: 0, overflow: 'hidden' }}>
+                          <span style={{ flexShrink: 0, fontSize: '12px' }}>{s.icon}</span>
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{s.label}</span>
                         </div>
-                        <span style={{ fontSize: '10.5px', color: 'var(--om-muted, #6b7280)', marginTop: '2px', lineHeight: 1.3 }}>
-                          {s.desc.slice(0, 22)}...
+                        <span style={{ fontSize: '9.5px', color: 'var(--om-muted, #6b7280)', marginTop: '2px', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', minWidth: 0, display: 'block' }}>
+                          {s.desc}
                         </span>
                       </button>
                     );
@@ -1098,11 +1157,11 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 </div>
               </div>
 
-              {/* 最近生成的专属形象 (新的排在后面) */}
+              {/* 最近生成的专属形象 */}
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--om-fg, #111827)' }}>
-                    最近生成的专属形象 (新的排在后面)
+                    最近生成的专属形象
                   </span>
                   {studioStatus?.customFaces && studioStatus.customFaces.length > 0 && (
                     <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
@@ -1204,6 +1263,16 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                                     }}
                                   >
                                     {isEquipped ? '已装配' : '立即装配'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy !== null}
+                                    onClick={() => handleDeleteCustomFace(face.id, face.description)}
+                                    className="btn-secondary"
+                                    style={{ padding: '3px 7px', fontSize: '11px', borderRadius: '6px', color: '#ef4444' }}
+                                    title="删除此形象"
+                                  >
+                                    <Trash2 size={12} />
                                   </button>
                                 </div>
                               </div>

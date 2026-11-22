@@ -4627,7 +4627,7 @@ details[open] .thought-toggle::after {
 /* 虚拟形象工坊响应式栅格布局 */
 .avatar-studio-layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 24px;
   min-height: 520px;
 }
@@ -4808,7 +4808,7 @@ details[open] .thought-toggle::after {
 }
 
 /* ============================================================================
-   10. nanoMuse 虚拟形象工坊 (Avatar Studio) 样式
+   10. 虚拟形象工坊 (Avatar Studio) 样式体系
 ============================================================================ */
 .avatar-studio-container {
   display: flex;
@@ -4816,141 +4816,837 @@ details[open] .thought-toggle::after {
   gap: 18px;
 }
 
-.avatar-studio-stage {
+/* ── 左侧：虚拟形象交互展示台 (Live Stage) ─────────────── */
+.avatar-stage-panel {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 16px 0;
+  padding: 22px 18px;
   background-color: var(--om-surface-2);
-  border-radius: 20px;
+  border-radius: var(--om-radius-lg, 20px);
   border: 1px solid var(--om-border);
+  position: sticky;
+  top: 0;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.04);
 }
 
-.avatar-studio-preview-box {
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
+.avatar-stage-eyebrow {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--om-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.avatar-stage-avatar-wrap {
+  margin: 10px 0 16px;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.08));
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.avatar-stage-avatar-wrap:hover {
+  transform: scale(1.03);
+}
+
+.avatar-stage-bot-info {
+  text-align: center;
+  margin-bottom: 16px;
+  width: 100%;
+}
+
+.avatar-stage-bot-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--om-fg);
+  letter-spacing: -0.2px;
+}
+
+.avatar-stage-bot-desc {
+  font-size: 12px;
+  color: var(--om-muted);
+  margin-top: 3px;
+  white-space: nowrap;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  border: 3px solid var(--om-surface);
-  position: relative;
-  background-color: #f1efeb;
+  text-overflow: ellipsis;
+  padding: 0 8px;
 }
 
-.avatar-studio-preview-box img,
-.avatar-studio-preview-box video {
+.avatar-stage-moods-section {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.avatar-stage-moods-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.avatar-stage-moods-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--om-muted);
+}
+
+.avatar-stage-cycle-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--om-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.avatar-stage-cycle-btn:hover {
+  color: var(--om-fg);
+  background: var(--om-surface);
+}
+
+.avatar-stage-cycle-btn.is-active {
+  color: var(--om-accent);
+  background: var(--om-surface);
+}
+
+.avatar-stage-moods-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.avatar-stage-mood-pill {
+  padding: 6px 2px;
+  font-size: 11px;
+  border-radius: var(--om-radius-sm, 8px);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  color: var(--om-muted);
+  cursor: pointer;
+  font-weight: 500;
+  text-align: center;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.avatar-stage-mood-pill:hover {
+  color: var(--om-fg);
+  border-color: color-mix(in srgb, var(--om-accent) 40%, var(--om-border));
+}
+
+.avatar-stage-mood-pill.is-active {
+  border-color: var(--om-accent);
+  background-color: var(--om-accent);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--om-accent) 30%, transparent);
+}
+
+.avatar-stage-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.avatar-stage-redraw-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--om-radius-sm, 8px);
+}
+
+.avatar-stage-reset-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  border-radius: var(--om-radius-sm, 8px);
+  color: var(--om-muted);
+}
+
+/* ── 右侧：创作工作区与形象图库 (Workspace) ─────────────── */
+.avatar-studio-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 顶部 Segmented Control 导航条 */
+.avatar-studio-tabs {
+  display: flex;
+  background-color: var(--om-surface-2);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--om-border);
+  gap: 4px;
+  margin-bottom: 18px;
+}
+
+.avatar-studio-tab-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--om-muted);
+  cursor: pointer;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.avatar-studio-tab-btn:hover:not(.is-active) {
+  color: var(--om-fg);
+}
+
+.avatar-studio-tab-btn.is-active {
+  background-color: var(--om-surface);
+  color: var(--om-fg);
+  border-color: var(--om-border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* 绘图引擎状态指示横幅 */
+.avatar-engine-banner {
+  padding: 10px 14px;
+  border-radius: var(--om-radius-sm, 8px);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.avatar-engine-banner.is-cloud {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  color: #8b5cf6;
+}
+
+.avatar-engine-banner.is-local {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  color: #d97706;
+}
+
+.avatar-engine-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.avatar-engine-title {
+  font-weight: 600;
+}
+
+.avatar-engine-sub {
+  font-size: 11px;
+  color: var(--om-muted);
+  margin-top: 2px;
+}
+
+.avatar-engine-badge {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.avatar-engine-banner.is-cloud .avatar-engine-badge {
+  background: rgba(139, 92, 246, 0.18);
+  color: #7c3aed;
+}
+
+.avatar-engine-banner.is-local .avatar-engine-badge {
+  background: rgba(245, 158, 11, 0.18);
+  color: #b45309;
+}
+
+.avatar-engine-config-btn {
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: #8b5cf6;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(139, 92, 246, 0.3);
+  transition: all 0.15s ease;
+}
+
+.avatar-engine-config-btn:hover {
+  background: #7c3aed;
+}
+
+/* 最近生成的形象横向滚动卡片组 */
+.avatar-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.avatar-section-label {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--om-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.avatar-section-count {
+  font-size: 11px;
+  color: var(--om-muted);
+}
+
+.avatar-recent-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+  margin-bottom: 16px;
+  scrollbar-width: thin;
+}
+
+.avatar-face-card {
+  flex: 0 0 152px;
+  width: 152px;
+  border-radius: var(--om-radius-md, 14px);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.avatar-face-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  border-color: color-mix(in srgb, var(--om-accent) 45%, var(--om-border));
+}
+
+.avatar-face-card.is-equipped {
+  border-color: var(--accent-green, #10b981);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.avatar-face-card.is-selected {
+  border-color: var(--om-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--om-accent) 25%, transparent);
+}
+
+.avatar-face-img-wrap {
+  aspect-ratio: 1 / 1;
+  background-color: var(--om-surface-2);
+  overflow: hidden;
+  position: relative;
+}
+
+.avatar-face-img-wrap img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.avatar-mood-pills {
-  display: flex;
-  gap: 6px;
-  margin-top: 14px;
+.avatar-face-badge-equipped {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--accent-green, #10b981);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
 }
 
-.avatar-mood-pill {
-  padding: 4px 10px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 600;
-  background-color: var(--om-surface);
-  color: var(--om-muted);
-  border: 1px solid var(--om-border);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.avatar-mood-pill:hover {
-  color: var(--om-fg);
-}
-
-.avatar-mood-pill.active {
-  background-color: var(--om-accent);
-  color: #fff;
-  border-color: var(--om-accent);
-}
-
-.avatar-source-nav {
-  display: flex;
-  gap: 6px;
-  border-bottom: 1px solid var(--om-border);
-  padding-bottom: 8px;
-  overflow-x: auto;
-}
-
-.avatar-source-tab {
-  padding: 6px 14px;
-  border-radius: 8px;
-  background: transparent;
+.avatar-face-delete-btn {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
   border: none;
-  font-size: 13px;
-  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  z-index: 3;
+}
+
+.avatar-face-delete-btn:hover {
+  background: var(--accent-red, #ef4444);
+}
+
+.avatar-face-delete-btn.is-confirming {
+  width: auto;
+  border-radius: 12px;
+  padding: 0 8px;
+  background: var(--accent-red, #ef4444);
+  font-size: 10.5px;
+  font-weight: 700;
+  animation: pulseDelete 1s infinite alternate;
+}
+
+.avatar-face-meta {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 64px;
+}
+
+.avatar-face-desc {
+  font-size: 11.5px;
+  color: var(--om-fg);
+  line-height: 1.35;
+  max-height: 2.7em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin-bottom: 6px;
+}
+
+.avatar-face-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.avatar-face-style-tag {
+  font-size: 10px;
   color: var(--om-muted);
+  background: var(--om-surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.avatar-face-equip-btn {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.15s ease;
 }
 
-.avatar-source-tab:hover {
-  background-color: var(--om-surface-2);
+/* 描述输入区与灵感词 */
+.avatar-form-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.avatar-field-label {
+  font-size: 12.5px;
+  font-weight: 650;
   color: var(--om-fg);
 }
 
-.avatar-source-tab.active {
-  background-color: var(--om-accent-soft);
+.avatar-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--om-radius-sm, 8px);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface-2);
+  color: var(--om-fg);
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.avatar-textarea:focus {
+  border-color: var(--om-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--om-accent) 15%, transparent);
+}
+
+.avatar-suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.avatar-suggestion-chip {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 20px;
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  color: var(--om-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.avatar-suggestion-chip:hover {
+  background-color: var(--om-surface);
+  color: var(--om-fg);
+  border-color: color-mix(in srgb, var(--om-accent) 40%, var(--om-border));
+}
+
+/* 艺术风格网格 */
+.avatar-styles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  gap: 8px;
+}
+
+.avatar-style-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--om-radius-sm, 8px);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  min-height: 52px;
+}
+
+.avatar-style-card:hover {
+  border-color: color-mix(in srgb, var(--om-accent) 45%, var(--om-border));
+  background-color: var(--om-surface-2);
+}
+
+.avatar-style-card.is-selected {
+  border-color: var(--om-accent);
+  background-color: color-mix(in srgb, var(--om-accent) 8%, var(--om-surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--om-accent) 25%, transparent);
+}
+
+.avatar-style-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--om-fg);
+  width: 100%;
+}
+
+.avatar-style-desc {
+  font-size: 10px;
+  color: var(--om-muted);
+  margin-top: 3px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+/* 参考图上传区 */
+.avatar-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.avatar-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--om-radius-sm, 8px);
+  border: 1px dashed var(--om-border);
+  background-color: var(--om-surface-2);
+  color: var(--om-fg);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.avatar-upload-btn:hover {
+  border-color: var(--om-accent);
   color: var(--om-accent);
 }
 
-.avatar-grid-picker {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
-  gap: 12px;
-  padding: 4px 0;
+/* 4 候选四宫格展示区 */
+.avatar-candidates-box {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: var(--om-radius-md, 14px);
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
 }
 
-.avatar-preset-tile {
+.avatar-candidates-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
-  gap: 6px;
-  padding: 8px 6px;
-  border-radius: 14px;
-  border: 1px solid var(--om-border);
+  margin-bottom: 12px;
+}
+
+.avatar-candidates-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .avatar-candidates-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.avatar-candidate-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--om-radius-sm, 8px);
+  overflow: hidden;
   background-color: var(--om-surface);
-  cursor: pointer;
+  border: 1px solid var(--om-border);
   transition: all 0.15s ease;
 }
 
-.avatar-preset-tile:hover {
+.avatar-candidate-cell.is-chosen {
   border-color: var(--om-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--om-accent) 30%, transparent);
+}
+
+.avatar-candidate-tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+}
+
+.avatar-candidate-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background-color: var(--om-accent);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+/* 预设形象卡片列表 */
+.avatar-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 680px) {
+  .avatar-presets-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.avatar-preset-card {
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+  border-radius: var(--om-radius-md, 14px);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  transition: all 0.15s ease;
+}
+
+.avatar-preset-card:hover {
+  border-color: color-mix(in srgb, var(--om-accent) 40%, var(--om-border));
   background-color: var(--om-surface-2);
 }
 
-.avatar-preset-tile.selected {
+.avatar-preset-card.is-selected {
   border-color: var(--om-accent);
-  box-shadow: 0 0 0 2px var(--om-accent);
-  background-color: var(--om-accent-soft);
+  background-color: color-mix(in srgb, var(--om-accent) 6%, var(--om-surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--om-accent) 25%, transparent);
 }
 
-.avatar-preset-img {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  object-fit: cover;
-  background-color: #f1efeb;
+.avatar-preset-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.avatar-preset-name {
+.avatar-preset-title-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.avatar-preset-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--om-fg);
+}
+
+.avatar-preset-desc {
   font-size: 11.5px;
+  color: var(--om-muted);
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+/* ── 对话区：虚拟形象交互卡片 (AvatarOptionsCard) ───────── */
+.avatar-options-card-wrap {
+  margin: 8px 0;
+  max-width: 440px;
+  width: 100%;
+}
+
+.avatar-card-container {
+  border-radius: var(--om-radius-md, 16px);
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.avatar-card-container.is-live {
+  border-color: var(--om-accent);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--om-accent) 20%, transparent);
+}
+
+.avatar-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background-color: var(--om-surface-2);
+  border-bottom: 1px solid var(--om-border);
+}
+
+.avatar-card-container.is-live .avatar-card-header {
+  background-color: color-mix(in srgb, var(--om-accent) 8%, var(--om-surface));
+}
+
+.avatar-card-icon-circle {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--om-muted);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.avatar-card-container.is-live .avatar-card-icon-circle {
+  background-color: var(--om-accent);
+}
+
+.avatar-card-stage-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--om-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.avatar-card-desc-title {
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--om-fg);
-  text-align: center;
-  white-space: nowrap;
+  margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  white-space: nowrap;
+}
+
+.avatar-card-body {
+  padding: 14px 16px;
+}
+
+.avatar-card-grid-2x2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.avatar-card-candidate-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--om-radius-sm, 10px);
+  overflow: hidden;
+  background-color: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  transition: all 0.15s ease;
+}
+
+.avatar-card-candidate-cell.is-selected {
+  border-color: var(--om-accent);
+  box-shadow: 0 0 0 2px var(--om-accent);
+}
+
+.avatar-card-candidate-tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 5px;
+  backdrop-filter: blur(4px);
 }
 
 .avatar-emoji-grid {

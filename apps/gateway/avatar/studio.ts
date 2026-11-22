@@ -182,6 +182,35 @@ export class AvatarStudio {
   }
 
   /**
+   * 删除指定的自定义专属形象
+   */
+  public deleteCustomFace(faceId: string): boolean {
+    if (!faceId || !faceId.startsWith('face_')) {
+      return false;
+    }
+    const faceDir = path.join(this.customDir, faceId);
+    if (!fs.existsSync(faceDir)) {
+      return false;
+    }
+    try {
+      fs.rmSync(faceDir, { recursive: true, force: true });
+      // 如果有任何 Bot 正在佩戴被删除的形象，重置为默认形象
+      const bots = this.botRegistry.list();
+      for (const bot of bots) {
+        if (bot.avatar === faceId) {
+          bot.avatar = 'haibara';
+          (bot as any).avatarType = 'preset';
+          this.botRegistry.update(bot.id, { avatar: 'haibara', avatarType: 'preset' } as any);
+        }
+      }
+      return true;
+    } catch (err) {
+      console.warn(`[AvatarStudio] 删除自定义形象 ${faceId} 失败: ${err}`);
+      return false;
+    }
+  }
+
+  /**
    * 检查当前系统可用于图像生成的模型与环境状态
    */
   public getImageEndpointConfig(): {
