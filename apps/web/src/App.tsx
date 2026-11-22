@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { useApp } from './context/AppContext';
 import type { TabType } from './types';
 import { NavRail } from './components/layout/NavRail';
@@ -7,6 +7,7 @@ import { TopBar } from './components/layout/TopBar';
 import { ChatView } from './components/chat/ChatView';
 import { ToastContainer } from './components/common/Toast';
 import { AlertTriangle } from 'lucide-react';
+import { copyToClipboard } from './utils/clipboard';
 
 // 首屏只加载对话，其余工作台按需拆包
 const FeedView = lazy(() =>
@@ -118,8 +119,37 @@ export const App: React.FC = () => {
     setIsAvatarStudioOpen,
     activeBot,
     loadBots,
+    showToast,
   } = useApp();
   const ActiveView = tab === 'chat' ? null : VIEWS[tab];
+
+  // 全局托管代码块复制按钮事件
+  useEffect(() => {
+    const handleCodeCopy = async (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const btn = target?.closest?.('.code-copy-btn, .btn-code-copy') as HTMLButtonElement | null;
+      if (!btn) return;
+      const code =
+        btn.getAttribute('data-code') ||
+        btn.closest('.code-block-wrapper')?.querySelector('pre code')?.textContent;
+      if (!code) return;
+      const ok = await copyToClipboard(code);
+      if (ok) {
+        const prevText = btn.textContent;
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        showToast('代码已复制到剪贴板', 'info');
+        setTimeout(() => {
+          btn.textContent = prevText || '复制';
+          btn.classList.remove('copied');
+        }, 2000);
+      } else {
+        showToast('复制失败，请手动选中文本复制', 'error');
+      }
+    };
+    document.addEventListener('click', handleCodeCopy);
+    return () => document.removeEventListener('click', handleCodeCopy);
+  }, [showToast]);
 
   return (
     <div className="app-container">

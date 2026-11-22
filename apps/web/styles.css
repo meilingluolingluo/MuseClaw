@@ -2942,15 +2942,16 @@ html[data-theme="dark"] .approval-result-pill.rejected {
   text-decoration: none;
 }
 
-/* 4. 代码块增强 (Header、语言标签与一键复制) */
+/* 4. 代码块增强 (Header、语言标签与一键复制、暗色代码框基准与语法高亮) */
 .code-block-wrapper {
   position: relative;
   margin: 14px 0;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--om-border);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   background-color: #1a1b1e;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+  color: #e6edf3;
 }
 
 .code-block-header {
@@ -2963,17 +2964,20 @@ html[data-theme="dark"] .approval-result-pill.rejected {
   font-size: 11.5px;
   color: #8b949e;
   font-family: var(--font-mono);
+  user-select: none;
 }
 
 .code-block-header .code-lang {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  color: #8b949e;
 }
 
+.code-copy-btn,
 .btn-code-copy {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   color: #c9d1d9;
   border-radius: 5px;
   padding: 2px 8px;
@@ -2983,11 +2987,20 @@ html[data-theme="dark"] .approval-result-pill.rejected {
   align-items: center;
   gap: 4px;
   transition: all 0.15s ease;
+  font-family: inherit;
 }
 
+.code-copy-btn:hover,
 .btn-code-copy:hover {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.16);
   color: #ffffff;
+}
+
+.code-copy-btn.copied,
+.btn-code-copy.copied {
+  color: #3fb950;
+  border-color: rgba(63, 185, 80, 0.4);
+  background-color: rgba(63, 185, 80, 0.15);
 }
 
 .code-block-wrapper pre {
@@ -2997,6 +3010,116 @@ html[data-theme="dark"] .approval-result-pill.rejected {
   padding: 14px 16px !important;
   background-color: transparent !important;
   overflow-x: auto;
+  color: #e6edf3 !important;
+}
+
+.markdown-body .code-block-wrapper code,
+.code-block-wrapper pre code,
+.code-block-wrapper code.hljs {
+  color: #e6edf3 !important;
+  background-color: transparent !important;
+  padding: 0 !important;
+  border: none !important;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Highlight.js 语法高亮 (Dark Theme 配色，覆盖 bash / sh / python / js / ts / json / yaml / sql / xml / diff 等) */
+.code-block-wrapper pre code.hljs,
+.hljs {
+  color: #e6edf3;
+  background: transparent;
+}
+
+.code-block-wrapper .hljs-keyword,
+.code-block-wrapper .hljs-doctag,
+.code-block-wrapper .hljs-meta .hljs-keyword,
+.code-block-wrapper .hljs-template-tag,
+.code-block-wrapper .hljs-template-variable,
+.code-block-wrapper .hljs-type,
+.code-block-wrapper .hljs-variable.language_ {
+  color: #ff7b72;
+}
+
+.code-block-wrapper .hljs-title,
+.code-block-wrapper .hljs-title.class_,
+.code-block-wrapper .hljs-title.class_.inherited__,
+.code-block-wrapper .hljs-title.function_,
+.code-block-wrapper .hljs-function {
+  color: #d2a8ff;
+}
+
+.code-block-wrapper .hljs-attr,
+.code-block-wrapper .hljs-attribute,
+.code-block-wrapper .hljs-literal,
+.code-block-wrapper .hljs-meta,
+.code-block-wrapper .hljs-number,
+.code-block-wrapper .hljs-operator,
+.code-block-wrapper .hljs-variable,
+.code-block-wrapper .hljs-selector-attr,
+.code-block-wrapper .hljs-selector-class,
+.code-block-wrapper .hljs-selector-id {
+  color: #79c0ff;
+}
+
+.code-block-wrapper .hljs-regexp,
+.code-block-wrapper .hljs-string,
+.code-block-wrapper .hljs-meta .hljs-string {
+  color: #a5d6ff;
+}
+
+.code-block-wrapper .hljs-built_in,
+.code-block-wrapper .hljs-symbol {
+  color: #ffa657;
+}
+
+.code-block-wrapper .hljs-comment,
+.code-block-wrapper .hljs-code,
+.code-block-wrapper .hljs-formula {
+  color: #8b949e;
+  font-style: italic;
+}
+
+.code-block-wrapper .hljs-name,
+.code-block-wrapper .hljs-quote,
+.code-block-wrapper .hljs-selector-tag,
+.code-block-wrapper .hljs-selector-pseudo {
+  color: #7ee787;
+}
+
+.code-block-wrapper .hljs-subst,
+.code-block-wrapper .hljs-params {
+  color: #e6edf3;
+}
+
+.code-block-wrapper .hljs-section {
+  color: #1f6feb;
+  font-weight: 600;
+}
+
+.code-block-wrapper .hljs-bullet {
+  color: #f2cc60;
+}
+
+.code-block-wrapper .hljs-emphasis {
+  color: #e6edf3;
+  font-style: italic;
+}
+
+.code-block-wrapper .hljs-strong {
+  color: #e6edf3;
+  font-weight: 600;
+}
+
+.code-block-wrapper .hljs-addition {
+  color: #aff5b4;
+  background-color: rgba(46, 160, 67, 0.2);
+}
+
+.code-block-wrapper .hljs-deletion {
+  color: #ffdcd7;
+  background-color: rgba(248, 81, 73, 0.2);
 }
 
 .markdown-body pre {

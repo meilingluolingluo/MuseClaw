@@ -149,7 +149,7 @@ renderer.code = function ({ text, lang }) {
     <div class="code-block-wrapper">
       <div class="code-block-header">
         ${langLabel}
-        <button class="code-copy-btn" type="button" data-code="${escapeHtml(text)}">复制</button>
+        <button class="code-copy-btn" type="button" data-code="${escapeHtml(text)}" title="复制代码" aria-label="复制代码">复制</button>
       </div>
       <pre><code class="hljs ${escapeHtml(language)}">${highlighted}</code></pre>
     </div>
