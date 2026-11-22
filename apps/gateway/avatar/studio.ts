@@ -596,7 +596,7 @@ export class AvatarStudio {
     referencePath: string,
     index: number
   ): Promise<Buffer> {
-    if (ep.provider === 'openai' && ep.apiKey) {
+    if ((ep.provider === 'openai' || ep.provider === 'siliconflow') && ep.apiKey) {
       try {
         const resp = await fetch(`${ep.baseUrl}/images/generations`, {
           method: 'POST',
@@ -605,20 +605,25 @@ export class AvatarStudio {
             Authorization: `Bearer ${ep.apiKey}`,
           },
           body: JSON.stringify({
-            model: ep.model || 'dall-e-3',
+            model: ep.model || (ep.provider === 'siliconflow' ? 'black-forest-labs/FLUX.1-schnell' : 'dall-e-3'),
             prompt,
-            n: 1,
-            size: '1024x1024',
-            response_format: 'b64_json',
+            ...(ep.provider === 'siliconflow'
+              ? { image_size: '1024x1024', batch_size: 1 }
+              : { n: 1, size: '1024x1024', response_format: 'b64_json' }),
           }),
         });
         if (resp.ok) {
           const data = (await resp.json()) as any;
           const b64 = data.data?.[0]?.b64_json;
           if (b64) return Buffer.from(b64, 'base64');
+          const url = data.data?.[0]?.url;
+          if (url) {
+            const imgRes = await fetch(url);
+            return Buffer.from(await imgRes.arrayBuffer());
+          }
         }
       } catch (e) {
-        console.warn('[AvatarStudio] OpenAI 图像接口调用失败，降级至内置生成器:', e);
+        console.warn(`[AvatarStudio] ${ep.provider} 图像接口调用失败，降级至内置生成器:`, e);
       }
     }
 
