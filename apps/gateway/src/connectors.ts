@@ -248,15 +248,53 @@ export const CATALOGUE_CONNECTORS: ConnectorItem[] = [
     category: 'dev',
     description: '管理代码仓库、Pull Request、Issue 讨论与全库代码检索',
     status: 'disconnected',
-    authType: 'oauth',
-    url: 'https://api.githubcopilot.com/mcp/',
+    authType: 'key',
+    keyHint: 'GitHub Personal Access Token (PAT，如 ghp_...)',
+    url: 'https://api.github.com',
     docs: 'https://github.com/github/github-mcp-server',
     color: '#181717',
     tools: [
-      { name: 'github_search_repositories', description: '搜索 GitHub 公开与组织内私有仓库', enabled: true },
-      { name: 'github_get_file_contents', description: '按分支或 Tag 读取指定文件原始代码', enabled: true },
-      { name: 'github_create_pull_request', description: '基于对比分支创建代码合并请求', enabled: true },
-      { name: 'github_list_issues', description: '拉取指定仓库的开放 Issue 列表', enabled: true }
+      {
+        name: 'github_search_repositories',
+        description: '搜索 GitHub 公开与组织内私有仓库',
+        enabled: true,
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '搜索关键词，如 language:typescript stars:>1000' }
+          },
+          required: ['query']
+        }
+      },
+      {
+        name: 'github_get_file_contents',
+        description: '按分支或 Tag 读取指定文件原始代码',
+        enabled: true,
+        parameters: {
+          type: 'object',
+          properties: {
+            owner: { type: 'string', description: '仓库所有者或组织名' },
+            repo: { type: 'string', description: '仓库名称' },
+            path: { type: 'string', description: '仓库内的相对文件路径' },
+            ref: { type: 'string', description: '分支名称或 commit hash（默认 main）' }
+          },
+          required: ['owner', 'repo', 'path']
+        }
+      },
+      {
+        name: 'github_list_issues',
+        description: '拉取指定仓库的开放 Issue 列表',
+        enabled: true,
+        parameters: {
+          type: 'object',
+          properties: {
+            owner: { type: 'string', description: '仓库所有者' },
+            repo: { type: 'string', description: '仓库名' },
+            state: { type: 'string', enum: ['open', 'closed', 'all'], description: '状态（默认 open）' }
+          },
+          required: ['owner', 'repo']
+        }
+      }
     ]
   },
   {
@@ -407,12 +445,27 @@ export const CATALOGUE_CONNECTORS: ConnectorItem[] = [
     category: 'talk',
     description: '连接社区服务器、监听关键频道事件与互动交互',
     status: 'disconnected',
-    authType: 'oauth',
-    url: 'https://mcp.discord.com/mcp',
+    authType: 'key',
+    keyHint: 'Discord Bot Token 或频道的 Webhook URL (https://discord.com/api/webhooks/...)',
+    url: 'https://discord.com/api/v10',
     docs: 'https://discord.com/developers/docs/intro',
     color: '#5865F2',
     tools: [
-      { name: 'discord_send_channel_message', description: '向 Discord 频道推送更新或嵌入卡片', enabled: true }
+      {
+        name: 'discord_send_channel_message',
+        description: '向 Discord 频道或 Webhook 发送通知消息与富文本嵌入卡片',
+        enabled: true,
+        parameters: {
+          type: 'object',
+          properties: {
+            content: { type: 'string', description: '要发送的消息正文文本（支持 Markdown）' },
+            channel_id: { type: 'string', description: 'Discord 目标频道 ID（若使用 Webhook URL 则可省略）' },
+            embed_title: { type: 'string', description: '可选的卡片标题' },
+            embed_description: { type: 'string', description: '可选的卡片说明' }
+          },
+          required: ['content']
+        }
+      }
     ]
   },
 
@@ -645,7 +698,6 @@ export class ConnectorManager {
         disabledTools: []
       };
     } else {
-      record.status = 'connected';
       record.updatedAt = now;
       if (options.key !== undefined) record.key = options.key;
       if (options.token !== undefined) record.token = options.token;
@@ -670,9 +722,23 @@ export class ConnectorManager {
           description: t.description,
           enabled: true
         }));
+        record.status = 'connected';
+        record.error = undefined;
       } catch (err: any) {
         record.status = 'error';
         record.error = `MCP 进程启动失败: ${err.message}`;
+      }
+    } else {
+      // 临时保存以便 test() 读取凭据进行真实测试
+      this.records.set(id, record);
+      const testRes = await this.test(id);
+      if (testRes.success) {
+        record.status = 'connected';
+        record.connectedAt = record.connectedAt || now;
+        record.error = undefined;
+      } else {
+        record.status = 'error';
+        record.error = testRes.message;
       }
     }
 
@@ -706,7 +772,7 @@ export class ConnectorManager {
   }
 
   /**
-   * 测试连接器连通性
+   * 测试连接器连通性与凭据有效性
    */
   public async test(id: string): Promise<{ success: boolean; latencyMs: number; message: string }> {
     const item = this.get(id);
@@ -714,9 +780,10 @@ export class ConnectorManager {
       return { success: false, latencyMs: 0, message: '连接器不存在' };
     }
 
+    const record = this.records.get(id);
     const start = Date.now();
 
-    // 内置连接器常驻就绪
+    // 1. 内置连接器常驻就绪
     if (item.category === 'builtin') {
       return {
         success: true,
@@ -725,13 +792,189 @@ export class ConnectorManager {
       };
     }
 
-    // 远程 HTTP 端点探测
+    // 2. Discord 专用连通性与凭据校验
+    if (id === 'discord') {
+      const cred = record?.key || record?.token || record?.url;
+      if (!cred) {
+        return {
+          success: false,
+          latencyMs: 0,
+          message: '未配置 Discord 凭据：请点击「重新配置认证」填入 Bot Token 或频道 Webhook URL'
+        };
+      }
+
+      // Webhook 模式校验
+      if (cred.startsWith('https://discord.com/api/webhooks') || cred.startsWith('https://discordapp.com/api/webhooks')) {
+        try {
+          const res = await fetch(cred, {
+            method: 'GET',
+            headers: { 'User-Agent': 'MuseClaw/0.1.0' }
+          });
+          const latency = Date.now() - start;
+          if (res.ok) {
+            const data: any = await res.json().catch(() => ({}));
+            return {
+              success: true,
+              latencyMs: latency,
+              message: `Discord Webhook 校验通过: ${data.name || '频道 Webhook'} (频道 ID: ${data.channel_id || '有效'})`
+            };
+          }
+          return {
+            success: false,
+            latencyMs: latency,
+            message: `Discord Webhook 校验失败 (HTTP ${res.status})：链接可能已失效或已被删除`
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            message: `Discord Webhook 连接失败: ${err.message}`
+          };
+        }
+      }
+
+      // Bot Token 模式校验
+      const token = cred.startsWith('Bot ') ? cred : `Bot ${cred}`;
+      try {
+        const res = await fetch('https://discord.com/api/v10/users/@me', {
+          headers: {
+            'Authorization': token,
+            'User-Agent': 'MuseClaw/0.1.0'
+          }
+        });
+        const latency = Date.now() - start;
+        if (res.ok) {
+          const data: any = await res.json().catch(() => ({}));
+          return {
+            success: true,
+            latencyMs: latency,
+            message: `Discord Bot 认证成功: @${data.username}${data.discriminator && data.discriminator !== '0' ? '#' + data.discriminator : ''} (已在线就绪)`
+          };
+        }
+        if (res.status === 401) {
+          return {
+            success: false,
+            latencyMs: latency,
+            message: 'Discord 认证失败: Bot Token 无效或未在开发者平台开启权限 (HTTP 401 Unauthorized)'
+          };
+        }
+        return {
+          success: false,
+          latencyMs: latency,
+          message: `Discord API 响应异常 (HTTP ${res.status}): ${res.statusText}`
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          latencyMs: Date.now() - start,
+          message: `Discord API 网络连接失败: ${err.message}`
+        };
+      }
+    }
+
+    // 3. GitHub 专用连通性与凭据校验
+    if (id === 'github') {
+      const token = record?.key || record?.token;
+      if (!token) {
+        return {
+          success: false,
+          latencyMs: 0,
+          message: '未配置 GitHub Personal Access Token (PAT)'
+        };
+      }
+      try {
+        const res = await fetch('https://api.github.com/user', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'User-Agent': 'MuseClaw/0.1.0'
+          }
+        });
+        const latency = Date.now() - start;
+        if (res.ok) {
+          const data: any = await res.json().catch(() => ({}));
+          return {
+            success: true,
+            latencyMs: latency,
+            message: `GitHub 认证成功: @${data.login} (Scopes: ${res.headers.get('x-oauth-scopes') || 'repo/user'})`
+          };
+        }
+        if (res.status === 401) {
+          return {
+            success: false,
+            latencyMs: latency,
+            message: 'GitHub 认证失败: Token 无效或已过期 (HTTP 401 Unauthorized)'
+          };
+        }
+        return {
+          success: false,
+          latencyMs: latency,
+          message: `GitHub API 异常 (HTTP ${res.status})`
+        };
+      } catch (err: any) {
+        return {
+          success: false,
+          latencyMs: Date.now() - start,
+          message: `GitHub 连接失败: ${err.message}`
+        };
+      }
+    }
+
+    // 4. Tavily 检索服务鉴权校验
+    if (id === 'tavily') {
+      const key = record?.key;
+      if (!key) {
+        return { success: false, latencyMs: 0, message: '未配置 Tavily API Key' };
+      }
+      try {
+        const res = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: key, query: 'ping' })
+        });
+        const latency = Date.now() - start;
+        if (res.ok) {
+          return { success: true, latencyMs: latency, message: 'Tavily API Key 校验通过，时效检索引擎就绪' };
+        }
+        return {
+          success: false,
+          latencyMs: latency,
+          message: `Tavily 鉴权失败: 密钥无效或账户额度耗尽 (HTTP ${res.status})`
+        };
+      } catch (err: any) {
+        return { success: false, latencyMs: Date.now() - start, message: `Tavily 请求异常: ${err.message}` };
+      }
+    }
+
+    // 5. 高德地图 Web API 校验
+    if (id === 'amap') {
+      const key = record?.key;
+      if (!key) {
+        return { success: false, latencyMs: 0, message: '未配置高德 Web 服务 Key' };
+      }
+      try {
+        const res = await fetch(`https://restapi.amap.com/v3/ip?key=${encodeURIComponent(key)}`);
+        const latency = Date.now() - start;
+        const data: any = await res.json().catch(() => ({}));
+        if (data.status === '1') {
+          return { success: true, latencyMs: latency, message: '高德地图 Web 服务 Key 验证通过' };
+        }
+        return {
+          success: false,
+          latencyMs: latency,
+          message: `高德地图 Key 验证未通过: ${data.info || 'KEY 异常'}`
+        };
+      } catch (err: any) {
+        return { success: false, latencyMs: Date.now() - start, message: `高德网络请求失败: ${err.message}` };
+      }
+    }
+
+    // 6. 通用 HTTP / MCP 远程端点探测
     if (item.url && item.url.startsWith('http')) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 6000);
         const headers: Record<string, string> = { 'User-Agent': 'MuseClaw-Connector/0.1.0' };
-        if (item.key) headers['Authorization'] = `Bearer ${item.key}`;
+        if (record?.key) headers['Authorization'] = `Bearer ${record.key}`;
         const res = await fetch(item.url, {
           method: 'GET',
           headers,
@@ -739,10 +982,39 @@ export class ConnectorManager {
         });
         clearTimeout(timeout);
         const latency = Date.now() - start;
+
+        if (res.status >= 200 && res.status < 300) {
+          return {
+            success: true,
+            latencyMs: latency,
+            message: `端点连通且已鉴权通过 (HTTP ${res.status} OK, 耗时 ${latency}ms)`
+          };
+        }
+        if (res.status === 401) {
+          return {
+            success: false,
+            latencyMs: latency,
+            message: `缺少有效凭据或尚未授权 (HTTP 401 Unauthorized)，请点击「重新配置认证」填入访问凭据`
+          };
+        }
+        if (res.status === 403) {
+          return {
+            success: false,
+            latencyMs: latency,
+            message: `访问受限 (HTTP 403 Forbidden)，请检查端点访问权限或 IP 白名单`
+          };
+        }
+        if (res.status === 404) {
+          return {
+            success: false,
+            latencyMs: latency,
+            message: `端点未找到 (HTTP 404 Not Found)，请核对服务 URL 路径`
+          };
+        }
         return {
-          success: res.status < 500,
+          success: false,
           latencyMs: latency,
-          message: `端点响应正常 (HTTP ${res.status}, 耗时 ${latency}ms)`
+          message: `端点返回异常状态: HTTP ${res.status} ${res.statusText}`
         };
       } catch (err: any) {
         return {
@@ -753,7 +1025,6 @@ export class ConnectorManager {
       }
     }
 
-    // 默认测试成功
     return {
       success: true,
       latencyMs: Math.max(2, Date.now() - start),
