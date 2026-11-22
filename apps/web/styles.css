@@ -5223,6 +5223,17 @@ details[open] .thought-toggle::after {
   animation: pulseDelete 1s infinite alternate;
 }
 
+@keyframes pulseDelete {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+    transform: scale(1.04);
+  }
+}
+
 .avatar-face-meta {
   padding: 8px 10px;
   display: flex;
@@ -5481,6 +5492,72 @@ details[open] .thought-toggle::after {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
+/* 形象姿态就绪全态展示框 */
+.avatar-done-box {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: var(--om-radius-md, 14px);
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.avatar-done-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-green, #10b981);
+  font-weight: 650;
+  font-size: 13.5px;
+}
+
+.avatar-done-moods-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.avatar-done-mood-item {
+  width: 54px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.avatar-done-mood-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--om-radius-sm, 8px);
+  overflow: hidden;
+  border: 1px solid var(--om-border);
+  background-color: var(--om-surface);
+}
+
+.avatar-done-mood-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-done-mood-label {
+  font-size: 10.5px;
+  color: var(--om-muted);
+  margin-top: 4px;
+  display: block;
+}
+
+/* 形象工坊空白缺省占位 */
+.avatar-empty-state {
+  padding: 24px 16px;
+  text-align: center;
+  border-radius: var(--om-radius-md, 12px);
+  background-color: var(--om-surface-2);
+  border: 1px dashed var(--om-border);
+  font-size: 12.5px;
+  color: var(--om-muted);
+  line-height: 1.5;
+}
+
 /* 预设形象卡片列表 */
 .avatar-presets-grid {
   display: grid;
@@ -5647,6 +5724,30 @@ details[open] .thought-toggle::after {
   padding: 2px 6px;
   border-radius: 5px;
   backdrop-filter: blur(4px);
+}
+
+.avatar-card-hover-mask {
+  position: absolute;
+  inset: 0;
+  background-color: color-mix(in srgb, var(--om-accent) 85%, transparent);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  backdrop-filter: blur(2px);
+}
+
+.avatar-card-candidate-cell:hover .avatar-card-hover-mask {
+  opacity: 1;
+}
+
+.avatar-card-hover-mask.is-active {
+  opacity: 1;
 }
 
 .avatar-emoji-grid {

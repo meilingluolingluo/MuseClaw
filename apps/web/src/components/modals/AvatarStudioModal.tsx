@@ -6,15 +6,11 @@ import {
   X,
   Upload,
   Loader2,
-  Film,
-  Image as ImageIcon,
-  Smile,
-  Compass,
-  Palette,
   Play,
   RotateCcw,
   Settings,
   Trash2,
+  Compass,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { BotAvatar } from '../common/BotAvatar';
@@ -75,16 +71,14 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
   const { activeBot, showToast, loadBots, isImageModelModalOpen, setIsImageModelModalOpen } = useApp();
   const currentBot = targetBot || activeBot;
 
-  const [activeTab, setActiveTab] = useState<'create' | 'presets' | 'custom'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'presets'>('create');
   const [studioStatus, setStudioStatus] = useState<AvatarStudioView | null>(null);
   const [stageMood, setStageMood] = useState<AvatarMood>('idle');
   const [isAutoCycle, setIsAutoCycle] = useState(false);
 
-  useEffect(() => {
-    if (!isImageModelModalOpen) {
-      fetchStatus();
-    }
-  }, [isImageModelModalOpen]);
+  // 删除两步确认状态
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // AI 创作表单状态
   const [description, setDescription] = useState('');
@@ -110,12 +104,27 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
   };
 
   useEffect(() => {
+    if (!isImageModelModalOpen) {
+      fetchStatus();
+    }
+  }, [isImageModelModalOpen]);
+
+  useEffect(() => {
     if (isOpen) {
       fetchStatus();
     } else {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      setConfirmDeleteId(null);
     }
   }, [isOpen, currentBot?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
 
   // 当会话处于 drawing 或 posing 阶段时，自动轮询刷新状态
   useEffect(() => {
@@ -253,12 +262,24 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
     }
   };
 
-  // 删除指定的自定义专属形象
-  const handleDeleteCustomFace = async (faceId: string, desc?: string) => {
-    const hint = desc ? `「${desc.slice(0, 12)}...」` : '';
-    if (!window.confirm(`确定要彻底删除该历史形象 ${hint} 吗？此操作无法撤销。`)) {
+  // 删除指定的自定义专属形象（两步内联倒计时确认）
+  const handleDeleteCustomFace = async (faceId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (confirmDeleteId !== faceId) {
+      setConfirmDeleteId(faceId);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => {
+        setConfirmDeleteId(null);
+        deleteTimerRef.current = null;
+      }, 3500);
       return;
     }
+
+    if (deleteTimerRef.current) {
+      clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+    setConfirmDeleteId(null);
     setBusy(`del-${faceId}`);
     try {
       await api.deleteCustomAvatar(faceId);
@@ -330,27 +351,13 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
     >
       <div className="avatar-studio-layout">
         {/* 左侧：虚拟形象交互展示台 (Live Stage) */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            padding: '24px 18px',
-            background: 'var(--om-surface-2, #f9fafb)',
-            borderRadius: '16px',
-            border: '1px solid var(--om-border, #e5e7eb)',
-            position: 'sticky',
-            top: 0,
-            alignSelf: 'flex-start',
-            zIndex: 10,
-          }}
-        >
-          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase', marginBottom: '14px' }}>
+        <div className="avatar-stage-panel">
+          <div className="avatar-stage-eyebrow">
             智能体舞台 · 实时姿态
           </div>
 
           {/* 舞台核心大头像 */}
-          <div style={{ margin: '14px 0 18px' }}>
+          <div className="avatar-stage-avatar-wrap">
             <BotAvatar
               bot={currentBot}
               size={136}
@@ -360,39 +367,33 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
             />
           </div>
 
-          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--om-fg, #111827)' }}>
+          <div className="avatar-stage-bot-info">
+            <div className="avatar-stage-bot-name">
               {currentBot?.name || '数字员工'}
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--om-muted, #6b7280)', marginTop: '2px' }}>
+            <div
+              className="avatar-stage-bot-desc"
+              title={studioStatus?.face?.description || currentBot?.avatar || '默认'}
+            >
               当前形象: {studioStatus?.face?.description ? studioStatus.face.description.slice(0, 24) + '...' : currentBot?.avatar || '默认'}
             </div>
           </div>
 
           {/* 5 情绪快速切换药丸栏 */}
-          <div style={{ width: '100%', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--om-muted, #6b7280)' }}>
+          <div className="avatar-stage-moods-section">
+            <div className="avatar-stage-moods-header">
+              <span className="avatar-stage-moods-label">
                 切换情绪状态:
               </span>
               <button
                 type="button"
                 onClick={() => setIsAutoCycle(!isAutoCycle)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '11px',
-                  color: isAutoCycle ? 'var(--om-accent, #3b82f6)' : 'var(--om-muted, #9ca3af)',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '3px',
-                }}
+                className={`avatar-stage-cycle-btn ${isAutoCycle ? 'is-active' : ''}`}
               >
                 <Play size={10} /> {isAutoCycle ? '停止轮播' : '自动轮播'}
               </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
+            <div className="avatar-stage-moods-grid">
               {MOODS_LIST.map((m) => {
                 const isSelected = stageMood === m;
                 return (
@@ -403,17 +404,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                       setStageMood(m);
                       setIsAutoCycle(false);
                     }}
-                    style={{
-                      padding: '6px 2px',
-                      fontSize: '11px',
-                      borderRadius: '6px',
-                      border: isSelected ? '1px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                      background: isSelected ? 'var(--om-accent, #3b82f6)' : 'var(--om-surface, #ffffff)',
-                      color: isSelected ? '#ffffff' : 'var(--om-fg, #374151)',
-                      cursor: 'pointer',
-                      fontWeight: isSelected ? 600 : 400,
-                      textAlign: 'center',
-                    }}
+                    className={`avatar-stage-mood-pill ${isSelected ? 'is-active' : ''}`}
                   >
                     {m === 'idle' && '待机'}
                     {m === 'working' && '工作'}
@@ -426,100 +417,48 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
             </div>
           </div>
 
-          {/* 底部重绘操作 */}
-          {studioStatus?.face?.model !== 'preset' && (
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={handleRedrawMoods}
-              className="btn-secondary"
-              style={{
-                width: '100%',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                padding: '8px',
-                fontSize: '12px',
-                borderRadius: '8px',
-                marginTop: 'auto',
-              }}
-            >
-              <RotateCcw size={13} className={busy === 'redraw' ? 'animate-spin' : ''} />
-              重新生成 4 种情绪姿态
-            </button>
-          )}
+          {/* 底部重绘与恢复操作 */}
+          <div className="avatar-stage-actions">
+            {studioStatus?.face?.model !== 'preset' && (
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={handleRedrawMoods}
+                className="btn-secondary avatar-stage-redraw-btn"
+              >
+                <RotateCcw size={13} className={busy === 'redraw' ? 'animate-spin' : ''} />
+                重新生成 4 种情绪姿态
+              </button>
+            )}
 
-          {/* 恢复内置形象 */}
-          {currentBot?.avatar !== 'dragon' && (
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={handleResetToBuiltin}
-              className="btn-secondary"
-              style={{
-                width: '100%',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                padding: '7px',
-                fontSize: '11.5px',
-                borderRadius: '8px',
-                marginTop: '6px',
-                color: 'var(--om-muted, #6b7280)',
-              }}
-            >
-              恢复内置形象
-            </button>
-          )}
+            {currentBot?.avatar !== 'dragon' && (
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={handleResetToBuiltin}
+                className="btn-secondary avatar-stage-reset-btn"
+              >
+                恢复内置形象
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 右侧：创作工作区与形象馆 Tabs */}
-        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%', overflow: 'hidden' }}>
+        <div className="avatar-studio-workspace">
           {/* Tab 导航栏 */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '12px',
-              borderBottom: '1px solid var(--om-border, #e5e7eb)',
-              paddingBottom: '10px',
-              marginBottom: '18px',
-            }}
-          >
+          <div className="avatar-studio-tabs">
             <button
               type="button"
               onClick={() => setActiveTab('create')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '13.5px',
-                fontWeight: activeTab === 'create' ? 700 : 500,
-                color: activeTab === 'create' ? 'var(--om-accent, #3b82f6)' : 'var(--om-muted, #6b7280)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px 6px',
-              }}
+              className={`avatar-studio-tab-btn ${activeTab === 'create' ? 'is-active' : ''}`}
             >
               <Sparkles size={16} /> AI 智能创作
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('presets')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontSize: '13.5px',
-                fontWeight: activeTab === 'presets' ? 700 : 500,
-                color: activeTab === 'presets' ? 'var(--om-accent, #3b82f6)' : 'var(--om-muted, #6b7280)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px 6px',
-              }}
+              className={`avatar-studio-tab-btn ${activeTab === 'presets' ? 'is-active' : ''}`}
             >
               <Compass size={16} /> 形象图库 (预设与历史)
             </button>
@@ -527,118 +466,62 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
 
           {/* Tab 1: AI 智能创作 */}
           {activeTab === 'create' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, minWidth: 0, width: '100%', overflowY: 'auto', maxHeight: '560px', paddingRight: '4px' }}>
+            <div className="avatar-studio-container">
               {/* 独立生图引擎状态指示栏 & 快捷配置入口 */}
-              <div
-                style={{
-                  padding: '10px 14px',
-                  borderRadius: '10px',
-                  background: studioStatus?.cloud ? 'rgba(139, 92, 246, 0.08)' : 'rgba(245, 158, 11, 0.08)',
-                  border: studioStatus?.cloud ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)',
-                  fontSize: '12px',
-                  color: studioStatus?.cloud ? '#7c3aed' : '#b45309',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '10px',
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 600 }}>
+              <div className={`avatar-engine-banner ${studioStatus?.cloud ? 'is-cloud' : 'is-local'}`}>
+                <div>
+                  <div className="avatar-engine-title-row">
+                    <span className="avatar-engine-title">
                       {studioStatus?.cloud
                         ? `⚡ 绘图引擎: ${studioStatus?.provider} (${studioStatus?.imageModel})`
                         : '🎨 绘图引擎: 智能自适应矢量引擎 (离线本地绘图模式)'}
                     </span>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        padding: '1px 6px',
-                        borderRadius: '10px',
-                        background: studioStatus?.cloud ? 'rgba(139, 92, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                        fontWeight: 500,
-                      }}
-                    >
+                    <span className="avatar-engine-badge">
                       {studioStatus?.cloud ? '商业云端' : '本地离线'}
                     </span>
                   </div>
-                  <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
+                  <div className="avatar-engine-sub">
                     {studioStatus?.cloud
                       ? '已独立连接专用生图大模型，与对话模型完全隔离'
                       : '提示：可随时点击右侧按钮连接硅基流动、Google 或通义万相'}
-                  </span>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setIsImageModelModalOpen(true)}
-                  style={{
-                    padding: '5px 12px',
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    background: '#8b5cf6',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    whiteSpace: 'nowrap',
-                    boxShadow: '0 1px 3px rgba(139, 92, 246, 0.3)',
-                  }}
+                  className="avatar-engine-config-btn"
                 >
                   <Settings size={13} /> 配置生图引擎
                 </button>
               </div>
 
               {/* 最近生成的专属形象 */}
-              <div style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-muted, #6b7280)', textTransform: 'uppercase' }}>
+              <div className="avatar-form-block">
+                <div className="avatar-section-title-row">
+                  <span className="avatar-section-label">
                     最近生成的形象 (点击卡片填充描述，或直接「立即装配」):
                   </span>
                   {studioStatus?.customFaces && studioStatus.customFaces.length > 0 && (
-                    <span style={{ fontSize: '10.5px', color: 'var(--om-muted, #9ca3af)' }}>
+                    <span className="avatar-section-count">
                       共 {studioStatus.customFaces.length} 款历史创作
                     </span>
                   )}
                 </div>
 
                 {(!studioStatus?.customFaces || studioStatus.customFaces.length === 0) ? (
-                  <div
-                    style={{
-                      padding: '16px',
-                      textAlign: 'center',
-                      borderRadius: '10px',
-                      background: 'var(--om-surface, #f9fafb)',
-                      border: '1px dashed var(--om-border, #e5e7eb)',
-                      fontSize: '12px',
-                      color: 'var(--om-muted, #6b7280)',
-                    }}
-                  >
+                  <div className="avatar-empty-state">
                     暂无历史生成的形象。在下方输入描述并点击「开始绘制」，生成的形象将自动陈列于此。
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '10px',
-                      overflowX: 'auto',
-                      paddingBottom: '8px',
-                      paddingTop: '2px',
-                      scrollbarWidth: 'thin',
-                      width: '100%',
-                      minWidth: 0,
-                      maxWidth: '100%',
-                    }}
-                  >
+                  <div className="avatar-recent-strip">
                     {[...(studioStatus?.customFaces || [])]
-                      .sort((a, b) => (a.created || 0) - (b.created || 0))
+                      .sort((a, b) => (b.created || 0) - (a.created || 0))
                       .map((face) => {
                         const isEquipped = currentBot?.avatar === face.id;
                         const isDescSelected = description === face.description;
                         const styleInfo = STYLES_CATALOG.find((s) => s.id === face.style);
                         const imgUrl = face.moods?.idle || `/avatars/custom/${face.id}/idle.webp`;
+                        const isConfirming = confirmDeleteId === face.id;
 
                         return (
                           <div
@@ -647,120 +530,42 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                               if (face.description) setDescription(face.description);
                               if (face.style) setSelectedStyle(face.style as AvatarStyle);
                             }}
-                            style={{
-                              flex: '0 0 148px',
-                              width: '148px',
-                              overflow: 'hidden',
-                              borderRadius: '12px',
-                              border: isEquipped
-                                ? '2px solid #10b981'
-                                : isDescSelected
-                                ? '2px solid var(--om-accent, #3b82f6)'
-                                : '1px solid var(--om-border, #e5e7eb)',
-                              background: isEquipped
-                                ? 'rgba(16, 185, 129, 0.05)'
-                                : isDescSelected
-                                ? 'rgba(59, 130, 246, 0.05)'
-                                : 'var(--om-surface, #ffffff)',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              cursor: 'pointer',
-                              position: 'relative',
-                              transition: 'all 0.15s ease',
-                              boxShadow: isEquipped ? '0 2px 6px rgba(16,185,129,0.15)' : 'none',
-                            }}
+                            className={`avatar-face-card ${isEquipped ? 'is-equipped' : ''} ${isDescSelected ? 'is-selected' : ''}`}
                             title={`点击填充描述: ${face.description}`}
                           >
                             {/* 缩略图与操作按钮 */}
-                            <div style={{ aspectRatio: '1/1', background: '#f3f4f6', overflow: 'hidden', position: 'relative' }}>
+                            <div className="avatar-face-img-wrap">
                               <img
                                 src={imgUrl}
                                 alt={face.description || face.id}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                 onError={(e) => {
                                   (e.currentTarget as HTMLImageElement).src = '/avatars/dragon-idle.webp';
                                 }}
                               />
                               {isEquipped && (
-                                <span
-                                  style={{
-                                    position: 'absolute',
-                                    top: '4px',
-                                    right: '4px',
-                                    background: '#10b981',
-                                    color: '#fff',
-                                    fontSize: '9.5px',
-                                    fontWeight: 700,
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
-                                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                                  }}
-                                >
+                                <span className="avatar-face-badge-equipped">
                                   使用中
                                 </span>
                               )}
-                              {/* 删除按钮 */}
+                              {/* 删除按钮 (两步内联倒计时确认) */}
                               <button
                                 type="button"
-                                title="删除该形象"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteCustomFace(face.id, face.description);
-                                }}
-                                style={{
-                                  position: 'absolute',
-                                  top: '4px',
-                                  left: '4px',
-                                  width: '22px',
-                                  height: '22px',
-                                  borderRadius: '50%',
-                                  background: 'rgba(0,0,0,0.45)',
-                                  color: '#fff',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  transition: 'all 0.15s ease',
-                                  zIndex: 3,
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.background = '#ef4444')}
-                                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.45)')}
+                                title={isConfirming ? '再次点击确认删除' : '删除该形象'}
+                                onClick={(e) => handleDeleteCustomFace(face.id, e)}
+                                className={`avatar-face-delete-btn ${isConfirming ? 'is-confirming' : ''}`}
                               >
-                                <Trash2 size={11} />
+                                {isConfirming ? '确认删除?' : <Trash2 size={11} />}
                               </button>
                             </div>
 
                             {/* 描述与风格 */}
-                            <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: '60px' }}>
-                              <div
-                                style={{
-                                  fontSize: '11px',
-                                  color: 'var(--om-fg, #111827)',
-                                  lineHeight: '1.3',
-                                  maxHeight: '2.6em',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  display: '-webkit-box',
-                                  WebkitLineClamp: 2,
-                                  WebkitBoxOrient: 'vertical',
-                                  marginBottom: '4px',
-                                }}
-                              >
+                            <div className="avatar-face-meta">
+                              <div className="avatar-face-desc" title={face.description || '自定义形象'}>
                                 {face.description || '自定义形象'}
                               </div>
 
-                              <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
-                                <span
-                                  style={{
-                                    fontSize: '9.5px',
-                                    color: 'var(--om-muted, #6b7280)',
-                                    background: 'rgba(0,0,0,0.04)',
-                                    padding: '1px 4px',
-                                    borderRadius: '3px',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
+                              <div className="avatar-face-footer">
+                                <span className="avatar-face-style-tag">
                                   {styleInfo?.label.split(' ')[0] || face.style || '默认'}
                                 </span>
 
@@ -771,18 +576,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                                     e.stopPropagation();
                                     handleApplyCustomFace(face);
                                   }}
-                                  style={{
-                                    padding: '2px 7px',
-                                    fontSize: '10.5px',
-                                    fontWeight: 600,
-                                    borderRadius: '5px',
-                                    border: 'none',
-                                    cursor: isEquipped ? 'default' : 'pointer',
-                                    background: isEquipped ? '#10b981' : 'var(--om-accent, #3b82f6)',
-                                    color: '#fff',
-                                    whiteSpace: 'nowrap',
-                                    opacity: busy && busy.startsWith('face-') ? 0.6 : 1,
-                                  }}
+                                  className={`avatar-face-equip-btn ${isEquipped ? 'btn-secondary' : 'btn-primary'}`}
                                 >
                                   {isEquipped ? '已装配' : '立即装配'}
                                 </button>
@@ -796,53 +590,44 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
               </div>
 
               {/* 描述输入框 */}
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="avatar-form-block">
+                <label className="avatar-field-label">
                   形象外貌与角色描述:
                 </label>
                 <textarea
-                  className="form-control"
+                  className="avatar-textarea"
                   rows={2}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="例如：一只软萌治愈系小柴犬，系着红蓝格子围巾..."
-                  style={{ width: '100%', fontSize: '13px', resize: 'vertical' }}
                 />
               </div>
 
               {/* 灵感词快捷填入 */}
-              <div>
-                <span style={{ fontSize: '11px', color: 'var(--om-muted, #9ca3af)', display: 'block', marginBottom: '4px' }}>
+              <div className="avatar-form-block">
+                <span className="avatar-field-label" style={{ fontSize: '11.5px', color: 'var(--om-muted)' }}>
                   快捷灵感词:
                 </span>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                <div className="avatar-suggestion-chips">
                   {PROMPT_SUGGESTIONS.map((item, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => setDescription(item)}
-                      style={{
-                        padding: '3px 8px',
-                        fontSize: '11px',
-                        borderRadius: '12px',
-                        background: 'var(--om-surface-2, #f3f4f6)',
-                        border: '1px solid var(--om-border, #e5e7eb)',
-                        color: 'var(--om-fg, #374151)',
-                        cursor: 'pointer',
-                      }}
+                      className="avatar-suggestion-chip"
                     >
-                      {item.slice(0, 14)}...
+                      {item.slice(0, 16)}...
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* 风格选择器 */}
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="avatar-form-block">
+                <label className="avatar-field-label">
                   艺术风格体系 (7 种):
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px', width: '100%' }}>
+                <div className="avatar-styles-grid">
                   {STYLES_CATALOG.map((s) => {
                     const isSelected = selectedStyle === s.id;
                     return (
@@ -851,31 +636,15 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                         type="button"
                         onClick={() => setSelectedStyle(s.id)}
                         title={`${s.label}：${s.desc}`}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          padding: '6px 8px',
-                          borderRadius: '8px',
-                          border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                          background: isSelected ? 'rgba(59, 130, 246, 0.08)' : 'var(--om-surface, #ffffff)',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          transition: 'all 0.15s ease',
-                          minHeight: '48px',
-                          minWidth: 0,
-                          width: '100%',
-                          overflow: 'hidden',
-                          boxSizing: 'border-box',
-                        }}
+                        className={`avatar-style-card ${isSelected ? 'is-selected' : ''}`}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 650, width: '100%', minWidth: 0, overflow: 'hidden' }}>
-                          <span style={{ flexShrink: 0, fontSize: '12px' }}>{s.icon}</span>
-                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{s.label}</span>
+                        <div className="avatar-style-header">
+                          <span>{s.icon}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
                         </div>
-                        <span style={{ fontSize: '9.5px', color: 'var(--om-muted, #6b7280)', marginTop: '2px', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', minWidth: 0, display: 'block' }}>
+                        <div className="avatar-style-desc" title={s.desc}>
                           {s.desc}
-                        </span>
+                        </div>
                       </button>
                     );
                   })}
@@ -883,31 +652,19 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
               </div>
 
               {/* 参考图附件 (可选) */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <label
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    borderRadius: '8px',
-                    border: '1px dashed var(--om-border, #d1d5db)',
-                    background: 'var(--om-surface-2, #f9fafb)',
-                    cursor: 'pointer',
-                  }}
-                >
+              <div className="avatar-upload-row">
+                <label className="avatar-upload-btn">
                   <Upload size={13} />
                   <span>{referenceUrl ? '更换参考图' : '上传参考图 (可选)'}</span>
                   <input type="file" accept="image/*" onChange={handleUploadReference} style={{ display: 'none' }} />
                 </label>
                 {referenceUrl && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#10b981' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--accent-green, #10b981)' }}>
                     <Check size={14} /> 已上传参考底图
                     <button
                       type="button"
                       onClick={() => setReferenceUrl('')}
-                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0 }}
+                      style={{ background: 'none', border: 'none', color: 'var(--accent-red, #ef4444)', cursor: 'pointer', padding: 0 }}
                     >
                       <X size={12} />
                     </button>
@@ -926,7 +683,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '8px',
-                    padding: '10px 22px',
+                    padding: '9px 20px',
                     fontSize: '13.5px',
                     fontWeight: 650,
                     borderRadius: '8px',
@@ -939,17 +696,9 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
 
               {/* 候选四宫格展示区 */}
               {session && (session.stage === 'drawing' || session.stage === 'choose' || session.stage === 'posing') && (
-                <div
-                  style={{
-                    marginTop: '12px',
-                    padding: '14px',
-                    borderRadius: '12px',
-                    background: 'var(--om-surface-2, #f9fafb)',
-                    border: '1px solid var(--om-border, #e5e7eb)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--om-fg, #111827)' }}>
+                <div className="avatar-candidates-box">
+                  <div className="avatar-candidates-header">
+                    <span style={{ fontSize: '12.5px', fontWeight: 650, color: 'var(--om-fg)' }}>
                       {session.stage === 'drawing' ? '正在并行生成 4 组形象候选方案...' : '点击任一款定型生成全套情绪姿态:'}
                     </span>
                     {session.stage === 'choose' && (
@@ -957,29 +706,21 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                         type="button"
                         onClick={() => api.avatarStart(session.id)}
                         className="btn-secondary"
-                        style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px' }}
+                        style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                       >
                         <RefreshCw size={11} /> 换一批
                       </button>
                     )}
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                  <div className="avatar-candidates-grid">
                     {session.candidates.map((cand, idx) => {
                       const isChosen = selectedCandidate === idx || session.chosen === idx;
                       return (
                         <div
                           key={idx}
-                          style={{
-                            position: 'relative',
-                            aspectRatio: '1/1',
-                            borderRadius: '10px',
-                            overflow: 'hidden',
-                            background: 'var(--om-surface, #ffffff)',
-                            border: isChosen ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                            cursor: session.stage === 'choose' && cand ? 'pointer' : 'default',
-                            boxShadow: isChosen ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : 'none',
-                          }}
+                          className={`avatar-candidate-cell ${isChosen ? 'is-chosen' : ''}`}
+                          style={{ cursor: session.stage === 'choose' && cand ? 'pointer' : 'default' }}
                           onClick={() => {
                             if (session.stage === 'choose' && cand && busy === null) {
                               setSelectedCandidate(selectedCandidate === idx ? null : idx);
@@ -993,38 +734,11 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                               <Loader2 size={18} className="animate-spin text-muted" />
                             </div>
                           )}
-                          <span
-                            style={{
-                              position: 'absolute',
-                              top: '4px',
-                              left: '4px',
-                              background: 'rgba(0,0,0,0.6)',
-                              color: '#ffffff',
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              padding: '1px 5px',
-                              borderRadius: '4px',
-                            }}
-                          >
+                          <span className="avatar-candidate-tag">
                             #{idx + 1}
                           </span>
                           {isChosen && (
-                            <span
-                              style={{
-                                position: 'absolute',
-                                top: '4px',
-                                right: '4px',
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: '50%',
-                                background: 'var(--om-accent, #3b82f6)',
-                                color: '#ffffff',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                              }}
-                            >
+                            <span className="avatar-candidate-check">
                               <Check size={12} />
                             </span>
                           )}
@@ -1056,7 +770,7 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                         {busy === `choose-${selectedCandidate}` ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                         就用这张 (定型生成全套 5 态)
                       </button>
-                      <p style={{ textAlign: 'center', fontSize: '11.5px', color: 'var(--om-muted, #6b7280)', margin: 0 }}>
+                      <p style={{ textAlign: 'center', fontSize: '11.5px', color: 'var(--om-muted)', margin: 0 }}>
                         接下来，系统将以此为基准生成全套 5 种情绪姿态（待机、工作、思考、喜悦、纠错）。
                       </p>
                     </div>
@@ -1066,25 +780,17 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
 
               {/* 姿态生成成功完成态 */}
               {session?.stage === 'done' && session.moods && (
-                <div
-                  style={{
-                    marginTop: '12px',
-                    padding: '14px',
-                    borderRadius: '12px',
-                    background: 'rgba(16, 185, 129, 0.08)',
-                    border: '1px solid rgba(16, 185, 129, 0.3)',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', fontWeight: 650, fontSize: '13px' }}>
+                <div className="avatar-done-box">
+                  <div className="avatar-done-title">
                     <Check size={16} /> 形象全套姿态已成功装配至「{currentBot?.name}」！
                   </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <div className="avatar-done-moods-row">
                     {MOODS_LIST.map((m) => (
-                      <div key={m} style={{ width: '50px', textAlign: 'center' }}>
-                        <div style={{ width: '48px', height: '48px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #d1d5db' }}>
-                          <img src={session.moods?.[m]} alt={m} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <div key={m} className="avatar-done-mood-item">
+                        <div className="avatar-done-mood-thumb">
+                          <img src={session.moods?.[m]} alt={m} />
                         </div>
-                        <span style={{ fontSize: '10px', color: '#4b5563', marginTop: '2px', display: 'block' }}>
+                        <span className="avatar-done-mood-label">
                           {MOOD_NAMES[m]}
                         </span>
                       </div>
@@ -1097,42 +803,35 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
 
           {/* Tab 2: 形象图库 (预设与历史) */}
           {activeTab === 'presets' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', overflowY: 'auto', maxHeight: '540px', paddingRight: '4px' }}>
+            <div className="avatar-studio-container">
               {/* 系统内置预设 */}
-              <div>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--om-fg, #111827)', display: 'block', marginBottom: '8px' }}>
+              <div className="avatar-form-block">
+                <span className="avatar-field-label" style={{ marginBottom: '8px' }}>
                   系统内置预设
                 </span>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                <div className="avatar-presets-grid">
                   {(studioStatus?.presets || []).map((preset) => {
                     const isSelected = currentBot?.avatar === preset.id;
                     return (
                       <div
                         key={preset.id}
-                        style={{
-                          display: 'flex',
-                          gap: '12px',
-                          padding: '12px',
-                          borderRadius: '12px',
-                          border: isSelected ? '2px solid var(--om-accent, #3b82f6)' : '1px solid var(--om-border, #e5e7eb)',
-                          background: isSelected ? 'rgba(59, 130, 246, 0.06)' : 'var(--om-surface, #ffffff)',
-                        }}
+                        className={`avatar-preset-card ${isSelected ? 'is-selected' : ''}`}
                       >
                         <div style={{ flexShrink: 0 }}>
                           <BotAvatar bot={{ avatar: preset.id } as any} size={52} motion="avatar-idle" />
                         </div>
-                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: '13px', fontWeight: 650, color: 'var(--om-fg, #111827)' }}>
+                        <div className="avatar-preset-info">
+                          <div className="avatar-preset-title-line">
+                            <span className="avatar-preset-title">
                               {preset.name}
                             </span>
                             {preset.clips && (
-                              <span style={{ fontSize: '10px', color: '#3b82f6', background: 'rgba(59,130,246,0.1)', padding: '1px 5px', borderRadius: '4px' }}>
+                              <span style={{ fontSize: '10px', color: 'var(--om-accent)', background: 'color-mix(in srgb, var(--om-accent) 12%, transparent)', padding: '1px 5px', borderRadius: '4px' }}>
                                 含视频动态
                               </span>
                             )}
                           </div>
-                          <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)', marginTop: '2px', lineHeight: 1.3 }}>
+                          <span className="avatar-preset-desc">
                             {preset.description}
                           </span>
                           <button
@@ -1157,83 +856,60 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                 </div>
               </div>
 
-              {/* 最近生成的专属形象 */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--om-fg, #111827)' }}>
-                    最近生成的专属形象
+              {/* 历史生成的专属形象 */}
+              <div className="avatar-form-block">
+                <div className="avatar-section-title-row">
+                  <span className="avatar-field-label">
+                    历史生成的专属形象
                   </span>
                   {studioStatus?.customFaces && studioStatus.customFaces.length > 0 && (
-                    <span style={{ fontSize: '11px', color: 'var(--om-muted, #6b7280)' }}>
+                    <span className="avatar-section-count">
                       共 {studioStatus.customFaces.length} 款历史创作
                     </span>
                   )}
                 </div>
 
                 {(!studioStatus?.customFaces || studioStatus.customFaces.length === 0) ? (
-                  <div
-                    style={{
-                      padding: '24px',
-                      textAlign: 'center',
-                      borderRadius: '10px',
-                      background: 'var(--om-surface, #f9fafb)',
-                      border: '1px dashed var(--om-border, #e5e7eb)',
-                      fontSize: '12px',
-                      color: 'var(--om-muted, #6b7280)',
-                    }}
-                  >
+                  <div className="avatar-empty-state">
                     暂无生成的自定义专属形象。可在「AI 智能创作」中输入提示词绘制。
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                  <div className="avatar-presets-grid">
                     {[...(studioStatus?.customFaces || [])]
-                      .sort((a, b) => (a.created || 0) - (b.created || 0))
+                      .sort((a, b) => (b.created || 0) - (a.created || 0))
                       .map((face) => {
                         const isEquipped = currentBot?.avatar === face.id;
                         const styleInfo = STYLES_CATALOG.find((s) => s.id === face.style);
+                        const isConfirming = confirmDeleteId === face.id;
+
                         return (
                           <div
                             key={face.id}
-                            style={{
-                              display: 'flex',
-                              gap: '12px',
-                              padding: '12px',
-                              borderRadius: '12px',
-                              border: isEquipped ? '2px solid #10b981' : '1px solid var(--om-border, #e5e7eb)',
-                              background: isEquipped ? 'rgba(16, 185, 129, 0.06)' : 'var(--om-surface, #ffffff)',
-                            }}
+                            className={`avatar-preset-card ${isEquipped ? 'is-selected' : ''}`}
+                            style={isEquipped ? { borderColor: 'var(--accent-green, #10b981)', background: 'rgba(16, 185, 129, 0.05)' } : undefined}
                           >
                             <div style={{ flexShrink: 0 }}>
                               <BotAvatar bot={{ avatar: face.id, avatarType: 'custom' } as any} size={52} motion="avatar-idle" />
                             </div>
-                            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <span style={{ fontSize: '11px', fontWeight: 600, color: '#6366f1', background: 'rgba(99,102,241,0.08)', padding: '1px 5px', borderRadius: '4px' }}>
+                            <div className="avatar-preset-info">
+                              <div className="avatar-preset-title-line">
+                                <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--om-accent)', background: 'color-mix(in srgb, var(--om-accent) 12%, transparent)', padding: '1px 5px', borderRadius: '4px' }}>
                                   {styleInfo?.label.split(' ')[0] || face.style || '自定义'}
                                 </span>
                                 {isEquipped && (
-                                  <span style={{ fontSize: '10.5px', color: '#10b981', fontWeight: 650 }}>
+                                  <span style={{ fontSize: '10.5px', color: 'var(--accent-green, #10b981)', fontWeight: 650 }}>
                                     当前佩戴中
                                   </span>
                                 )}
                               </div>
                               <span
-                                style={{
-                                  fontSize: '11.5px',
-                                  color: 'var(--om-fg, #111827)',
-                                  marginTop: '4px',
-                                  lineHeight: 1.35,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  display: '-webkit-box',
-                                  WebkitLineClamp: 2,
-                                  WebkitBoxOrient: 'vertical',
-                                }}
+                                className="avatar-preset-desc"
+                                title={face.description || '自定义形象'}
                               >
                                 {face.description || '自定义形象'}
                               </span>
-                              <div style={{ marginTop: 'auto', paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <span style={{ fontSize: '10px', color: 'var(--om-muted, #9ca3af)' }}>
+                              <div style={{ marginTop: 'auto', paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--om-border)' }}>
+                                <span style={{ fontSize: '10px', color: 'var(--om-muted)' }}>
                                   {face.created ? new Date(face.created).toLocaleDateString() : ''}
                                 </span>
                                 <div style={{ display: 'flex', gap: '6px' }}>
@@ -1258,8 +934,8 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                                       padding: '3px 9px',
                                       fontSize: '11px',
                                       borderRadius: '6px',
-                                      background: isEquipped ? undefined : '#10b981',
-                                      borderColor: isEquipped ? undefined : '#10b981',
+                                      background: isEquipped ? undefined : 'var(--accent-green, #10b981)',
+                                      borderColor: isEquipped ? undefined : 'var(--accent-green, #10b981)',
                                     }}
                                   >
                                     {isEquipped ? '已装配' : '立即装配'}
@@ -1267,12 +943,19 @@ export const AvatarStudioModal: React.FC<AvatarStudioModalProps> = ({
                                   <button
                                     type="button"
                                     disabled={busy !== null}
-                                    onClick={() => handleDeleteCustomFace(face.id, face.description)}
-                                    className="btn-secondary"
-                                    style={{ padding: '3px 7px', fontSize: '11px', borderRadius: '6px', color: '#ef4444' }}
-                                    title="删除此形象"
+                                    onClick={(e) => handleDeleteCustomFace(face.id, e)}
+                                    className={`btn-secondary ${isConfirming ? 'is-confirming' : ''}`}
+                                    style={{
+                                      padding: '3px 7px',
+                                      fontSize: '11px',
+                                      borderRadius: '6px',
+                                      color: isConfirming ? '#ffffff' : 'var(--accent-red, #ef4444)',
+                                      backgroundColor: isConfirming ? 'var(--accent-red, #ef4444)' : undefined,
+                                      borderColor: isConfirming ? 'var(--accent-red, #ef4444)' : undefined,
+                                    }}
+                                    title={isConfirming ? '再次点击确认删除' : '删除此形象'}
                                   >
-                                    <Trash2 size={12} />
+                                    {isConfirming ? '确认删除?' : <Trash2 size={12} />}
                                   </button>
                                 </div>
                               </div>
