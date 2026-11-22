@@ -268,11 +268,18 @@ export const SettingsModal: React.FC = () => {
     setIsConnecting(true);
     setConnectError('');
     try {
-      await api.connectConnector({
+      const res = await api.connectConnector({
         id: connectTarget.id,
         key: connectKeyInput.trim() || undefined,
         url: connectUrlInput.trim() || undefined
       });
+      if (res.connector?.status === 'error') {
+        const errMsg = res.connector.error || '验证未通过';
+        setConnectError(errMsg);
+        showToast(`连接校验未通过: ${errMsg}`, 'warning');
+        await loadConnectors();
+        return;
+      }
       showToast(`连接器「${connectTarget.name}」配置接入成功！`, 'success');
       setIsConnectModalOpen(false);
       await loadConnectors();
@@ -1361,27 +1368,27 @@ export const SettingsModal: React.FC = () => {
             <div className="connector-dialog-body">
               <div className="connector-hero-desc">{connectTarget.description}</div>
 
-              {connectTarget.authType === 'key' && (
+              {(connectTarget.authType === 'key' || connectTarget.authType === 'oauth') && (
                 <div className="connector-form-field">
-                  <label className="connector-form-label">API 密钥 / Token 凭据</label>
+                  <label className="connector-form-label">
+                    {connectTarget.authType === 'key' ? 'API 密钥 / Webhook URL / 访问凭据' : 'OAuth 访问令牌 / Token (支持直接填入)'}
+                  </label>
                   <input
                     type="password"
-                    placeholder="输入或粘贴访问密钥..."
+                    placeholder={
+                      connectTarget.id === 'discord'
+                        ? '输入 Discord Bot Token 或频道 Webhook URL...'
+                        : '输入访问密钥、Access Token 或 Webhook URL...'
+                    }
                     className="connector-form-input"
                     value={connectKeyInput}
                     onChange={(e) => setConnectKeyInput(e.target.value)}
                   />
-                  {connectTarget.keyHint && (
+                  {connectTarget.keyHint ? (
                     <p className="connector-form-hint">获取指引: {connectTarget.keyHint}</p>
-                  )}
-                </div>
-              )}
-
-              {connectTarget.authType === 'oauth' && (
-                <div className="settings-card">
-                  <div className="connector-form-hint">
-                    该服务支持标准 OAuth 2.0 鉴权流程。连接时将引导授权，授予 MuseClaw 受限工具调用访问权。
-                  </div>
+                  ) : connectTarget.authType === 'oauth' ? (
+                    <p className="connector-form-hint">支持填入该平台 Personal Access Token、Bot Token 或 Webhook 直连</p>
+                  ) : null}
                 </div>
               )}
 
