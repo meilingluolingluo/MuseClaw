@@ -15,6 +15,14 @@
   - 技术文档、接口说明、架构方案中，仅聚焦陈述本系统/模块的功能设计与实现细节。
   - **严禁**添加无意义的外部参考项目背景说明。
 
+## 前端样式与组件开发规范
+
+- **严禁滥用硬编码内联样式 (Inline Styles)**：
+  - 页面与组件样式统一收敛至工程 CSS 样式表（`styles.css` 或模块化样式文件），采用语义化类名组织管理。
+  - 严禁在 JSX/TSX 组件内硬编码内联样式（`style={{ ... }}`）与静态颜色值（如 `#f9fafb`, `#111827`, `#e5e7eb` 等）。
+  - 动态样式仅允许用于必不可少的纯数值计算或坐标位移（如动态宽高度、动态位移），常规布局、间距、字体、主题色彩必须严格采用设计系统 CSS 变量（如 `var(--om-surface)`, `var(--om-fg)`, `var(--om-border)`, `var(--om-accent)` 等）。
+  - 所有新开发或重构的界面必须天然适配暗黑模式（Dark Mode）与明亮模式，杜绝因硬编码导致的色彩反转断裂与文字不可读问题。
+
 ## 桌面应用自动化操作规范 (agent-desktop)
 
 - Use `agent-desktop` to see and operate desktop apps. Before the first use, run `agent-desktop skills get desktop` and `agent-desktop skills get platform`, and follow them.
