@@ -799,7 +799,8 @@ export function startGatewayServer(defaultPort = 8799) {
       for await (const chunk of req) body += chunk;
       try {
         const payload = JSON.parse(body || '{}');
-        const session = await avatarStudio.start(payload.session);
+        const sid = payload.session || payload.sessionId;
+        const session = await avatarStudio.start(sid);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(session));
       } catch (err: any) {
@@ -817,7 +818,8 @@ export function startGatewayServer(defaultPort = 8799) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'index is required' }));
         }
-        const session = await avatarStudio.choose(payload.session, payload.index, payload.botId);
+        const sid = payload.session || payload.sessionId;
+        const session = await avatarStudio.choose(sid, payload.index, payload.botId);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(session));
       } catch (err: any) {
@@ -831,7 +833,8 @@ export function startGatewayServer(defaultPort = 8799) {
       for await (const chunk of req) body += chunk;
       try {
         const payload = JSON.parse(body || '{}');
-        const session = avatarStudio.cancel(payload.session);
+        const sid = payload.session || payload.sessionId;
+        const session = avatarStudio.cancel(sid);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify(session));
       } catch (err: any) {
@@ -2906,7 +2909,16 @@ fi
       for (const [prefix, dir] of uploadRoots) {
         if (!url.pathname.startsWith(prefix)) continue;
         const rel = path.normalize(decodeURIComponent(url.pathname.slice(prefix.length)));
-        const target = path.join(dir, rel);
+        let target = path.join(dir, rel);
+        if (!fs.existsSync(target)) {
+          if (target.endsWith('.webp')) {
+            const altSvg = target.slice(0, -5) + '.svg';
+            if (fs.existsSync(altSvg)) target = altSvg;
+          } else if (target.endsWith('.svg')) {
+            const altWebp = target.slice(0, -4) + '.webp';
+            if (fs.existsSync(altWebp)) target = altWebp;
+          }
+        }
         if (!target.startsWith(dir) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) {
           if (prefix.includes('avatar') && url.pathname.endsWith('.mp4')) {
             res.writeHead(204);
@@ -2926,9 +2938,35 @@ fi
           '.mp4': 'video/mp4',
           '.txt': 'text/plain; charset=utf-8'
         };
+        let contentType = types[ext] || 'application/octet-stream';
+
+        // 动态嗅探文件头 Magic Bytes，如果真实内容是 SVG，则返回 image/svg+xml
+        try {
+          const fd = fs.openSync(target, 'r');
+          const buf = Buffer.alloc(128);
+          const bytesRead = fs.readSync(fd, buf, 0, 128, 0);
+          fs.closeSync(fd);
+          if (bytesRead > 0) {
+            const headerStr = buf.subarray(0, bytesRead).toString('utf-8').trimStart();
+            if (headerStr.startsWith('<svg') || headerStr.startsWith('<?xml') || headerStr.startsWith('<!DOCTYPE svg')) {
+              contentType = 'image/svg+xml; charset=utf-8';
+            } else if (bytesRead >= 12 && buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP') {
+              contentType = 'image/webp';
+            } else if (bytesRead >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+              contentType = 'image/png';
+            } else if (bytesRead >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+              contentType = 'image/jpeg';
+            } else if (bytesRead >= 6 && buf.subarray(0, 3).toString('ascii') === 'GIF') {
+              contentType = 'image/gif';
+            }
+          }
+        } catch {
+          // ignore read error
+        }
+
         res.writeHead(200, {
-          'Content-Type': types[ext] || 'application/octet-stream',
-          'Cache-Control': 'public, max-age=86400'
+          'Content-Type': contentType,
+          'Cache-Control': 'no-cache, must-revalidate'
         });
         return fs.createReadStream(target).pipe(res);
       }

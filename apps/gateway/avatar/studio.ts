@@ -468,7 +468,7 @@ export class AvatarStudio {
         try {
           const moodInstruction = MOOD_INSTRUCTIONS[mood];
           const moodPrompt = `${KEEP_PROMPT} Character: ${session.description}. ${moodInstruction}`;
-          const moodBuffer = await this.renderMoodImage(ep, moodPrompt, idleDest, mood, session.style);
+          const moodBuffer = await this.renderMoodImage(ep, moodPrompt, idleDest, mood, session.style, chosenIndex);
 
           const moodDest = path.join(faceDir, `${mood}.webp`);
           fs.writeFileSync(moodDest, moodBuffer);
@@ -657,7 +657,8 @@ export class AvatarStudio {
     prompt: string,
     baseIdlePath: string,
     mood: Exclude<AvatarMood, 'idle'>,
-    style: string
+    style: string,
+    variantIndex = 0
   ): Promise<Buffer> {
     // 若配置了远程图片编辑接口 (OpenAI /images/edits 或 DashScope 多模态)
     if (ep.provider === 'openai' && ep.apiKey && fs.existsSync(baseIdlePath)) {
@@ -668,7 +669,7 @@ export class AvatarStudio {
       }
     }
 
-    return this.generateProceduralAvatar(prompt, mood, 0);
+    return this.generateProceduralAvatar(prompt, mood, variantIndex);
   }
 
   /**
