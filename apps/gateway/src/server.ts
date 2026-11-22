@@ -16,6 +16,7 @@ import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
 import { globalSkillStore } from '../skills/index.ts';
 import { authService, parseCookies, type AuthUser } from '../auth/auth-service.ts';
+import { AvatarStudio, parseAvatarRequest, parseAvatarChoice } from '../avatar/index.ts';
 import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,6 +163,7 @@ const botRegistry = new BotRegistry();
 const sessionStore = new SessionStore();
 const sessionRouter = new SessionRouter(botRegistry, sessionStore);
 const feedStore = new FeedStore();
+const avatarStudio = new AvatarStudio(botRegistry);
 
 function safeJsonParse<T = any>(str: string, fallback: T = {} as T): T {
   try {
@@ -567,6 +569,9 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/runner/machines'
     ].includes(url.pathname) ||
     url.pathname.startsWith('/runner') ||
+    url.pathname.startsWith('/api/avatar/') ||
+    url.pathname === '/api/tasks' ||
+    url.pathname === '/api/chat' ||
     url.pathname === '/api/channels/feishu/webhook' ||
     url.pathname === '/api/channels/infoflow/webhook' ||
     (req.method === 'GET' && url.pathname === '/api/bots') ||
@@ -723,6 +728,108 @@ export function startGatewayServer(defaultPort = 8799) {
         return res.end(JSON.stringify({ success: true, url: avatarUrl }));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    // B1.2 形象工坊接口 (Avatar Studio)
+    if (req.method === 'GET' && url.pathname === '/api/avatar/status') {
+      const botId = url.searchParams.get('botId') || undefined;
+      const ep = avatarStudio.getImageEndpointConfig();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        available: ep.available,
+        provider: ep.provider,
+        imageModel: ep.model,
+        videoModel: ep.videoModel,
+        cloud: ep.provider !== 'builtin-procedural',
+        current: avatarStudio.getCurrentSession(),
+        face: avatarStudio.getFaceInfo(botId),
+        presets: avatarStudio.getPresets()
+      }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/avatar/presets') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(avatarStudio.getPresets()));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/begin') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const session = await avatarStudio.begin({
+          description: payload.description || '',
+          style: payload.style,
+          thread: payload.thread,
+          botId: payload.botId,
+          reference: payload.reference
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(session));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/start') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const session = await avatarStudio.start(payload.session);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(session));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/choose') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        if (payload.index === undefined) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'index is required' }));
+        }
+        const session = await avatarStudio.choose(payload.session, payload.index, payload.botId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(session));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/cancel') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const session = avatarStudio.cancel(payload.session);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(session));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/avatar/moods') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const session = await avatarStudio.redrawMoods(payload.botId);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(session));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: err.message }));
       }
     }
@@ -2468,6 +2575,68 @@ fi
         mentionName: mention_name
       })}\n\n`);
 
+      // 形象工坊对话拦截：若存在处于 choose 状态的会话，且用户输入属于选项/重新生成/取消
+      const curStudioSession = avatarStudio.getCurrentSession();
+      if (
+        curStudioSession &&
+        curStudioSession.stage === 'choose' &&
+        (curStudioSession.thread === session.id || curStudioSession.thread === 'main' || !curStudioSession.thread)
+      ) {
+        const choice = parseAvatarChoice(text);
+        if (choice !== null) {
+          session.messages.push({
+            role: 'user',
+            content: text,
+            attachments: attachments.length ? (attachments as any) : undefined
+          });
+          sessionStore.save(session, userId);
+
+          if (choice === 'regenerate') {
+            await avatarStudio.regenerate(curStudioSession.id);
+          } else if (choice === 'cancel') {
+            avatarStudio.cancel(curStudioSession.id);
+          } else if (typeof choice === 'number') {
+            await avatarStudio.choose(curStudioSession.id, choice, bot.id);
+          }
+
+          res.write(`data: ${JSON.stringify({
+            type: 'avatar',
+            event: curStudioSession,
+            bot_id: bot.id,
+            session_id: session.id
+          })}\n\n`);
+          res.end();
+          return;
+        }
+      }
+
+      // 形象工坊对话拦截：自然语言意图创建或更换虚拟形象
+      const avatarReqDesc = parseAvatarRequest(text);
+      if (avatarReqDesc && images.length <= 1) {
+        const avatarSession = await avatarStudio.begin({
+          description: avatarReqDesc,
+          thread: session.id,
+          botId: bot.id,
+          reference: images[0] || ''
+        });
+
+        session.messages.push({
+          role: 'user',
+          content: text,
+          attachments: attachments.length ? (attachments as any) : undefined
+        });
+        sessionStore.save(session, userId);
+
+        res.write(`data: ${JSON.stringify({
+          type: 'avatar',
+          event: avatarSession,
+          bot_id: bot.id,
+          session_id: session.id
+        })}\n\n`);
+        res.end();
+        return;
+      }
+
       // 启动 Agent Loop，注入该 Bot 的 Profile 及专属静态记忆 (按当前用户隔离)
       const botWithMemory: AgentProfile = {
         ...bot,
@@ -2654,6 +2823,10 @@ fi
     // B4. 运行时上传文件（工件、聊天图片、自定义头像）不在构建产物里，单独托管
     const uploadRoots: Array<[string, string]> = [
       ['/avatars/uploads/', path.resolve(__dirname, '../data/avatars/uploads')],
+      ['/avatars/custom/', path.resolve(__dirname, '../data/avatars/custom')],
+      ['/avatars/sessions/', path.resolve(__dirname, '../data/avatars/sessions')],
+      ['/avatars/presets/', path.resolve(__dirname, '../../web/public/avatars/presets')],
+      ['/avatars/', path.resolve(__dirname, '../../web/public/avatars')],
       ['/uploads/', path.resolve(__dirname, '../data/uploads')]
     ];
     if (req.method === 'GET' || req.method === 'HEAD') {

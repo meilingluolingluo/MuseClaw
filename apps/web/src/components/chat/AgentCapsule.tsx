@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Bot } from '../../types';
+import type { Bot, AvatarMood } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { Sparkles, Terminal } from 'lucide-react';
 
@@ -9,6 +9,7 @@ interface AgentCapsuleProps {
   isStreaming?: boolean;
   streamingReasoning?: string;
   streamingToolsCount?: number;
+  mood?: AvatarMood;
   size?: number;
   onClick?: () => void;
 }
@@ -19,12 +20,13 @@ export const AgentCapsule: React.FC<AgentCapsuleProps> = ({
   isStreaming = false,
   streamingReasoning = '',
   streamingToolsCount = 0,
+  mood: customMood,
   size = 50,
   onClick,
 }) => {
   const botName = bot?.name || '小哀';
   const botRole = bot?.role || bot?.description || '企业自驱数字员工';
-  const mood = isStreaming ? 'working' : 'idle';
+  const mood = customMood || (isStreaming ? 'working' : 'idle');
 
   let statusLine: string | null = null;
   let statusIcon: React.ReactNode = null;

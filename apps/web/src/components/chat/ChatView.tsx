@@ -5,7 +5,7 @@ import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
 import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw, Home, MessageSquare, Plus } from 'lucide-react';
-import type { Message, MessageAttachment } from '../../types';
+import type { Message, MessageAttachment, AvatarMood } from '../../types';
 import { api } from '../../services/api';
 
 export const ChatView: React.FC = () => {
@@ -34,6 +34,7 @@ export const ChatView: React.FC = () => {
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
   const [streamingTools, setStreamingTools] = useState<any[]>([]);
+  const [botMood, setBotMood] = useState<AvatarMood>('idle');
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -267,6 +268,7 @@ export const ChatView: React.FC = () => {
 
     setMessages((prev) => [...prev, userMessage]);
     setIsStreaming(true);
+    setBotMood('working');
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingTools([]);
@@ -356,6 +358,7 @@ export const ChatView: React.FC = () => {
               accumulatedReasoning += event.text;
               scheduleStreamingUpdate();
             } else if (event.type === 'agent:error') {
+              setBotMood('error');
               const errSnippet = event.text || `\n[执行出错: ${event.error || '未知异常'}]`;
               accumulatedText += errSnippet;
               if (activeSessionIdRef.current === targetSessionId) {
@@ -397,6 +400,7 @@ export const ChatView: React.FC = () => {
               setTainted(event.isTainted, event.reason);
             } else if (event.type === 'sentinel:approval_needed') {
               hasApprovalNeeded = true;
+              setBotMood('waiting');
               if (activeSessionIdRef.current === targetSessionId) {
                 setMessages((prev) => [
                   ...prev,
@@ -410,6 +414,19 @@ export const ChatView: React.FC = () => {
                       command: event.request?.targetDetails?.command,
                       status: 'pending',
                     },
+                  },
+                ]);
+              }
+            } else if (event.type === 'avatar') {
+              if (activeSessionIdRef.current === targetSessionId) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `avatar_${event.event?.id || Date.now()}`,
+                    role: 'assistant',
+                    content: '',
+                    avatarEvent: event.event,
+                    timestamp: Date.now(),
                   },
                 ]);
               }
@@ -439,7 +456,10 @@ export const ChatView: React.FC = () => {
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
+        setBotMood('happy');
+        setTimeout(() => setBotMood('idle'), 2500);
       } else if (!hasApprovalNeeded) {
+        setBotMood('idle');
         const fallbackMsg: Message = {
           id: `asst_${Date.now()}`,
           role: 'assistant',
@@ -539,6 +559,7 @@ export const ChatView: React.FC = () => {
             isStreaming={isStreaming}
             streamingReasoning={streamingReasoning}
             streamingToolsCount={streamingTools.length}
+            mood={botMood}
             onClick={() => setIsBotModalOpen(true)}
           />
 

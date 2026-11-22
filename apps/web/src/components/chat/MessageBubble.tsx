@@ -14,6 +14,7 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { ToolTrace } from './ToolTrace';
+import { AvatarOptionsCard } from './AvatarOptionsCard';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { formatRelativeTime } from '../../utils/format';
@@ -235,6 +236,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
               )
             )}
           </div>
+        )}
+
+        {/* 形象工坊交互卡片 */}
+        {message.avatarEvent && (
+          <AvatarOptionsCard event={message.avatarEvent} botName={bot?.name} />
         )}
 
         {/* Markdown Rendered Content */}

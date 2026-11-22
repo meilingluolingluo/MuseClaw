@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import { BotAvatar } from '../common/BotAvatar';
 import { Modal } from '../common/Modal';
+import { AvatarStudioModal } from './AvatarStudioModal';
 import {
   List,
   Shield,
@@ -74,6 +75,7 @@ export const AgentProfileDrawer: React.FC = () => {
 
   // 模态框状态
   const [isLookModalOpen, setIsLookModalOpen] = useState(false);
+  const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [isSoulModalOpen, setIsSoulModalOpen] = useState(false);
   const [soulPromptBuffer, setSoulPromptBuffer] = useState('');
 
@@ -385,6 +387,29 @@ export const AgentProfileDrawer: React.FC = () => {
           <div className="agent-drawer-status">
             <span className="bot-status-dot-pulse" />
             <span>已连接</span>
+          </div>
+
+          <div style={{ marginTop: '8px', marginBottom: '12px' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '12px',
+                padding: '4px 12px',
+                borderRadius: '16px',
+                background: 'rgba(59, 130, 246, 0.08)',
+                color: 'var(--om-accent, #3b82f6)',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
+              }}
+              onClick={() => setIsStudioModalOpen(true)}
+              title="打开虚拟形象工坊，基于 AI 创作或定制全套姿态"
+            >
+              <Sparkles size={12} />
+              形象工坊 (Avatar Studio)
+            </button>
           </div>
 
           {/* 三个设定分区 */}
@@ -851,6 +876,25 @@ export const AgentProfileDrawer: React.FC = () => {
             >
               自定义地址
             </button>
+            <button
+              type="button"
+              className="btn-secondary agent-avatar-tab"
+              style={{
+                marginLeft: 'auto',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                color: 'var(--om-accent, #3b82f6)',
+                fontWeight: 600,
+              }}
+              onClick={() => {
+                setIsLookModalOpen(false);
+                setIsStudioModalOpen(true);
+              }}
+            >
+              <Sparkles size={12} />
+              AI 形象工坊
+            </button>
           </div>
 
           {avatarChoice === 'preset' && (
@@ -915,6 +959,20 @@ export const AgentProfileDrawer: React.FC = () => {
           )}
         </div>
       </Modal>
+
+      {/* 虚拟形象工坊模态框 */}
+      <AvatarStudioModal
+        isOpen={isStudioModalOpen}
+        onClose={() => {
+          setIsStudioModalOpen(false);
+          loadBots();
+        }}
+        targetBot={activeBot}
+        onApplied={(b) => {
+          if (b.avatar) setAvatar(b.avatar);
+          loadBots();
+        }}
+      />
     </>
   );
 };

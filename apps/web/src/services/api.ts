@@ -13,6 +13,9 @@ import type {
   Grant,
   ModelsConfig,
   ModelProvider,
+  AvatarStudioView,
+  AvatarSession,
+  AvatarPreset,
   FeedPost,
   FeedActivity,
   SandboxStatus,
@@ -343,6 +346,36 @@ export const api = {
     const qs = params.toString();
     return request<AuditLog[]>(`/api/audit${qs ? `?${qs}` : ''}`);
   },
+
+  // Avatar Studio
+  avatarStatus: (botId?: string) =>
+    request<AvatarStudioView>(`/api/avatar/status${botId ? `?botId=${encodeURIComponent(botId)}` : ''}`),
+  avatarPresets: () => request<AvatarPreset[]>('/api/avatar/presets'),
+  avatarBegin: (data: { description: string; style?: string; thread?: string; botId?: string; reference?: string }) =>
+    request<AvatarSession>('/api/avatar/begin', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  avatarStart: (session: string) =>
+    request<AvatarSession>('/api/avatar/start', {
+      method: 'POST',
+      body: JSON.stringify({ session }),
+    }),
+  avatarChoose: (session: string, index: number, botId?: string) =>
+    request<AvatarSession>('/api/avatar/choose', {
+      method: 'POST',
+      body: JSON.stringify({ session, index, botId }),
+    }),
+  avatarCancel: (session: string) =>
+    request<AvatarSession>('/api/avatar/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ session }),
+    }),
+  avatarMoods: (botId?: string) =>
+    request<AvatarSession>('/api/avatar/moods', {
+      method: 'POST',
+      body: JSON.stringify({ botId }),
+    }),
 
   // Artifacts
   getArtifacts: () => request<Artifact[]>('/api/artifacts'),

@@ -64,6 +64,7 @@ export interface Message {
   }>;
   attachments?: MessageAttachment[];
   timestamp?: number;
+  avatarEvent?: AvatarSession;
   approvalRequest?: {
     actionId: string;
     description: string;
@@ -416,3 +417,71 @@ export interface Skill {
   updatedAt?: number;
   createdAt?: number;
 }
+
+// 虚拟形象系统类型定义
+export type AvatarMood = 'idle' | 'working' | 'waiting' | 'happy' | 'error';
+export type AvatarStyle = 'muse' | 'flat' | 'clay' | 'watercolor' | 'pixel' | 'line' | 'sticker';
+export type AvatarStage = 'estimate' | 'drawing' | 'choose' | 'posing' | 'animating' | 'done' | 'cancelled' | 'failed';
+
+export interface AvatarCostEstimate {
+  pictures?: number;
+  clips?: number;
+  model?: string;
+  clip_model?: string;
+  cloud?: boolean;
+  error?: string;
+}
+
+export interface AvatarSession {
+  id: string;
+  thread: string;
+  botId?: string;
+  stage: AvatarStage;
+  description: string;
+  style: AvatarStyle | string;
+  reference?: string;
+  cost?: AvatarCostEstimate;
+  candidates: Array<string | null>;
+  errors?: string[];
+  chosen?: number | null;
+  face?: string | null;
+  moods?: Partial<Record<AvatarMood, string>>;
+  clips?: Partial<Record<AvatarMood, string>>;
+  message?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AvatarFaceMeta {
+  id: string;
+  botId?: string;
+  description: string;
+  style: string;
+  model: string;
+  clip_model?: string;
+  created: number;
+  moods?: Partial<Record<AvatarMood, string>>;
+  clips?: Partial<Record<AvatarMood, string>>;
+}
+
+export interface AvatarPreset {
+  id: string;
+  name: string;
+  description: string;
+  style: string;
+  emoji?: string;
+  moods: Record<AvatarMood, string>;
+  clips?: Partial<Record<AvatarMood, string>>;
+}
+
+export interface AvatarStudioView {
+  available: boolean;
+  provider?: string;
+  imageModel: string;
+  videoModel?: string;
+  cloud: boolean;
+  current: AvatarSession | null;
+  face: AvatarFaceMeta | null;
+  presets: AvatarPreset[];
+}
+
