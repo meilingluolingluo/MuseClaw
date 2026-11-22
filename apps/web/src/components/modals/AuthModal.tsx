@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
-import { User as UserIcon, LogOut } from 'lucide-react';
+import { User as UserIcon, LogOut, AlertCircle } from 'lucide-react';
 import { api } from '../../services/api';
 
 export const AuthModal: React.FC = () => {
@@ -129,18 +129,22 @@ export const AuthModal: React.FC = () => {
         </div>
       ) : (
         <div className="auth-form-container">
-          <div className="auth-tabs-row">
+          <div className="auth-tabs auth-tabs-row" role="tablist">
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'login'}
               onClick={() => { setActiveTab('login'); setErrorMsg(''); }}
-              className={`auth-tab-btn ${activeTab === 'login' ? 'is-active' : ''}`}
+              className={`auth-tab auth-tab-btn ${activeTab === 'login' ? 'is-active' : ''}`}
             >
               账号登录
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'register'}
               onClick={() => { setActiveTab('register'); setErrorMsg(''); }}
-              className={`auth-tab-btn ${activeTab === 'register' ? 'is-active' : ''}`}
+              className={`auth-tab auth-tab-btn ${activeTab === 'register' ? 'is-active' : ''}`}
             >
               注册新账号
             </button>
@@ -150,9 +154,10 @@ export const AuthModal: React.FC = () => {
             <div
               role="alert"
               aria-live="polite"
-              className="auth-error-alert"
+              className="auth-alert is-error auth-error-alert"
             >
-              {errorMsg}
+              <AlertCircle size={15} style={{ flexShrink: 0 }} />
+              <span>{errorMsg}</span>
             </div>
           )}
 

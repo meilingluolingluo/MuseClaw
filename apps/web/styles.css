@@ -9723,94 +9723,78 @@ details[open] .thought-toggle::after {
 }
 
 /* ── 身份认证与登录注册模态窗 (AuthModal) ─────────────── */
-.auth-user-card {
+.auth-form-container {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px;
-  border-radius: 12px;
+  flex-direction: column;
+}
+
+/* 分段切换 Tab (Segmented Control 质感) */
+.auth-tabs,
+.auth-tabs-row {
+  display: flex;
   background: var(--om-surface-2);
+  padding: 4px;
+  border-radius: 10px;
   border: 1px solid var(--om-border);
+  gap: 4px;
   margin-bottom: 20px;
 }
 
-.auth-user-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--om-accent-soft);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--om-accent);
-  font-weight: 700;
-  font-size: 18px;
-}
-
-.auth-user-name {
-  font-size: 15px;
-  font-weight: 650;
-  color: var(--om-fg);
-}
-
-.auth-user-role {
-  font-size: 12px;
-  color: var(--om-muted);
-  margin-top: 2px;
-}
-
-.auth-logout-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  font-size: 12.5px;
-  border-radius: 8px;
-  margin-left: auto;
-}
-
-.auth-tabs {
-  display: flex;
-  gap: 8px;
-  border-bottom: 1px solid var(--om-border);
-  padding-bottom: 12px;
-  margin-bottom: 18px;
-}
-
-.auth-tab {
-  padding: 6px 14px;
+.auth-tab,
+.auth-tab-btn {
+  flex: 1;
+  text-align: center;
+  padding: 8px 16px;
   font-size: 13px;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   color: var(--om-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.auth-tab.active {
-  background: var(--om-surface-2);
+.auth-tab:hover:not(.is-active):not(.active),
+.auth-tab-btn:hover:not(.is-active):not(.active) {
   color: var(--om-fg);
 }
 
-.auth-alert {
+.auth-tab.is-active,
+.auth-tab.active,
+.auth-tab-btn.is-active,
+.auth-tab-btn.active {
+  background: var(--om-surface);
+  color: var(--om-fg);
+  border-color: var(--om-border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* 错误与状态提示 */
+.auth-alert,
+.auth-error-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 10px 14px;
   border-radius: 8px;
   font-size: 12.5px;
   margin-bottom: 16px;
+  line-height: 1.45;
 }
 
-.auth-alert.is-error {
-  background: rgba(255, 69, 58, 0.08);
-  border: 1px solid var(--accent-red);
-  color: var(--accent-red);
+.auth-alert.is-error,
+.auth-error-alert {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  color: var(--accent-red, #ef4444);
 }
 
+/* 表单主体与字段 */
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 15px;
 }
 
 .auth-field {
@@ -9821,33 +9805,151 @@ details[open] .thought-toggle::after {
 
 .auth-label {
   display: block;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--om-fg);
+  letter-spacing: -0.1px;
 }
 
 .auth-input {
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 8px;
+  padding: 10px 14px;
+  border-radius: 9px;
   border: 1px solid var(--om-border);
   background: var(--om-surface-2);
   color: var(--om-fg);
-  font-size: 13px;
+  font-size: 13.5px;
   outline: none;
-  transition: border-color 0.15s ease;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.auth-input::placeholder {
+  color: var(--om-muted);
+  opacity: 0.75;
 }
 
 .auth-input:focus {
   border-color: var(--om-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--om-accent) 15%, transparent);
 }
 
 .auth-submit-btn {
-  margin-top: 8px;
-  padding: 11px;
-  border-radius: 8px;
+  margin-top: 6px;
+  padding: 11px 16px;
+  border-radius: 9px;
   font-weight: 600;
   font-size: 13.5px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+/* 已登录个人配置信息面板 (Profile View) */
+.auth-profile-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.auth-user-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--om-border);
+}
+
+.auth-user-avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--om-accent), #6366f1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 20px;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--om-accent) 25%, transparent);
+  flex-shrink: 0;
+}
+
+.auth-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.auth-user-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-user-display-name {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--om-fg);
+}
+
+.auth-user-username {
+  font-size: 12.5px;
+  color: var(--om-muted);
+}
+
+.auth-user-username code {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  color: var(--om-fg);
+}
+
+.auth-user-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  font-size: 13px;
+}
+
+.auth-user-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.auth-user-meta-label {
+  color: var(--om-muted);
+}
+
+.auth-user-meta-val {
+  color: var(--om-fg);
+  font-weight: 500;
+}
+
+.auth-user-meta-val.is-green {
+  color: var(--accent-green, #10b981);
+  font-weight: 600;
+}
+
+.auth-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-radius: 8px;
 }
 
 /* ── 大模型设置中心 (ModelSettingsModal) ─────────────── */
