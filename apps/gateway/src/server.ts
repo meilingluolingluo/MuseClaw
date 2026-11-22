@@ -2908,6 +2908,10 @@ fi
         const rel = path.normalize(decodeURIComponent(url.pathname.slice(prefix.length)));
         const target = path.join(dir, rel);
         if (!target.startsWith(dir) || !fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+          if (prefix.includes('avatar') && url.pathname.endsWith('.mp4')) {
+            res.writeHead(204);
+            return res.end();
+          }
           res.writeHead(404, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'Upload not found' }));
         }

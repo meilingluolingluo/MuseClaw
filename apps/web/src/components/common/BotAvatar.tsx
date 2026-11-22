@@ -60,12 +60,17 @@ export const BotAvatar: React.FC<BotAvatarProps> = ({
     }
   } else if (avatarType === 'custom') {
     stillUrl = `/avatars/custom/${avatarVal}/${activeMood}.webp`;
-    if (activeMood !== 'error') {
-      clipUrl = `/avatars/custom/${avatarVal}/${clipMood}.mp4`;
+    const customClips = (bot as any)?.clips;
+    if (activeMood !== 'error' && customClips && customClips[clipMood]) {
+      clipUrl = customClips[clipMood];
     }
   } else if (avatarType === 'preset') {
     const presetId = avatarVal || 'haibara';
     stillUrl = `/avatars/presets/${presetId}/${activeMood === 'error' ? 'error' : activeMood}.webp`;
+    const presetClips = (bot as any)?.clips;
+    if (activeMood !== 'error' && presetClips && presetClips[clipMood]) {
+      clipUrl = presetClips[clipMood];
+    }
   } else if (avatarType === 'image') {
     stillUrl = avatarVal;
   }
