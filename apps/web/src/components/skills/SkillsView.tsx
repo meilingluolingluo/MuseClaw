@@ -21,6 +21,7 @@ import {
   Save,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Sparkles,
   BookOpen,
   Cpu
@@ -63,6 +64,7 @@ export const SkillsView: React.FC = () => {
   const [mcpTotalTools, setMcpTotalTools] = useState(0);
   const [bots, setBots] = useState<Bot[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // 筛选与搜索
   const [searchQuery, setSearchQuery] = useState('');
@@ -126,6 +128,7 @@ export const SkillsView: React.FC = () => {
   // 加载数据
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [skillsRes, sbRes, mcpRes, botsRes] = await Promise.all([
         api.getSkills(),
@@ -139,6 +142,8 @@ export const SkillsView: React.FC = () => {
       setMcpTotalTools(mcpRes.totalTools || 0);
       setBots(Array.isArray(botsRes) ? botsRes : []);
     } catch (err: any) {
+      console.error('Failed to load skills:', err);
+      setLoadError(err.message || '加载技能规程库失败');
       showToast(err.message || '加载技能规程库失败', 'error');
     } finally {
       setLoading(false);
@@ -538,6 +543,14 @@ export const SkillsView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+          <AlertTriangle size={14} />
+          <span>技能规程加载失败：{loadError}</span>
+          <button type="button" onClick={loadData} disabled={loading}>重试</button>
+        </div>
+      )}
 
       {/* 运行环境概览 */}
       <div className="skills-env" role="status">

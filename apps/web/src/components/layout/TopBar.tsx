@@ -42,17 +42,38 @@ export const TopBar: React.FC = () => {
   } = useApp();
 
   const [isMobile, setIsMobile] = useState(false);
+  const [confirmingFull, setConfirmingFull] = useState(false);
+
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)');
     const update = () => setIsMobile(mq.matches);
     update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
+    if (mq.addEventListener) {
+      mq.addEventListener('change', update);
+      return () => mq.removeEventListener('change', update);
+    } else if ((mq as any).addListener) {
+      (mq as any).addListener(update);
+      return () => (mq as any).removeListener(update);
+    }
   }, []);
 
+  const hasConfiguredModel = Boolean(modelsConfig?.activeProviderId);
   const activeProvider = modelsConfig?.providers?.find(
     (p) => p.id === modelsConfig.activeProviderId
-  ) || { id: 'deepseek', name: 'DeepSeek' };
+  ) || { id: 'none', name: '未配置模型' };
+
+  const handleApprovalSelectorClick = () => {
+    const current = (activeBot?.approvalMode || 'ASK').toUpperCase();
+    if (current === 'AUTO_EDITS') {
+      if (!confirmingFull) {
+        setConfirmingFull(true);
+        setTimeout(() => setConfirmingFull(false), 4000);
+        return;
+      }
+    }
+    setConfirmingFull(false);
+    cycleApprovalMode();
+  };
 
   const tabTitles: Record<string, { title: string; icon: React.ReactNode }> = {
     chat: { title: '对话工作台', icon: null },
@@ -154,34 +175,36 @@ export const TopBar: React.FC = () => {
           <span className="model-status-icon">
             <ProviderIcon providerId={activeProvider.id} size={15} />
           </span>
-          <span className="model-status-name">{activeProvider.name}</span>
-          <span className="model-status-dot online" aria-hidden="true" />
+          <span className="model-status-name">{hasConfiguredModel ? activeProvider.name : '未配置模型'}</span>
+          <span className={`model-status-dot ${hasConfiguredModel ? 'online' : 'offline'}`} aria-hidden="true" />
         </button>
 
-        {/* 员工身份胶囊 */}
+        {/* 员工身份胶囊 (未登录态显示醒目提示) */}
         <button
-          className="user-profile-capsule"
+          className={`user-profile-capsule ${!user ? 'is-unauthenticated' : ''}`}
           type="button"
           onClick={() => setIsAuthModalOpen(true)}
-          title="员工身份与鉴权配置"
+          title={user ? `当前登录员工：${user.displayName || user.username}` : '点击登录以建立员工独立会话与数据隔离'}
           aria-label="员工身份与鉴权配置"
         >
           <span className="user-avatar-icon">
             <UserIcon size={14} />
           </span>
-          <span className="user-name">{user ? user.displayName || user.username : '未登录'}</span>
+          <span className="user-name">{user ? user.displayName || user.username : '登录 / 员工身份'}</span>
         </button>
 
-        {/* 门禁审批模式切换器 */}
+        {/* 门禁审批模式切换器 (切入 FULL 模式前提供防误触二次确认) */}
         <button
-          className="approval-selector"
+          className={`approval-selector ${confirmingFull ? 'is-confirming-full' : ''}`}
           type="button"
-          onClick={cycleApprovalMode}
-          title="点击循环切换门禁审批模式 (ASK 逐项确认 / AUTO_EDITS 自动编辑 / FULL 完全自主)"
+          onClick={handleApprovalSelectorClick}
+          title={confirmingFull ? '再次点击确认开启完全自主模式' : '点击切换门禁审批模式 (ASK 逐项确认 / AUTO_EDITS 自动编辑 / FULL 完全自主)'}
           aria-label="切换门禁审批模式"
         >
           <Lock size={12} className="approval-lock-icon" />
-          <span className="approval-mode-text">{(activeBot?.approvalMode || 'ASK').toUpperCase()} 门禁</span>
+          <span className="approval-mode-text">
+            {confirmingFull ? '确认开启 FULL?' : `${(activeBot?.approvalMode || 'ASK').toUpperCase()} 门禁`}
+          </span>
           <ChevronDown size={12} className="approval-chevron-icon" />
         </button>
 

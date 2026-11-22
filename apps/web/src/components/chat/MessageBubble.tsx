@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import type { Message, Bot } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { renderMarkdown } from '../../utils/markdown';
@@ -17,6 +17,7 @@ import { ToolTrace } from './ToolTrace';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { formatRelativeTime } from '../../utils/format';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface MessageBubbleProps {
   message: Message;
@@ -27,27 +28,43 @@ interface MessageBubbleProps {
   live?: boolean;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({
+const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   message,
   bot,
   sessionId,
   onApprovalResolved,
   live,
 }) => {
-  const { setIsAuditDrawerOpen, showToast } = useApp();
+  const { setIsAuditDrawerOpen, setFocusApprovalId, showToast } = useApp();
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
-  const [approvalStatus, setApprovalStatus] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState<string | null>(() => {
+    if (message.approvalRequest?.status === 'approved') return '已批准';
+    if (message.approvalRequest?.status === 'rejected') return '已拒绝';
+    return null;
+  });
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (message.approvalRequest?.status === 'approved') {
+      setApprovalStatus('已批准');
+    } else if (message.approvalRequest?.status === 'rejected') {
+      setApprovalStatus('已拒绝');
+    }
+  }, [message.approvalRequest?.status]);
 
   const isUser = message.role === 'user';
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     const textToCopy = message.content || '';
     if (!textToCopy) return;
-    navigator.clipboard.writeText(textToCopy);
-    setCopied(true);
-    showToast('内容已复制到剪贴板', 'info');
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(textToCopy);
+    if (ok) {
+      setCopied(true);
+      showToast('内容已复制到剪贴板', 'info');
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      showToast('复制失败，请手动选中文本复制', 'error');
+    }
   };
 
   const handleDecision = async (approved: boolean) => {
@@ -63,6 +80,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   };
 
   const formattedTime = message.timestamp ? formatRelativeTime(message.timestamp) : '';
+
+  // 缓存 Markdown 解析结果，避免同一会话内流式渲染其它气泡时反复解析
+  const renderedHtml = useMemo(() => {
+    if (isUser || !message.content) return '';
+    const displayClean = message.content
+      .replace(/<[｜|]{2}DSML[｜|]{2}\s*calls>[\s\S]*?(?:<\/[｜|]{2}DSML[｜|]{2}\s*calls>|$)/gi, '')
+      .trim();
+    return displayClean ? renderMarkdown(displayClean) : '';
+  }, [isUser, message.content]);
 
   return (
     <div className={`message-row ${message.role}`}>
@@ -135,7 +161,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <button
                 type="button"
                 className="approval-details-link"
-                onClick={() => setIsAuditDrawerOpen(true)}
+                onClick={() => {
+                  if (message.approvalRequest?.actionId) {
+                    setFocusApprovalId(message.approvalRequest.actionId);
+                  }
+                  setIsAuditDrawerOpen(true);
+                }}
                 title="打开右侧审计抽屉查看完整策略判定"
               >
                 查看审计详情 →
@@ -173,15 +204,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <div className="user-message-images">
             {message.attachments.map((att, idx) =>
               !att.url ? null : att.type === 'image' ? (
-                <img
+                <button
                   key={idx}
-                  src={att.url}
-                  alt={att.name}
-                  loading="lazy"
-                  className="user-bubble-image"
+                  type="button"
+                  className="user-bubble-image-btn"
                   onClick={() => window.open(att.url, '_blank')}
                   title="点击查看原图"
-                />
+                  aria-label={`查看附图: ${att.name || '图片'}`}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                >
+                  <img
+                    src={att.url}
+                    alt={att.name || '用户附图'}
+                    loading="lazy"
+                    className="user-bubble-image"
+                  />
+                </button>
               ) : (
                 <a
                   key={idx}
@@ -204,20 +242,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <div className="user-text">
             {message.content}
           </div>
-        ) : (
-          (() => {
-            const displayClean = (message.content || '')
-              .replace(/<[｜|]{2}DSML[｜|]{2}\s*calls>[\s\S]*?(?:<\/[｜|]{2}DSML[｜|]{2}\s*calls>|$)/gi, '')
-              .trim();
-            return displayClean ? (
-              <div
-                className="assistant-text markdown-body"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(displayClean) }}
-              />
-            ) : null;
-          })()
-        )}
+        ) : renderedHtml ? (
+          <div
+            className="assistant-text markdown-body"
+            dangerouslySetInnerHTML={{ __html: renderedHtml }}
+          />
+        ) : null}
       </div>
     </div>
   );
 };
+
+export const MessageBubble = React.memo(MessageBubbleComponent);

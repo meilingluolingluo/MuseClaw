@@ -124,6 +124,8 @@ export const MemoryView: React.FC = () => {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editContentBuffer, setEditContentBuffer] = useState('');
   const [editCategoryBuffer, setEditCategoryBuffer] = useState<MemoryCategory>('general');
+  const [confirmDiscardEditId, setConfirmDiscardEditId] = useState<string | null>(null);
+  const discardTimerRef = useRef<any>(null);
 
   // Markdown 全文编辑模态框
   const [isMarkdownModalOpen, setIsMarkdownModalOpen] = useState(false);
@@ -200,8 +202,28 @@ export const MemoryView: React.FC = () => {
     }
   };
 
-  // 取消行内编辑（有改动时确认，避免误触丢稿）
-  const cancelItemEdit = (_item: MemoryItem) => {
+  // 取消行内编辑（有改动时二次确认，避免误触丢稿）
+  const cancelItemEdit = (item: MemoryItem) => {
+    const hasChanges =
+      editContentBuffer.trim() !== (item.content || '').trim() ||
+      editCategoryBuffer !== (item.category || 'general');
+
+    if (!hasChanges) {
+      if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+      setConfirmDiscardEditId(null);
+      setEditingItemId(null);
+      return;
+    }
+
+    if (confirmDiscardEditId !== item.id) {
+      setConfirmDiscardEditId(item.id);
+      if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+      discardTimerRef.current = setTimeout(() => setConfirmDiscardEditId(null), 3000);
+      return;
+    }
+
+    if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+    setConfirmDiscardEditId(null);
     setEditingItemId(null);
   };
 
@@ -721,6 +743,7 @@ export const MemoryView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
+                          setConfirmDiscardEditId(null);
                           setEditingItemId(item.id);
                           setEditContentBuffer(item.content);
                           setEditCategoryBuffer(item.category);
@@ -778,10 +801,11 @@ export const MemoryView: React.FC = () => {
                       <div className="memory-edit-btn-group">
                         <button
                           type="button"
-                          className="btn-secondary memory-edit-btn"
+                          className={`btn-secondary memory-edit-btn ${confirmDiscardEditId === item.id ? 'is-confirming' : ''}`}
                           onClick={() => cancelItemEdit(item)}
+                          title={confirmDiscardEditId === item.id ? '再次点击确认放弃改动' : '取消编辑'}
                         >
-                          取消
+                          {confirmDiscardEditId === item.id ? '确认放弃改动？' : '取消'}
                         </button>
                         <button
                           type="button"

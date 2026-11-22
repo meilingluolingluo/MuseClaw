@@ -182,9 +182,9 @@ function getOrCreateSession(sessionId?: string, botId?: string, userId = 'system
   return session;
 }
 
-// 2. 初始化如流 (Infoflow) 通道配置
-const infoflowToken = process.env.INFOFLOW_TOKEN || 'museclaw_token';
-const infoflowAesKey = process.env.INFOFLOW_AES_KEY || '1234567890123456789012345678901234567890123'; // 43 位
+// 2. 初始化如流 (Infoflow) 通道配置 (未配置安全凭据时关闭通道)
+const infoflowToken = process.env.INFOFLOW_TOKEN || '';
+const infoflowAesKey = process.env.INFOFLOW_AES_KEY || '';
 const infoflowAppId = process.env.INFOFLOW_APP_ID;
 const infoflowAppSecret = process.env.INFOFLOW_APP_SECRET;
 const infoflowApiBase = process.env.INFOFLOW_API_BASE;
@@ -429,10 +429,34 @@ h1{font-size:20px;margin:0 0 8px}p{color:#555}</style></head>
 <p><code>pnpm --filter @museclaw/web build</code></p>
 <p>然后刷新本页。</p></body></html>`;
 
+const webhookRateLimit = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(ip: string, maxRequests = 60, windowMs = 60000): boolean {
+  const now = Date.now();
+  const entry = webhookRateLimit.get(ip);
+  if (!entry || now > entry.resetAt) {
+    webhookRateLimit.set(ip, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= maxRequests) {
+    return false;
+  }
+  entry.count++;
+  return true;
+}
+
 export function startGatewayServer(defaultPort = 8799) {
   const port = Number(process.env.PORT) || defaultPort;
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+    // 对企业 IM Webhook 入口加限流保护
+    if (url.pathname.startsWith('/api/channels/')) {
+      const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
+      if (!checkRateLimit(clientIp, 60, 60000)) {
+        res.writeHead(429, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Too Many Requests', code: 429 }));
+      }
+    }
 
     // A. 优先处理如流 Webhook (GET 校验 / POST 消息)
     const handledByInfoflow = await infoflowChannel.handleHttpRequest(req, res);
@@ -441,32 +465,6 @@ export function startGatewayServer(defaultPort = 8799) {
     // A2. 优先处理飞书 Webhook (Challenge / 交互卡片按钮 / 消息事件)
     const handledByFeishu = await feishuChannel.handleHttpRequest(req, res);
     if (handledByFeishu) return;
-
-    // A2.1 飞书消息统一发送接口 (供沙箱工具、自动化脚本与外部系统安全推送飞书消息)
-    if (req.method === 'POST' && (url.pathname === '/api/channels/feishu/send' || url.pathname === '/api/feishu/send')) {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      try {
-        const payload = JSON.parse(body || '{}');
-        const content = payload.content;
-        if (!content) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ success: false, error: '消息内容 content 不能为空' }));
-        }
-        const result = await feishuChannel.sender.sendMessage(
-          payload.receive_id,
-          content,
-          payload.msg_type || 'text',
-          payload.receive_id_type,
-          payload.title
-        );
-        res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(result));
-      } catch (err: any) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
-      }
-    }
 
     // A3. 解析当前请求的用户登录身份 (支持 Cookie 与 Authorization Bearer Token)
     const currentUser = authService.getCurrentUser(req);
@@ -495,17 +493,16 @@ export function startGatewayServer(defaultPort = 8799) {
         for await (const chunk of req) body += chunk;
         const data = JSON.parse(body || '{}');
         const result = authService.register(data.username, data.password, data.displayName);
-        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https');
+        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https') || (req.socket as any).encrypted;
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Set-Cookie': authService.createSessionCookie(result.token, isHttps)
+          'Set-Cookie': authService.createSessionCookie(result.token, Boolean(isHttps))
         });
         return res.end(JSON.stringify({
           ok: true,
           code: 200,
           data: result.user,
-          user: result.user,
-          token: result.token
+          user: result.user
         }));
       } catch (err: any) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -519,17 +516,16 @@ export function startGatewayServer(defaultPort = 8799) {
         for await (const chunk of req) body += chunk;
         const data = JSON.parse(body || '{}');
         const result = authService.login(data.username, data.password);
-        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https');
+        const isHttps = req.headers['x-forwarded-proto']?.toString().includes('https') || (req.socket as any).encrypted;
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Set-Cookie': authService.createSessionCookie(result.token, isHttps)
+          'Set-Cookie': authService.createSessionCookie(result.token, Boolean(isHttps))
         });
         return res.end(JSON.stringify({
           ok: true,
           code: 200,
           data: result.user,
-          user: result.user,
-          token: result.token
+          user: result.user
         }));
       } catch (err: any) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -549,7 +545,7 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ ok: true, message: 'Logged out successfully' }));
     }
 
-    // A5. 未登录请求拦截保护
+    // A5. 业务 API 鉴权拦截保护
     const isPublicPath = [
       '/api/auth/register',
       '/api/auth/login',
@@ -558,44 +554,52 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/v1/loginUser',
       '/api/v1/login',
       '/api/v1/logout',
-      '/api/bots',
-      '/api/models',
-      '/api/tasks',
-      '/api/chat',
-      '/api/artifacts',
-      '/api/upload',
-      '/api/upload/image',
-      '/api/upload/avatar',
-      '/api/multica/status',
+      '/runner/client.js',
+      '/runner/install.sh',
       '/api/runner/register',
       '/api/runner/poll',
-      '/runner/client.js',
-      '/runner/install.sh'
+      '/api/runner/machines'
     ].includes(url.pathname) ||
-    url.pathname.startsWith('/api/bots') ||
-    url.pathname.startsWith('/api/models') ||
-    url.pathname.startsWith('/api/runner') ||
     url.pathname.startsWith('/runner') ||
-    url.pathname.startsWith('/api/sessions') ||
-    url.pathname.startsWith('/api/routines') ||
-    url.pathname.startsWith('/api/feed') ||
-    url.pathname.startsWith('/api/goals') ||
-    url.pathname.startsWith('/api/approvals') ||
-    url.pathname.startsWith('/api/audit') ||
-    url.pathname.startsWith('/api/policy') ||
-    url.pathname.startsWith('/api/grants') ||
-    url.pathname.startsWith('/api/memory') ||
-    url.pathname.startsWith('/api/sandbox') ||
-    url.pathname.startsWith('/api/mcp') ||
-    url.pathname.startsWith('/api/hooks') ||
-    url.pathname.startsWith('/api/skills') ||
-    url.pathname.startsWith('/api/infoflow') ||
-    url.pathname.startsWith('/api/channels') ||
-    url.pathname.startsWith('/api/feishu');
+    url.pathname === '/api/channels/feishu/webhook' ||
+    url.pathname === '/api/channels/infoflow/webhook' ||
+    (req.method === 'GET' && url.pathname === '/api/bots') ||
+    (req.method === 'GET' && url.pathname === '/api/models/config') ||
+    (req.method === 'GET' && url.pathname === '/api/models/local-agents');
 
     if (!currentUser && url.pathname.startsWith('/api/') && !isPublicPath) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
+    }
+
+    // A5.1 飞书消息统一发送接口 (仅已登录用户可调用)
+    if (req.method === 'POST' && (url.pathname === '/api/channels/feishu/send' || url.pathname === '/api/feishu/send')) {
+      if (!currentUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: 'Unauthorized' }));
+      }
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const payload = JSON.parse(body || '{}');
+        const content = payload.content;
+        if (!content) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: false, error: '消息内容 content 不能为空' }));
+        }
+        const result = await feishuChannel.sender.sendMessage(
+          payload.receive_id,
+          content,
+          payload.msg_type || 'text',
+          payload.receive_id_type,
+          payload.title
+        );
+        res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(result));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+      }
     }
 
     // B. 静态主页：React 工作台（仅托管构建产物）
@@ -794,7 +798,7 @@ export function startGatewayServer(defaultPort = 8799) {
       try { parsed = JSON.parse(body || '{}'); } catch {}
       botId = botId || parsed.botId || parsed.bot_id || 'muse';
       const title = parsed.title || '新任务对话';
-      const targetUserId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
       const sessionId = parsed.id || `sess_${botId}_${Date.now()}`;
       const session = sessionStore.create(sessionId, botId, title, targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1482,7 +1486,7 @@ export function startGatewayServer(defaultPort = 8799) {
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const botIdParam = url.searchParams.get('bot_id') || url.searchParams.get('botId') || undefined;
       const includeEmpty = url.searchParams.get('include_empty') !== 'false';
-      const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
       const list = sessionStore.list(botIdParam, targetUserId, includeEmpty).map(s => ({
         id: s.id,
         title: s.title,
@@ -1503,7 +1507,7 @@ export function startGatewayServer(defaultPort = 8799) {
       if (isMessagesRequest) {
         id = id.replace(/\/messages$/, '');
       }
-      const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
       const s = sessionStore.get(id, targetUserId);
       if (!s) {
         if (isMessagesRequest) {
@@ -1530,7 +1534,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/sessions/')) {
       const id = url.pathname.replace('/api/sessions/', '');
-      const targetUserId = currentUser?.username || url.searchParams.get('userId') || url.searchParams.get('user_id') || 'user_web';
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
       const success = sessionStore.delete(id, targetUserId);
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success, id }));
@@ -1559,14 +1563,45 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // D. 审批结果回调接口 (供 Web 交互卡片或外部 Webhook 点击调用，支持 scope: once | session | 24h | always)
     if (req.method === 'POST' && url.pathname.startsWith('/api/approvals/')) {
+      if (!currentUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
+      }
       const approvalId = url.pathname.replace('/api/approvals/', '');
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { approved, scope, operator } = JSON.parse(body || '{}');
+      const { approved, scope } = JSON.parse(body || '{}');
 
-      const success = sentinel.resolveApproval(approvalId, Boolean(approved), scope || 'once', operator || 'human');
+      // 操作人严格绑定当前已登录用户
+      const operator = currentUser.username;
+      const success = sentinel.resolveApproval(approvalId, Boolean(approved), scope || 'once', operator);
+
+      // 持久化审批决策到对应会话消息
+      if (success) {
+        try {
+          const sessions = sessionStore.list(undefined, currentUser.username, true);
+          for (const s of sessions) {
+            let matched = false;
+            for (const m of (s.messages || [])) {
+              if (m.approvalRequest && m.approvalRequest.actionId === approvalId) {
+                m.approvalRequest.status = approved ? 'approved' : 'rejected';
+                m.approvalRequest.decidedBy = operator;
+                m.approvalRequest.decidedAt = Date.now();
+                matched = true;
+              }
+            }
+            if (matched) {
+              sessionStore.save(s, currentUser.username);
+              break;
+            }
+          }
+        } catch (e) {
+          console.warn('[Approval] Failed to persist approval state in session:', e);
+        }
+      }
+
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success, approvalId, approved, scope: scope || 'once' }));
+      return res.end(JSON.stringify({ success, approvalId, approved, scope: scope || 'once', operator }));
     }
 
     // D1. 结构化审计日志接口 (Audit Trail)
@@ -1619,6 +1654,10 @@ export function startGatewayServer(defaultPort = 8799) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/models/config') {
+      if (!currentUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
+      }
       let body = '';
       for await (const chunk of req) body += chunk;
       const data = JSON.parse(body || '{}');
@@ -1667,7 +1706,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // D1.5 远程计算节点 Mesh 伴侣接口 (Remote Runner Mesh API)
     if (req.method === 'GET' && url.pathname === '/api/runner/machines') {
-      const targetUserId = currentUser?.username || url.searchParams.get('userId') || undefined;
+      const targetUserId = currentUser ? currentUser.username : undefined;
       const machines = globalRunnerMesh.listMachines(targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: true, machines }));
@@ -1964,7 +2003,7 @@ fi
       const botId = url.searchParams.get('bot_id') || undefined;
       const status = (url.searchParams.get('status') as any) || undefined;
       const category = url.searchParams.get('category') || undefined;
-      const targetUserId = currentUser?.username || url.searchParams.get('userId') || undefined;
+      const targetUserId = currentUser ? currentUser.username : undefined;
       const goals = goalStore.list({ botId, status, category, userId: targetUserId });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(goals));
@@ -2313,7 +2352,7 @@ fi
         return res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
       }
       const text = parsed.prompt || parsed.text || parsed.message || '';
-      const userId = currentUser?.username || parsed.userId || parsed.user_id || 'user_web';
+      const userId = currentUser ? currentUser.username : 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
       const requestedBotId = parsed.botId || parsed.bot_id;
       const attachments: Array<{ name?: string; type?: string; url?: string; mime?: string }> = Array.isArray(
@@ -2434,11 +2473,25 @@ fi
       let clientGone = false;
       let finished = false;
 
-      // 用户点「停止」或关掉页面：终结这一轮，而不是留着后台继续跑
+      // 用户点「停止」或关掉页面：终结这一轮，并自动失效待处理的审批项
       res.on('close', () => {
         if (finished) return;
         clientGone = true;
         sentinel.cancelPendingForSession(session.id);
+        if (session.messages) {
+          let updated = false;
+          for (const m of session.messages) {
+            if (m.approvalRequest && m.approvalRequest.status === 'pending') {
+              m.approvalRequest.status = 'rejected';
+              m.approvalRequest.decidedBy = 'system_cancelled';
+              m.approvalRequest.decidedAt = Date.now();
+              updated = true;
+            }
+          }
+          if (updated) {
+            sessionStore.save(session, userId);
+          }
+        }
       });
 
       try {
@@ -2449,6 +2502,19 @@ fi
           }
           if (event.type === 'stream:reasoning-delta') {
             reasoningText += event.text;
+          }
+          if (event.type === 'sentinel:approval_needed') {
+            session.messages.push({
+              role: 'assistant',
+              content: '触发安全门禁审批：请审核以下操作是否批准执行。',
+              approvalRequest: {
+                actionId: event.request?.approvalId,
+                description: event.request?.actionSummary,
+                command: event.request?.targetDetails?.command,
+                status: 'pending'
+              }
+            });
+            sessionStore.save(session, userId);
           }
           if (event.type === 'tool:call_start') {
             toolCalls.push({

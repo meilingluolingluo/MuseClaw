@@ -10,6 +10,7 @@ export interface InfoflowReceiverConfig {
 export class InfoflowReceiver {
   private crypto: InfoflowCrypto;
   private bridge?: InfoflowApprovalBridge;
+  private seenNonces = new Map<string, number>();
 
   constructor(config: InfoflowReceiverConfig, bridge?: InfoflowApprovalBridge) {
     this.crypto = new InfoflowCrypto(config.token, config.encodingAesKey, config.appId);
@@ -38,6 +39,26 @@ export class InfoflowReceiver {
     if (!signature || !timestamp || !nonce) {
       throw new Error('如流消息回调签名参数缺失');
     }
+
+    // 时间戳时效窗口校验 (5 分钟)
+    const tsNum = parseInt(timestamp, 10);
+    if (!isNaN(tsNum)) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const diff = Math.abs(nowSec - tsNum);
+      if (diff > 300) {
+        throw new Error('如流消息时间戳超出时效窗口 (5分钟)');
+      }
+    }
+
+    // Nonce 去重防重放
+    const now = Date.now();
+    for (const [n, t] of this.seenNonces.entries()) {
+      if (now - t > 600000) this.seenNonces.delete(n);
+    }
+    if (this.seenNonces.has(nonce)) {
+      throw new Error('如流消息 nonce 重复，疑似重放请求');
+    }
+    this.seenNonces.set(nonce, now);
 
     let parsedBody: { encrypt?: string } = {};
     try {

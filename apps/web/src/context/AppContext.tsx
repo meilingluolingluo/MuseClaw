@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { TabType, User, Bot, Session, ModelsConfig } from '../types';
-import { api } from '../services/api';
+import { api, setOnUnauthorizedCallback } from '../services/api';
+import { safeStorage } from '../utils/storage';
 import type { ToastMessage } from '../components/common/Toast';
 
 interface AppContextType {
@@ -22,7 +23,7 @@ interface AppContextType {
   createNewSession: (silent?: boolean) => Promise<Session | undefined>;
   deleteSession: (sessionId: string) => Promise<void>;
   loadBots: () => Promise<void>;
-  loadSessions: (botId: string) => Promise<void>;
+  loadSessions: (botId: string, keepActiveId?: string) => Promise<void>;
   isDrawerCollapsed: boolean;
   setIsDrawerCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
   isMobileDrawerOpen: boolean;
@@ -39,6 +40,8 @@ interface AppContextType {
   setIsBotModalOpen: (open: boolean) => void;
   isAuditDrawerOpen: boolean;
   setIsAuditDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  focusApprovalId: string | null;
+  setFocusApprovalId: (id: string | null) => void;
   toasts: ToastMessage[];
   showToast: (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
   dismissToast: (id: string) => void;
@@ -46,6 +49,8 @@ interface AppContextType {
   taintReasons: string[];
   setTainted: (tainted: boolean, reason?: string) => void;
   cycleApprovalMode: () => Promise<void>;
+  initError: string | null;
+  retryInit: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -70,34 +75,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const onPopState = () => {
       const path = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-      if (path === 'audit') {
-        setIsAuditDrawerOpen(true);
-        setTabState('chat');
-        return;
-      }
-      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
+      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
       setTabState((valid.includes(path as TabType) ? path : 'chat') as TabType);
     };
     window.addEventListener('popstate', onPopState);
-
-    // 如果初始从 /audit 进入，自动展开对话并拉起审计抽屉
-    const initialPath = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-    if (initialPath === 'audit') {
-      setIsAuditDrawerOpen(true);
-      setTabState('chat');
-    }
-
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   // Theme
   const [theme, setThemeState] = useState<'light' | 'dark' | 'system'>(() => {
-    return (localStorage.getItem('museclaw_theme') as any) || 'system';
+    return (safeStorage.getItem('museclaw_theme') as any) || 'system';
   });
 
   const setTheme = (t: 'light' | 'dark' | 'system') => {
     setThemeState(t);
-    localStorage.setItem('museclaw_theme', t);
+    safeStorage.setItem('museclaw_theme', t);
     const isDark =
       t === 'dark' || (t === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
@@ -117,8 +109,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         document.documentElement.dataset.theme = e.matches ? 'dark' : 'light';
       }
     };
-    media.addEventListener('change', listener);
-    return () => media.removeEventListener('change', listener);
+    if (media.addEventListener) {
+      media.addEventListener('change', listener);
+      return () => media.removeEventListener('change', listener);
+    } else if ((media as any).addListener) {
+      (media as any).addListener(listener);
+      return () => (media as any).removeListener(listener);
+    }
   }, [theme]);
 
   // User
@@ -129,14 +126,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const showToast = useCallback((message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
     const id = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     setToasts((prev) => [...prev, { id, message, type }]);
+    const duration = type === 'error' || type === 'warning' ? 8000 : 3800;
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3800);
+    }, duration);
   }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // Global Online/Offline Listener
+  useEffect(() => {
+    const handleOnline = () => showToast('网络连接已恢复', 'info');
+    const handleOffline = () => showToast('网络连接已断开，请检查网络设置', 'error');
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [showToast]);
+
+  // Global 401 Interceptor
+  useEffect(() => {
+    setOnUnauthorizedCallback(() => {
+      setIsAuthModalOpen(true);
+      showToast('登录已过期，请重新登录以保障数据归属隔离', 'warning');
+    });
+  }, [showToast]);
 
   // Bots & Sessions
   const [bots, setBots] = useState<Bot[]>([]);
@@ -152,10 +170,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isBotModalOpen, setIsBotModalOpen] = useState(false);
   const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
+  const [focusApprovalId, setFocusApprovalId] = useState<string | null>(null);
 
   // Taint & Security
   const [isTainted, setIsTainted] = useState(false);
   const [taintReasons, setTaintReasons] = useState<string[]>([]);
+  const [initError, setInitError] = useState<string | null>(null);
 
   const setTainted = (tainted: boolean, reason?: string) => {
     setIsTainted(tainted);
@@ -176,34 +196,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  const loadSessions = useCallback(async (botId: string) => {
-    try {
-      const s = await api.getSessions(botId, user?.username);
-      const sessionList = Array.isArray(s) ? s : [];
-      if (sessionList.length > 0) {
-        setSessions(sessionList);
-        setActiveSessionId(sessionList[0].id);
-      } else {
-        const initId = `sess_${botId}_${Date.now()}`;
-        const initSess: Session = {
-          id: initId,
-          botId,
-          title: '新任务对话',
-          createdAt: Date.now(),
-          messageCount: 0,
-        };
-        setSessions([initSess]);
-        setActiveSessionId(initId);
+  const loadSessions = useCallback(
+    async (botId: string, keepActiveId?: string) => {
+      try {
+        const s = await api.getSessions(botId);
+        const sessionList = Array.isArray(s) ? s : [];
+        if (sessionList.length > 0) {
+          setSessions(sessionList);
+          if (keepActiveId && sessionList.some((it) => it.id === keepActiveId)) {
+            setActiveSessionId(keepActiveId);
+          } else if (!activeSessionId || !sessionList.some((it) => it.id === activeSessionId)) {
+            setActiveSessionId(sessionList[0].id);
+          }
+        } else {
+          const initId = `sess_${botId}_${Date.now()}`;
+          const initSess: Session = {
+            id: initId,
+            botId,
+            title: '新任务对话',
+            createdAt: Date.now(),
+            messageCount: 0,
+          };
+          setSessions([initSess]);
+          setActiveSessionId(initId);
+        }
+      } catch (err) {
+        console.error('Failed to load sessions:', err);
       }
-    } catch (err) {
-      console.error('Failed to load sessions:', err);
-    }
-  }, [user?.username]);
+    },
+    [activeSessionId]
+  );
 
   const selectBot = useCallback(
     (botId: string) => {
       setActiveBotId(botId);
-      localStorage.setItem('museclaw_active_bot', botId);
+      safeStorage.setItem('museclaw_active_bot', botId);
       loadSessions(botId);
     },
     [loadSessions]
@@ -211,6 +238,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loadBots = useCallback(async () => {
     try {
+      setInitError(null);
       const b = await api.getBots();
       const raw = Array.isArray(b) ? b : [];
       // 统一成前端使用的形状：以服务端 snake_case 为准，兼容历史 camelCase 字段
@@ -229,14 +257,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setBots(botList);
 
       if (botList.length > 0) {
-        const saved = localStorage.getItem('museclaw_active_bot');
+        const saved = safeStorage.getItem('museclaw_active_bot');
         const match = botList.find((bot) => bot.id === saved);
         const initial = match ? match.id : botList[0].id;
         setActiveBotId(initial);
         loadSessions(initial);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load bots:', err);
+      setInitError(err.message || '网关服务未就绪或未构建');
     }
   }, [loadSessions]);
 
@@ -244,35 +273,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveSessionId(sessionId);
   }, []);
 
-  const createNewSession = useCallback(async (silent = false): Promise<Session | undefined> => {
-    if (!activeBotId) return undefined;
-    const fallbackId = `sess_${activeBotId}_${Date.now()}`;
-    const draftSession: Session = {
-      id: fallbackId,
-      botId: activeBotId,
-      title: '新任务对话',
-      createdAt: Date.now(),
-      messageCount: 0,
-    };
-    try {
-      const newSession = await api.createSession(activeBotId, '新任务对话', user?.username);
-      const sess = newSession || draftSession;
-      setSessions((prev) => [sess, ...prev.filter((s) => s.id !== sess.id)]);
-      setActiveSessionId(sess.id);
-      if (!silent) showToast('已新建会话', 'success');
-      return sess;
-    } catch {
-      setSessions((prev) => [draftSession, ...prev.filter((s) => s.id !== draftSession.id)]);
-      setActiveSessionId(draftSession.id);
-      if (!silent) showToast('已新建会话', 'success');
-      return draftSession;
-    }
-  }, [activeBotId, user?.username, showToast]);
+  const createNewSession = useCallback(
+    async (silent = false): Promise<Session | undefined> => {
+      if (!activeBotId) return undefined;
+      try {
+        const newSession = await api.createSession(activeBotId, '新任务对话');
+        if (!newSession) throw new Error('服务端未返回会话');
+        setSessions((prev) => [newSession, ...prev.filter((s) => s.id !== newSession.id)]);
+        setActiveSessionId(newSession.id);
+        if (!silent) showToast('已新建会话', 'success');
+        return newSession;
+      } catch (err: any) {
+        if (!silent) showToast(`新建会话失败: ${err.message || '网络异常'}`, 'error');
+        return undefined;
+      }
+    },
+    [activeBotId, showToast]
+  );
 
   const deleteSession = useCallback(
     async (sessionId: string) => {
       try {
-        await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', credentials: 'include' });
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', credentials: 'include' });
+        if (!res.ok) {
+          throw new Error(res.status === 401 ? '登录已过期，请重新登录' : `HTTP ${res.status}`);
+        }
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         if (activeSessionId === sessionId) {
           const remaining = sessions.filter((s) => s.id !== sessionId);
@@ -300,11 +325,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nextIdx = (modes.indexOf(current) + 1) % modes.length;
     const next = modes[nextIdx];
 
+    // 乐观更新前暂存 prev，以便失败时回滚
+    const prevBots = bots;
+    setBots((prev) => prev.map((b) => (b.id === activeBotId ? { ...b, approvalMode: next } : b)));
+
     try {
       await api.updateBot(activeBotId, { approvalMode: next });
-      setBots((prev) => prev.map((b) => (b.id === activeBotId ? { ...b, approvalMode: next } : b)));
       showToast(`门禁审批模式已切换为 ${next}`, 'info');
     } catch (err: any) {
+      setBots(prevBots);
       showToast(`更新门禁模式失败: ${err.message}`, 'error');
     }
   }, [activeBotId, bots, showToast]);
@@ -314,10 +343,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api
       .getMe()
       .then((res) => {
-        if (res.user) setUser(res.user);
+        if (res.user) {
+          setUser(res.user);
+        } else {
+          // 未登录主动弹框引导
+          setIsAuthModalOpen(true);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        setIsAuthModalOpen(true);
+      });
 
+    loadBots();
+    loadModelsConfig();
+  }, [loadBots, loadModelsConfig]);
+
+  const retryInit = useCallback(() => {
     loadBots();
     loadModelsConfig();
   }, [loadBots, loadModelsConfig]);
@@ -363,6 +404,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsBotModalOpen,
         isAuditDrawerOpen,
         setIsAuditDrawerOpen,
+        focusApprovalId,
+        setFocusApprovalId,
         toasts,
         showToast,
         dismissToast,
@@ -370,6 +413,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         taintReasons,
         setTainted,
         cycleApprovalMode,
+        initError,
+        retryInit,
       }}
     >
       {children}

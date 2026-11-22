@@ -13,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export class SessionStore {
   private userSessions = new Map<string, Map<string, Session>>();
   private baseDir: string;
+  private saveTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir || path.resolve(__dirname, '../data/users');
@@ -56,10 +57,8 @@ export class SessionStore {
         const raw = fs.readFileSync(userFile, 'utf-8');
         const list: Session[] = JSON.parse(raw);
         for (const item of list) {
-          if (item.messages && item.messages.length > 0) {
-            item.userId = sanitized;
-            sessionMap.set(item.id, item);
-          }
+          item.userId = sanitized;
+          sessionMap.set(item.id, item);
         }
       } catch (err: any) {
         console.warn(`[SessionStore] 载入用户 ${sanitized} 会话异常: ${err.message}`);
@@ -68,29 +67,74 @@ export class SessionStore {
     return sessionMap;
   }
 
-  private saveUser(userId: string): void {
-    const sanitized = userId.replace(/[^\w-]/g, '_');
+  private async flushUserDirect(sanitized: string): Promise<void> {
     const targetFile = this.getUserFilePath(sanitized);
     const sessionMap = this.userSessions.get(sanitized);
     if (!sessionMap) return;
-
     try {
       const dir = path.dirname(targetFile);
       if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+        await fs.promises.mkdir(dir, { recursive: true });
       }
 
-      const list = Array.from(sessionMap.values()).filter(
-        (s) => s.messages && s.messages.length > 0
-      );
+      // 保存全量会话（包含新创建的空会话），并对过长会话历史截断最近 200 条以防无限膨胀
+      const list = Array.from(sessionMap.values()).map((s) => {
+        if (s.messages && s.messages.length > 200) {
+          return {
+            ...s,
+            messages: s.messages.slice(-200)
+          };
+        }
+        return s;
+      });
 
       const data = JSON.stringify(list, null, 2);
       const tmpPath = `${targetFile}.tmp.${Date.now()}`;
-      fs.writeFileSync(tmpPath, data, 'utf-8');
-      fs.renameSync(tmpPath, targetFile);
+      await fs.promises.writeFile(tmpPath, data, 'utf-8');
+      await fs.promises.rename(tmpPath, targetFile);
     } catch (err: any) {
       console.error(`[SessionStore] 持久化员工 ${sanitized} 会话失败: ${err.message}`);
     }
+  }
+
+  public async flush(userId?: string): Promise<void> {
+    if (userId) {
+      const sanitized = userId.replace(/[^\w-]/g, '_');
+      const timer = this.saveTimers.get(sanitized);
+      if (timer) {
+        clearTimeout(timer);
+        this.saveTimers.delete(sanitized);
+      }
+      await this.flushUserDirect(sanitized);
+    } else {
+      const users = Array.from(this.saveTimers.keys());
+      for (const u of users) {
+        const timer = this.saveTimers.get(u);
+        if (timer) {
+          clearTimeout(timer);
+          this.saveTimers.delete(u);
+        }
+        await this.flushUserDirect(u);
+      }
+    }
+  }
+
+  private saveUser(userId: string): void {
+    const sanitized = userId.replace(/[^\w-]/g, '_');
+    const sessionMap = this.userSessions.get(sanitized);
+    if (!sessionMap) return;
+
+    // 清除已有的防抖定时器并防抖异步刷盘
+    if (this.saveTimers.has(sanitized)) {
+      clearTimeout(this.saveTimers.get(sanitized)!);
+    }
+
+    const timer = setTimeout(async () => {
+      this.saveTimers.delete(sanitized);
+      await this.flushUserDirect(sanitized);
+    }, 50);
+
+    this.saveTimers.set(sanitized, timer);
   }
 
   public create(id: string, botId: string, title = '新会话', userId = 'system_proactive'): Session {
@@ -158,13 +202,21 @@ export class SessionStore {
     return sessionMap.get(id);
   }
 
-  public list(botId?: string, userId?: string, includeEmpty = false): Session[] {
-    if (!userId) return [];
+  public list(botId?: string, userIdOrIncludeEmpty?: string | boolean, includeEmpty = false): Session[] {
+    let userId = 'system_proactive';
+    let incEmpty = includeEmpty;
+
+    if (typeof userIdOrIncludeEmpty === 'boolean') {
+      incEmpty = userIdOrIncludeEmpty;
+    } else if (typeof userIdOrIncludeEmpty === 'string' && userIdOrIncludeEmpty) {
+      userId = userIdOrIncludeEmpty;
+    }
+
     const sanitized = userId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
 
     const all = Array.from(sessionMap.values()).filter((s) => {
-      const hasMsg = includeEmpty || (s.messages && s.messages.length > 0);
+      const hasMsg = incEmpty || (s.messages && s.messages.length > 0);
       return hasMsg;
     });
 
@@ -174,9 +226,9 @@ export class SessionStore {
     return all.filter((s) => s.bot_id === botId).sort((a, b) => b.updated_at - a.updated_at);
   }
 
-  public delete(id: string, userId: string): boolean {
-    if (!userId) return false;
-    const sanitized = userId.replace(/[^\w-]/g, '_');
+  public delete(id: string, userId = 'system_proactive'): boolean {
+    const effectiveUserId = userId || 'system_proactive';
+    const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
     const sessionMap = this.loadUser(sanitized);
     const existing = sessionMap.get(id);
     if (!existing) return false;

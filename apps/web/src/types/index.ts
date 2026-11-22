@@ -66,6 +66,9 @@ export interface Message {
     actionId: string;
     description: string;
     command?: string;
+    status?: 'approved' | 'rejected' | 'pending' | 'cancelled';
+    decidedBy?: string;
+    decidedAt?: number;
   };
 }
 
@@ -340,6 +343,8 @@ export interface FeedActivity {
   sessionTitle?: string;
   path?: string;
   quiet?: boolean;
+  approvalId?: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
 }
 
 export interface SandboxStatus {

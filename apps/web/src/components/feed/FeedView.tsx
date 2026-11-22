@@ -10,6 +10,9 @@ import {
   FileText,
   Trash2,
   ArrowRight,
+  Check,
+  X,
+  AlertTriangle,
 } from 'lucide-react';
 import type { FeedPost, FeedActivity } from '../../types';
 import { api } from '../../services/api';
@@ -118,7 +121,8 @@ FeedPostCard.displayName = 'FeedPostCard';
 const FeedActivityRow = React.memo<{
   act: FeedActivity;
   onOpen: (act: FeedActivity) => void;
-}>(({ act, onOpen }) => {
+  onDecision?: (act: FeedActivity, approved: boolean) => void;
+}>(({ act, onOpen, onDecision }) => {
   const kindCfg = KIND_CONFIG[act.kind || act.type || 'chat'] || {
     icon: <Sparkles size={15} />,
     label: act.botName || '智能体',
@@ -127,6 +131,7 @@ const FeedActivityRow = React.memo<{
   const textSnippet = (act.text || act.summary || '').replace(/[\r\n]+/g, ' ').trim();
   const timeText = formatRelativeTime(act.ts || act.timestamp);
   const clickable = Boolean(act.sessionId);
+  const isApproval = act.kind === 'approval' || act.type === 'approval';
 
   return (
     <div
@@ -165,6 +170,44 @@ const FeedActivityRow = React.memo<{
             {textSnippet}
           </div>
         )}
+
+        {/* 门禁审批内联操作条 */}
+        {isApproval && (
+          <div
+            className="feed-act-approval-bar"
+            style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {act.status === 'approved' ? (
+              <span className="pill-badge pill-green" style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <Check size={12} /> 已批准执行
+              </span>
+            ) : act.status === 'rejected' ? (
+              <span className="pill-badge pill-red" style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <X size={12} /> 已驳回
+              </span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn-reject"
+                  style={{ padding: '3px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  onClick={() => onDecision?.(act, false)}
+                >
+                  <X size={12} /> 驳回
+                </button>
+                <button
+                  type="button"
+                  className="btn-approve"
+                  style={{ padding: '3px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  onClick={() => onDecision?.(act, true)}
+                >
+                  <Check size={12} /> 授权批准
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -179,6 +222,7 @@ export const FeedView: React.FC = () => {
   const [isWriting, setIsWriting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const deletePostTimerRef = useRef<any>(null);
   const loadSeq = useRef(0);
@@ -186,6 +230,7 @@ export const FeedView: React.FC = () => {
   const loadFeed = useCallback(async () => {
     const seq = ++loadSeq.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const [feedData, actData] = await Promise.all([api.getFeed(), api.getFeedActivities()]);
       if (seq !== loadSeq.current) return;
@@ -194,6 +239,7 @@ export const FeedView: React.FC = () => {
     } catch (err: any) {
       if (seq !== loadSeq.current) return;
       console.error('Failed to load feed:', err);
+      setLoadError(err.message || '获取动态数据异常');
       showToast('获取动态数据异常', 'error');
     } finally {
       if (seq === loadSeq.current) {
@@ -253,13 +299,34 @@ export const FeedView: React.FC = () => {
 
   const handleDiscuss = useCallback(
     (post: FeedPost) => {
+      const prompt = post.prompt || `关于动态【${post.title}】：请帮我进一步分析评估，并给出具体落地建议。`;
+      sessionStorage.setItem('museclaw_chat_draft', prompt);
+      window.dispatchEvent(new CustomEvent('museclaw:chat_draft', { detail: prompt }));
       if (post.sessionId) {
         selectSession(post.sessionId);
       }
       setTab('chat');
-      showToast(`已就「${post.title}」进入对话`, 'info');
+      showToast(`已就「${post.title}」进入对话并填充草稿`, 'info');
     },
     [selectSession, setTab, showToast]
+  );
+
+  const handleDecision = useCallback(
+    async (act: FeedActivity, approved: boolean) => {
+      const actionId = act.approvalId || act.id;
+      try {
+        await api.sendDecision(act.sessionId || '', actionId, approved ? 'APPROVE' : 'REJECT');
+        setActivities((prev) =>
+          prev.map((item) =>
+            item.id === act.id ? { ...item, status: approved ? 'approved' : 'rejected' } : item
+          )
+        );
+        showToast(approved ? '已批准该审批项' : '已驳回该审批项', 'success');
+      } catch (err: any) {
+        showToast(`审批处理失败: ${err.message}`, 'error');
+      }
+    },
+    [showToast]
   );
 
   const handleOpenActivity = useCallback(
@@ -307,6 +374,14 @@ export const FeedView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+          <AlertTriangle size={14} />
+          <span>动态数据加载失败：{loadError}</span>
+          <button type="button" onClick={loadFeed} disabled={loading}>重试</button>
+        </div>
+      )}
 
       <div className="feed-layout">
         <div className="feed-main-col">
@@ -367,7 +442,12 @@ export const FeedView: React.FC = () => {
                 </div>
               ) : (
                 activities.map((act, idx) => (
-                  <FeedActivityRow key={act.id || `act-${idx}`} act={act} onOpen={handleOpenActivity} />
+                  <FeedActivityRow
+                    key={act.id || `act-${idx}`}
+                    act={act}
+                    onOpen={handleOpenActivity}
+                    onDecision={handleDecision}
+                  />
                 ))
               )}
             </div>

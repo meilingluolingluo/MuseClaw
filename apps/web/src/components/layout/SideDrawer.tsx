@@ -203,6 +203,13 @@ export const SideDrawer: React.FC = () => {
                         selectSession(sess.id);
                         closeMobileDrawer();
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          selectSession(sess.id);
+                          closeMobileDrawer();
+                        }
+                      }}
                       role="option"
                       aria-selected={isActive}
                       tabIndex={0}

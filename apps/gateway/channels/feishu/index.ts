@@ -56,6 +56,12 @@ export function createFeishuChannel(
         return false;
       }
 
+      if (!options.encryptKey && !options.verificationToken) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: '飞书通道未配置安全凭证 (FEISHU_ENCRYPT_KEY 或 FEISHU_VERIFICATION_TOKEN)，已禁用' }));
+        return true;
+      }
+
       if (req.method !== 'POST') {
         res.writeHead(405);
         res.end('Method Not Allowed');

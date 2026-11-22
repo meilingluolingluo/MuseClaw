@@ -48,6 +48,12 @@ export function createInfoflowChannel(
         return false;
       }
 
+      if (!options.token || !options.encodingAesKey) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: '如流通道未配置安全凭据 (INFOFLOW_TOKEN 或 INFOFLOW_AES_KEY)，已禁用' }));
+        return true;
+      }
+
       const queryParams: Record<string, string> = {};
       url.searchParams.forEach((v, k) => {
         queryParams[k] = v;

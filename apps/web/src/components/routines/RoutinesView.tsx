@@ -668,13 +668,18 @@ export const RoutinesView: React.FC = () => {
                     </span>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        if (!activeRoutine.webhookSecret) {
+                          showToast('请先在上方配置或生成 Webhook 密钥后再复制调用指令', 'warning');
+                          return;
+                        }
                         copyToClipboard(
-                          `curl -X POST "${window.location.origin}/api/routines/${activeRoutine.id}/trigger" -H "Authorization: Bearer ${activeRoutine.webhookSecret || 'secret'}" -H "Content-Type: application/json" -d '{"event":"external_trigger"}'`,
+                          `curl -X POST "${window.location.origin}/api/routines/${activeRoutine.id}/trigger" -H "Authorization: Bearer ${activeRoutine.webhookSecret}" -H "Content-Type: application/json" -d '{"event":"external_trigger"}'`,
                           'curl_cmd'
-                        )
-                      }
+                        );
+                      }}
                       className="routine-webhook-copy-btn"
+                      title={!activeRoutine.webhookSecret ? '请先配置 Webhook 密钥' : '复制 Curl 指令'}
                     >
                       {copiedId === 'curl_cmd' ? <Check size={12} color="var(--accent-green)" /> : <Copy size={12} />}
                       <span>{copiedId === 'curl_cmd' ? '已复制' : '复制 Curl 指令'}</span>

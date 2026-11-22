@@ -9,8 +9,11 @@ export interface FeishuReceiverConfig {
 export class FeishuReceiver {
   private crypto: FeishuCrypto;
   private bridge?: FeishuApprovalBridge;
+  private config: FeishuReceiverConfig;
+  private seenNonces = new Map<string, number>();
 
   constructor(config: FeishuReceiverConfig, bridge?: FeishuApprovalBridge) {
+    this.config = config;
     this.crypto = new FeishuCrypto(config.encryptKey, config.verificationToken);
     this.bridge = bridge;
   }
@@ -31,13 +34,44 @@ export class FeishuReceiver {
     text?: string;
     isApprovalCommand?: boolean;
   } {
-    // 1. 签名校验 (如果配置了 EncryptKey)
+    // 安全红线：未配置任何飞书安全凭据时，严格拒绝所有未授权回调
+    if (!this.config.encryptKey && !this.config.verificationToken) {
+      throw new Error('未配置飞书安全凭证 (FEISHU_ENCRYPT_KEY 或 FEISHU_VERIFICATION_TOKEN)，已安全拒绝未授权请求');
+    }
+
+    // 1. 签名与时间戳时效校验 (如果配置了 EncryptKey)
     const timestamp = String(headers['x-lark-request-timestamp'] || '');
     const nonce = String(headers['x-lark-request-nonce'] || '');
     const signature = String(headers['x-lark-signature'] || '');
 
-    if (signature && !this.crypto.verifySignature(timestamp, nonce, rawBody, signature)) {
-      throw new Error('飞书请求签名校验失败');
+    if (this.config.encryptKey) {
+      if (!signature) {
+        throw new Error('缺少飞书请求签名 (X-Lark-Signature)');
+      }
+      if (!timestamp || !nonce) {
+        throw new Error('缺少飞书请求时间戳或随机数');
+      }
+
+      // 时间戳 5 分钟时效窗口防重放
+      const tsNum = parseInt(timestamp, 10);
+      if (isNaN(tsNum) || Math.abs(Math.floor(Date.now() / 1000) - tsNum) > 300) {
+        throw new Error('飞书请求时间戳超出时效窗口 (5分钟)');
+      }
+
+      // 随机数去重防重放
+      const now = Date.now();
+      // 清理超过 10 分钟的历史 nonce
+      for (const [n, t] of this.seenNonces.entries()) {
+        if (now - t > 600000) this.seenNonces.delete(n);
+      }
+      if (this.seenNonces.has(nonce)) {
+        throw new Error('飞书请求 nonce 重复，疑似重放攻击');
+      }
+      this.seenNonces.set(nonce, now);
+
+      if (!this.crypto.verifySignature(timestamp, nonce, rawBody, signature)) {
+        throw new Error('飞书请求签名校验失败');
+      }
     }
 
     let payload: Record<string, any> = {};
@@ -51,6 +85,14 @@ export class FeishuReceiver {
     if (payload.encrypt) {
       const decrypted = this.crypto.decrypt(payload.encrypt);
       payload = JSON.parse(decrypted);
+    }
+
+    // Verification Token 强校验
+    if (this.config.verificationToken) {
+      const payloadToken = payload.token || payload.header?.token;
+      if (payloadToken !== this.config.verificationToken) {
+        throw new Error('飞书 Verification Token 校验失败');
+      }
     }
 
     // 3. 校验请求 (URL 挑战校验)

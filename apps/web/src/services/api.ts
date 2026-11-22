@@ -22,9 +22,24 @@ import type {
   User
 } from '../types';
 
+let onUnauthorizedCallback: (() => void) | null = null;
+export function setOnUnauthorizedCallback(cb: () => void) {
+  onUnauthorizedCallback = cb;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error('请求超时 (15s)，请检查网络连接'));
+  }, 15000);
+
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => controller.abort());
+  }
+
   const init: RequestInit = {
     ...options,
+    signal: controller.signal,
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
@@ -32,18 +47,31 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   };
 
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    let errMsg = `Request failed: ${res.status}`;
-    try {
-      const errJson = await res.json();
-      errMsg = errJson.error || errJson.message || errMsg;
-    } catch {
-      // ignore JSON parse error
+  try {
+    const res = await fetch(path, init);
+    clearTimeout(timeoutId);
+
+    if (res.status === 401) {
+      if (!path.startsWith('/api/auth/me') && !path.startsWith('/api/auth/login') && !path.startsWith('/api/auth/register')) {
+        onUnauthorizedCallback?.();
+      }
     }
-    throw new Error(errMsg);
+
+    if (!res.ok) {
+      let errMsg = `Request failed: ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errMsg = errJson.error || errJson.message || errMsg;
+      } catch {
+        // ignore JSON parse error
+      }
+      throw new Error(errMsg);
+    }
+    return res.json() as Promise<T>;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    throw err;
   }
-  return res.json() as Promise<T>;
 }
 
 export const api = {
@@ -74,20 +102,16 @@ export const api = {
   },
 
   // Sessions
-  getSessions: (botId: string, userId?: string) =>
-    request<Session[]>(`/api/sessions?bot_id=${encodeURIComponent(botId)}&userId=${encodeURIComponent(userId || 'user_web')}&include_empty=true`),
-  createSession: (botId: string, title = '新任务对话', userId?: string) =>
+  getSessions: (botId: string, _userId?: string) =>
+    request<Session[]>(`/api/sessions?bot_id=${encodeURIComponent(botId)}&include_empty=true`),
+  createSession: (botId: string, title = '新任务对话', _userId?: string) =>
     request<Session>('/api/sessions', {
       method: 'POST',
-      body: JSON.stringify({ botId, title, userId: userId || 'user_web' }),
+      body: JSON.stringify({ botId, title }),
     }),
-  getMessages: async (sessionId: string, userId?: string) => {
-    try {
-      const res = await request<any>(`/api/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(userId || 'user_web')}`);
-      return (Array.isArray(res) ? res : res.messages) || [];
-    } catch {
-      return [];
-    }
+  getMessages: async (sessionId: string, _userId?: string) => {
+    const res = await request<any>(`/api/sessions/${encodeURIComponent(sessionId)}`);
+    return (Array.isArray(res) ? res : res.messages) || [];
   },
   // 服务端只提供 /api/approvals/:approvalId，参数是 approved/scope
   sendDecision: (_sessionId: string, actionId: string, decision: 'APPROVE' | 'REJECT') =>

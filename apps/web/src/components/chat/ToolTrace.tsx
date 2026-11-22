@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { copyToClipboard } from '../../utils/clipboard';
 import {
   Check,
   ChevronRight,
@@ -134,11 +135,13 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
   const duration = formatDuration(item);
   const isTerminal = ['execute_shell', 'bash', 'sh', 'terminal'].includes(item.tool);
 
-  const handleCopy = (text: string, section: 'params' | 'result', e: React.MouseEvent) => {
+  const handleCopy = async (text: string, section: 'params' | 'result', e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(text);
-    setCopiedSection(section);
-    setTimeout(() => setCopiedSection(null), 1800);
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedSection(section);
+      setTimeout(() => setCopiedSection(null), 1800);
+    }
   };
 
   const paramsText = item.params == null ? arg || '—' : JSON.stringify(item.params, null, 2);

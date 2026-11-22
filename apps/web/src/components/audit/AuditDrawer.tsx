@@ -30,7 +30,7 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
   onClose,
   activeSessionId,
 }) => {
-  const { showToast, isTainted, taintReasons } = useApp();
+  const { showToast, isTainted, taintReasons, focusApprovalId } = useApp();
   const [activeTab, setActiveTab] = useState<'trail' | 'grants' | 'policy'>('trail');
   const [policy, setPolicy] = useState<any>({});
   const [grants, setGrants] = useState<Grant[]>([]);
@@ -38,6 +38,21 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
   const [loading, setLoading] = useState(false);
   const [filterSessionOnly, setFilterSessionOnly] = useState(false);
   const [expandedLogKeys, setExpandedLogKeys] = useState<Record<string, boolean>>({});
+  const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
+  const revokeTimerRef = React.useRef<any>(null);
+
+  // 监听 Esc 键关闭抽屉
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -64,7 +79,46 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
     }
   }, [isOpen, loadData]);
 
+  // 当外部传入聚焦的审批 ID 时，自动切换到审计流水页并定位展开高亮对应记录
+  useEffect(() => {
+    if (!isOpen || !focusApprovalId || auditLogs.length === 0) return;
+    setActiveTab('trail');
+
+    const matchedIdx = auditLogs.findIndex((l) => {
+      if (l.id === focusApprovalId) return true;
+      if ((l as any).approvalId === focusApprovalId) return true;
+      if ((l as any).actionId === focusApprovalId) return true;
+      if (typeof l.details === 'object' && l.details) {
+        if ((l.details as any).approvalId === focusApprovalId) return true;
+        if ((l.details as any).actionId === focusApprovalId) return true;
+      }
+      return JSON.stringify(l).includes(focusApprovalId);
+    });
+
+    if (matchedIdx !== -1) {
+      const targetLog = auditLogs[matchedIdx];
+      const targetKey = targetLog.id || `${targetLog.event}_${matchedIdx}_${targetLog.ts || targetLog.timestamp}`;
+      setExpandedLogKeys((prev) => ({ ...prev, [targetKey]: true }));
+
+      // 稍微延迟等待 DOM 展开渲染后平滑滚动
+      setTimeout(() => {
+        const el = document.getElementById(`audit-card-${targetKey}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [isOpen, focusApprovalId, auditLogs]);
+
   const handleRevokeGrant = async (id: string) => {
+    if (revokingGrantId !== id) {
+      setRevokingGrantId(id);
+      if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+      revokeTimerRef.current = setTimeout(() => setRevokingGrantId(null), 3500);
+      return;
+    }
+    if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+    setRevokingGrantId(null);
     try {
       await api.revokeGrant(id);
       setGrants((prev) => prev.filter((g) => g.id !== id));
@@ -241,8 +295,22 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
                       log.details?.actionSummary ||
                       (typeof log.decision === 'string' ? log.decision : '');
 
+                const isMatchedFocus = Boolean(
+                  focusApprovalId && (
+                    log.id === focusApprovalId ||
+                    (log as any).approvalId === focusApprovalId ||
+                    (log as any).actionId === focusApprovalId ||
+                    (typeof log.details === 'object' && ((log.details as any)?.approvalId === focusApprovalId || (log.details as any)?.actionId === focusApprovalId)) ||
+                    JSON.stringify(log).includes(focusApprovalId)
+                  )
+                );
+
                 return (
-                  <div key={logKey} className="audit-card">
+                  <div
+                    key={logKey}
+                    id={`audit-card-${logKey}`}
+                    className={`audit-card ${isMatchedFocus ? 'audit-card-highlighted' : ''}`}
+                  >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {getEventBadge(log)}
@@ -365,11 +433,11 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRevokeGrant(grant.id)}
-                        className="btn-reject"
+                        className={`btn-reject ${revokingGrantId === grant.id ? 'is-confirming' : ''}`}
                         style={{ padding: '3px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}
-                        title="撤销此免审批授权"
+                        title={revokingGrantId === grant.id ? '再次点击确认撤销' : '撤销此免审批授权'}
                       >
-                        <Trash2 size={11} /> 撤销授权
+                        <Trash2 size={11} /> {revokingGrantId === grant.id ? '确认撤销？' : '撤销授权'}
                       </button>
                     </div>
 

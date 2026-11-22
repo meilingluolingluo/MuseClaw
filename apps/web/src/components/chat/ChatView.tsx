@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MessageBubble } from './MessageBubble';
 import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
-import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck } from 'lucide-react';
+import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw } from 'lucide-react';
 import type { Message, MessageAttachment } from '../../types';
 import { api } from '../../services/api';
 
@@ -22,6 +22,7 @@ export const ChatView: React.FC = () => {
   } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
+  const [sessionLoadError, setSessionLoadError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
   const currentStreamingSessionIdRef = useRef<string | null>(null);
@@ -110,6 +111,7 @@ export const ChatView: React.FC = () => {
       setMessages([]);
       setVisibleCount(PAGE_SIZE);
       setLoadingSession(false);
+      setSessionLoadError(null);
       return;
     }
     let cancelled = false;
@@ -117,6 +119,7 @@ export const ChatView: React.FC = () => {
     setMessages([]);
     setVisibleCount(PAGE_SIZE);
     setLoadingSession(true);
+    setSessionLoadError(null);
     setShowScrollBottomBtn(false);
     setHasNewUnseen(false);
 
@@ -126,6 +129,7 @@ export const ChatView: React.FC = () => {
         if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
         const msgList = Array.isArray(res) ? res : [];
         setMessages(msgList);
+        setSessionLoadError(null);
         setVisibleCount(PAGE_SIZE);
 
         // 切换会话核心优化：采用 instant / auto 定位到底部最新内容，消除从顶部第1条一路 smooth 滚到底部的视觉眩晕
@@ -145,6 +149,7 @@ export const ChatView: React.FC = () => {
       .catch((err) => {
         if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
         console.error('Failed to load messages:', err);
+        setSessionLoadError(err.message || '加载会话历史失败');
         showToast(`会话记录载入失败：${err.message}`, 'error');
         isInitialSwitchRef.current = false;
       })
@@ -157,6 +162,44 @@ export const ChatView: React.FC = () => {
       cancelled = true;
     };
   }, [activeSessionId, showToast]);
+
+  const retryLoadSession = () => {
+    if (!activeSessionId) return;
+    setLoadingSession(true);
+    setSessionLoadError(null);
+    api
+      .getMessages(activeSessionId)
+      .then((res) => {
+        setMessages(Array.isArray(res) ? res : []);
+        setSessionLoadError(null);
+        scrollToBottom('auto');
+      })
+      .catch((err) => {
+        setSessionLoadError(err.message || '加载会话历史失败');
+        showToast(`重试加载失败: ${err.message}`, 'error');
+      })
+      .finally(() => {
+        setLoadingSession(false);
+      });
+  };
+
+  const handleApprovalResolved = useCallback((actionId: string, approved: boolean) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.approvalRequest && m.approvalRequest.actionId === actionId) {
+          return {
+            ...m,
+            approvalRequest: {
+              ...m.approvalRequest,
+              status: approved ? 'approved' : 'rejected',
+              decidedAt: Date.now(),
+            },
+          };
+        }
+        return m;
+      })
+    );
+  }, []);
 
   // 智能吸底：仅当用户处于底部附近时才跟随自动吸底，若用户正在上方阅读历史则不打扰用户
   useEffect(() => {
@@ -252,6 +295,19 @@ export const ChatView: React.FC = () => {
       let accumulatedReasoning = '';
       const toolsAccumulator: any[] = [];
 
+      let updateRafId: number | null = null;
+      let hasApprovalNeeded = false;
+      const scheduleStreamingUpdate = () => {
+        if (updateRafId != null) return;
+        updateRafId = requestAnimationFrame(() => {
+          updateRafId = null;
+          if (activeSessionIdRef.current === targetSessionId) {
+            setStreamingContent(accumulatedText);
+            setStreamingReasoning(accumulatedReasoning);
+          }
+        });
+      };
+
       while (true) {
         if (activeSessionIdRef.current !== targetSessionId) {
           try {
@@ -268,27 +324,23 @@ export const ChatView: React.FC = () => {
         }
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || '';
 
-        for (const block of lines) {
+        for (const block of blocks) {
           if (activeSessionIdRef.current !== targetSessionId) break;
           const line = block.trim();
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6);
+          if (!line.startsWith('data:')) continue;
+          const jsonStr = line.replace(/^data:\s*/, '');
           try {
             const event = JSON.parse(jsonStr);
 
             if (event.type === 'stream:text-delta') {
               accumulatedText += event.text;
-              if (activeSessionIdRef.current === targetSessionId) {
-                setStreamingContent(accumulatedText);
-              }
+              scheduleStreamingUpdate();
             } else if (event.type === 'stream:reasoning-delta') {
               accumulatedReasoning += event.text;
-              if (activeSessionIdRef.current === targetSessionId) {
-                setStreamingReasoning(accumulatedReasoning);
-              }
+              scheduleStreamingUpdate();
             } else if (event.type === 'agent:error') {
               const errSnippet = event.text || `\n[执行出错: ${event.error || '未知异常'}]`;
               accumulatedText += errSnippet;
@@ -330,6 +382,7 @@ export const ChatView: React.FC = () => {
             } else if (event.type === 'sentinel:taint_updated') {
               setTainted(event.isTainted, event.reason);
             } else if (event.type === 'sentinel:approval_needed') {
+              hasApprovalNeeded = true;
               if (activeSessionIdRef.current === targetSessionId) {
                 setMessages((prev) => [
                   ...prev,
@@ -341,6 +394,7 @@ export const ChatView: React.FC = () => {
                       actionId: event.request?.approvalId,
                       description: event.request?.actionSummary,
                       command: event.request?.targetDetails?.command,
+                      status: 'pending',
                     },
                   },
                 ]);
@@ -350,6 +404,11 @@ export const ChatView: React.FC = () => {
             console.warn('Failed to parse SSE line:', e);
           }
         }
+      }
+
+      if (updateRafId != null) {
+        cancelAnimationFrame(updateRafId);
+        updateRafId = null;
       }
 
       if (activeSessionIdRef.current !== targetSessionId) {
@@ -366,7 +425,7 @@ export const ChatView: React.FC = () => {
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
-      } else {
+      } else if (!hasApprovalNeeded) {
         const fallbackMsg: Message = {
           id: `asst_${Date.now()}`,
           role: 'assistant',
@@ -381,15 +440,27 @@ export const ChatView: React.FC = () => {
       }
       if (err?.name === 'AbortError') {
         const partial = accumulatedText.trim();
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `stop_${Date.now()}`,
-            role: 'assistant',
-            content: partial ? `${partial}\n\n（已停止这一轮）` : '（已停止这一轮）',
-            timestamp: Date.now(),
-          },
-        ]);
+        setMessages((prev) =>
+          prev
+            .map((m) => {
+              if (m.approvalRequest && m.approvalRequest.status === 'pending') {
+                return {
+                  ...m,
+                  approvalRequest: {
+                    ...m.approvalRequest,
+                    status: 'cancelled' as const,
+                  },
+                };
+              }
+              return m;
+            })
+            .concat({
+              id: `stop_${Date.now()}`,
+              role: 'assistant',
+              content: partial ? `${partial}\n\n（已停止这一轮，未决审批已失效）` : '（已停止这一轮，未决审批已失效）',
+              timestamp: Date.now(),
+            })
+        );
       } else {
         showToast(`对话失败: ${err.message}`, 'error');
         setMessages((prev) => [
@@ -416,12 +487,28 @@ export const ChatView: React.FC = () => {
         abortRef.current = null;
       }
       // 首轮之后标题/条数由服务端生成，刷新侧栏
-      if (activeBot?.id) loadSessions(activeBot.id);
+      if (activeBot?.id) loadSessions(activeBot.id, targetSessionId);
     }
   };
 
   const handleStop = () => {
     abortRef.current?.abort();
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.approvalRequest && (!m.approvalRequest.status || m.approvalRequest.status === 'pending')) {
+          return {
+            ...m,
+            approvalRequest: {
+              ...m.approvalRequest,
+              status: 'rejected',
+              description: `${m.approvalRequest.description} (会话已停止，审批已自动取消)`,
+              decidedAt: Date.now(),
+            },
+          };
+        }
+        return m;
+      })
+    );
   };
 
   const displayedMessages =
@@ -452,6 +539,20 @@ export const ChatView: React.FC = () => {
                 <span>正在载入会话记录…</span>
               </div>
             </div>
+          ) : sessionLoadError ? (
+            <div className="chat-load-error-state" role="alert" style={{ textAlign: 'center', padding: '60px 20px' }}>
+              <AlertCircle size={32} style={{ color: 'var(--accent-red)', marginBottom: '12px' }} />
+              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>会话历史加载失败</h3>
+              <p style={{ color: 'var(--text-dim)', fontSize: '13px', marginBottom: '16px' }}>{sessionLoadError}</p>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={retryLoadSession}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCcw size={13} /> 重新加载
+              </button>
+            </div>
           ) : messages.length === 0 && !isStreaming ? (
             <div className="chat-empty-state">
               <div className="chat-empty-hero-wrap">
@@ -471,6 +572,7 @@ export const ChatView: React.FC = () => {
                 <button
                   type="button"
                   className="chat-starter-card"
+                  disabled={isStreaming}
                   onClick={() => handleSendMessage('帮我梳理并规划长周期目标')}
                 >
                   <div className="chat-starter-icon is-goals">
@@ -484,6 +586,7 @@ export const ChatView: React.FC = () => {
                 <button
                   type="button"
                   className="chat-starter-card"
+                  disabled={isStreaming}
                   onClick={() => handleSendMessage('查询并记录我常用的工作习惯与偏好')}
                 >
                   <div className="chat-starter-icon is-memory">
@@ -497,6 +600,7 @@ export const ChatView: React.FC = () => {
                 <button
                   type="button"
                   className="chat-starter-card"
+                  disabled={isStreaming}
                   onClick={() => handleSendMessage('帮我配置一个工作日早上 09:30 的例行巡检任务')}
                 >
                   <div className="chat-starter-icon is-routine">
@@ -510,6 +614,7 @@ export const ChatView: React.FC = () => {
                 <button
                   type="button"
                   className="chat-starter-card"
+                  disabled={isStreaming}
                   onClick={() => handleSendMessage('在原生安全沙箱中执行系统自检与环境连通性验证')}
                 >
                   <div className="chat-starter-icon is-security">
@@ -538,6 +643,7 @@ export const ChatView: React.FC = () => {
                   message={msg}
                   bot={activeBot}
                   sessionId={activeSessionId || undefined}
+                  onApprovalResolved={handleApprovalResolved}
                 />
               ))}
             </>
@@ -549,7 +655,15 @@ export const ChatView: React.FC = () => {
               message={{
                 id: 'streaming_current',
                 role: 'assistant',
-                content: streamingContent || (streamingReasoning ? '' : (streamingTools.length > 0 ? '' : '正在连接并调度 Agent 推理执行...')),
+                content:
+                  streamingContent ||
+                  (streamingReasoning
+                    ? ''
+                    : streamingTools.length > 0
+                    ? ''
+                    : messages.some((m) => m.approvalRequest && (!m.approvalRequest.status || m.approvalRequest.status === 'pending'))
+                    ? '⚠️ 正在等待人工安全审批授权，请在上方门禁卡片中确认或驳回...'
+                    : '正在连接并调度 Agent 推理执行...'),
                 reasoning: streamingReasoning || undefined,
                 toolCalls: streamingTools,
               }}

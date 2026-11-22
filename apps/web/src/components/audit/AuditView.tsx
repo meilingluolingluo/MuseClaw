@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { ShieldCheck, RefreshCw, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ShieldCheck, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 import type { Grant, AuditLog } from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
@@ -11,9 +11,13 @@ export const AuditView: React.FC = () => {
   const [grants, setGrants] = useState<Grant[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
+  const revokeTimerRef = useRef<any>(null);
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [p, g, a] = await Promise.all([
         api.getPolicy(),
@@ -23,8 +27,9 @@ export const AuditView: React.FC = () => {
       setPolicy(p || {});
       setGrants(Array.isArray(g) ? g : []);
       setAuditLogs(Array.isArray(a) ? a : []);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load audit data:', err);
+      setLoadError(err.message || '安全审计数据加载失败');
     } finally {
       setLoading(false);
     }
@@ -35,6 +40,15 @@ export const AuditView: React.FC = () => {
   }, []);
 
   const handleRevokeGrant = async (id: string) => {
+    if (revokingGrantId !== id) {
+      setRevokingGrantId(id);
+      if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+      revokeTimerRef.current = setTimeout(() => setRevokingGrantId(null), 3500);
+      return;
+    }
+    if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+    setRevokingGrantId(null);
+
     try {
       await api.revokeGrant(id);
       setGrants((prev) => prev.filter((g) => g.id !== id));
@@ -63,6 +77,14 @@ export const AuditView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+          <AlertTriangle size={14} />
+          <span>审计数据加载失败：{loadError}</span>
+          <button type="button" onClick={loadData} disabled={loading}>重试</button>
+        </div>
+      )}
 
       <div className="audit-top-grid">
         {/* Declarative policy card */}
@@ -98,11 +120,13 @@ export const AuditView: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleRevokeGrant(grant.id)}
-                      className="audit-grant-revoke-btn"
-                      title="撤销授权"
+                      className={`audit-grant-revoke-btn ${revokingGrantId === grant.id ? 'is-confirming' : ''}`}
+                      title={revokingGrantId === grant.id ? '再次点击确认撤销' : '撤销授权'}
                       aria-label="撤销授权"
+                      style={revokingGrantId === grant.id ? { width: 'auto', padding: '0 6px', display: 'flex', alignItems: 'center', gap: '3px' } : undefined}
                     >
                       <Trash2 size={13} />
+                      {revokingGrantId === grant.id && <span style={{ fontSize: '11px', color: 'var(--accent-red)' }}>确认？</span>}
                     </button>
                   </div>
                 );

@@ -249,10 +249,11 @@ export const ModelSettingsModal: React.FC = () => {
             </div>
 
             <div className="model-field">
-              <label className="model-field-label">
+              <label htmlFor="local-model-select" className="model-field-label">
                 指定模型 (Model ID):
               </label>
               <select
+                id="local-model-select"
                 className="form-control model-select"
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
@@ -265,23 +266,25 @@ export const ModelSettingsModal: React.FC = () => {
               </select>
               <div className="model-candidate-tags">
                 {candidateModels.map((m) => (
-                  <span
+                  <button
                     key={m}
+                    type="button"
                     className={`model-candidate-tag ${m === modelId ? 'is-selected' : ''}`}
                     onClick={() => setModelId(m)}
                   >
                     {m}
-                  </span>
+                  </button>
                 ))}
               </div>
             </div>
 
             {currentProvider.id === 'ollama' && (
               <div className="model-field">
-                <label className="model-field-label">
+                <label htmlFor="local-endpoint-input" className="model-field-label">
                   服务接入点 (Base URL / Endpoint):
                 </label>
                 <input
+                  id="local-endpoint-input"
                   type="text"
                   className="form-control model-input"
                   placeholder="http://localhost:11434"
@@ -355,10 +358,11 @@ export const ModelSettingsModal: React.FC = () => {
         ) : (
           <div className="model-form-stack">
             <div className="model-field">
-              <label className="model-field-label">
+              <label htmlFor="remote-model-input" className="model-field-label">
                 指定模型 (Model ID):
               </label>
               <input
+                id="remote-model-input"
                 type="text"
                 className="form-control model-input"
                 value={modelId}
@@ -367,22 +371,24 @@ export const ModelSettingsModal: React.FC = () => {
               />
               <div className="model-candidate-tags">
                 {candidateModels.map((m) => (
-                  <span
+                  <button
                     key={m}
+                    type="button"
                     className={`model-candidate-tag ${m === modelId ? 'is-selected' : ''}`}
                     onClick={() => setModelId(m)}
                   >
                     {m}
-                  </span>
+                  </button>
                 ))}
               </div>
             </div>
 
             <div className="model-field">
-              <label className="model-field-label">
+              <label htmlFor="remote-api-key" className="model-field-label">
                 API Key:
               </label>
               <input
+                id="remote-api-key"
                 type="password"
                 className="form-control model-input"
                 placeholder={currentProvider.hasKey ? (currentProvider.maskedKey || '已配置密钥 (留空保持不变)') : 'sk-...'}
@@ -392,10 +398,11 @@ export const ModelSettingsModal: React.FC = () => {
             </div>
 
             <div className="model-field">
-              <label className="model-field-label">
+              <label htmlFor="remote-endpoint-input" className="model-field-label">
                 Base URL / Endpoint (选填):
               </label>
               <input
+                id="remote-endpoint-input"
                 type="text"
                 className="form-control model-input"
                 placeholder={currentProvider.baseUrl || 'https://api.openai.com/v1'}

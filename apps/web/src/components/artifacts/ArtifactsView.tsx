@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Package, RefreshCw, Download, FileText, ExternalLink } from 'lucide-react';
+import { Package, RefreshCw, Download, FileText, ExternalLink, AlertTriangle } from 'lucide-react';
 import type { Artifact } from '../../types';
 import { api } from '../../services/api';
 import { formatFileSize, formatTime } from '../../utils/format';
@@ -21,15 +21,18 @@ export const ArtifactsView: React.FC = () => {
   >(null);
   const objectUrlRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
 
   const loadArtifacts = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await api.getArtifacts();
       setArtifacts(Array.isArray(data) ? data : []);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load artifacts:', err);
+      setLoadError(err.message || '工件列表加载失败');
     } finally {
       setLoading(false);
     }
@@ -114,6 +117,14 @@ export const ArtifactsView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="view-load-error" role="alert" style={{ margin: '14px 20px 0' }}>
+          <AlertTriangle size={14} />
+          <span>工件列表加载失败：{loadError}</span>
+          <button type="button" onClick={loadArtifacts} disabled={loading}>重试</button>
+        </div>
+      )}
 
       <div className="artifacts-grid">
         {artifacts.length === 0 ? (

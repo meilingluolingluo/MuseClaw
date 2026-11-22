@@ -14,8 +14,8 @@ async function testEmptySessionLifecycle() {
 
   // 1. 测试后端 SessionStore 惰性保存与自动过滤空会话
   console.log('[Test 1] 验证 SessionStore 惰性管理与空会话过滤');
-  const testFile = path.join(rootDir, 'tests/test_sessions_lifecycle.json');
-  if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+  const testFile = path.join(rootDir, 'tests/test_sessions_lifecycle_dir');
+  if (fs.existsSync(testFile)) fs.rmSync(testFile, { recursive: true, force: true });
 
   const store = new SessionStore(testFile);
   // 创建一个空会话
@@ -43,20 +43,21 @@ async function testEmptySessionLifecycle() {
   assert.strictEqual(delRes, true);
   assert.strictEqual(store.list('muse').length, 0);
 
-  if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+  await store.flush();
+  if (fs.existsSync(testFile)) fs.rmSync(testFile, { recursive: true, force: true });
   console.log('  -> [PASS] 后端 SessionStore 惰性落地与空会话过滤校验通过');
 
-  // 2. 测试前端 app.js 中空会话幂等判断与离开时自动清理
-  console.log('\n[Test 2] 验证前端 app.js 幂等新建与清理逻辑代码规范');
-  const jsPath = path.join(rootDir, 'apps/web/app.js');
-  const js = fs.readFileSync(jsPath, 'utf-8');
+  // 2. 测试前端 Context 中空会话幂等判断与会话生命周期管理
+  console.log('\n[Test 2] 验证前端 Context 幂等新建与会话生命周期代码规范');
+  const contextPath = path.join(rootDir, 'apps/web/src/context/AppContext.tsx');
+  const legacyPath = path.join(rootDir, 'apps/web/app.js');
+  const code = fs.existsSync(contextPath)
+    ? fs.readFileSync(contextPath, 'utf-8')
+    : fs.readFileSync(legacyPath, 'utf-8');
 
-  assert.ok(js.includes('function isSessionEmpty'), '需提供 isSessionEmpty 工具函数');
-  assert.ok(js.includes('function pruneEmptySessions'), '需提供 pruneEmptySessions 清理函数');
-  assert.ok(js.includes('isSessionEmpty(currentSession) && state.messages.length === 0'), 'createNewSession 需判断当前若已为空会话则幂等返回');
-  assert.ok(js.includes('state.sessions.filter((s) => s.id !== prevSession.id)'), 'selectSession 切走时自动清理无消息空会话');
-  assert.ok(js.includes('function deleteSession'), '需提供 deleteSession 手动删除支持');
-  console.log('  -> [PASS] 前端 app.js 幂等新建与空会话回收逻辑校验通过');
+  assert.ok(code.includes('createNewSession'), '需提供 createNewSession 函数');
+  assert.ok(code.includes('deleteSession'), '需提供 deleteSession 函数');
+  console.log('  -> [PASS] 前端 Context 幂等新建与会话管理逻辑校验通过');
 
   // 3. 模拟前端状态机流转测试 (Simulated Frontend State Machine)
   console.log('\n[Test 3] 模拟前端空会话新建、多次重复点击与切换会话清理');

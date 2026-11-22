@@ -66,12 +66,31 @@ class ViewBoundary extends React.Component<
     if (this.state.error) {
       return (
         <div className="view-crash" role="alert">
-          <AlertTriangle size={22} />
-          <h2>这个页面没能打开</h2>
-          <p>{this.state.error.message || '渲染时出现异常。'}</p>
-          <button type="button" onClick={() => this.setState({ error: null })}>
-            重试
-          </button>
+          <AlertTriangle size={24} style={{ color: 'var(--accent-red)' }} />
+          <h2>页面暂时无法显示</h2>
+          <p>模块加载或视图组件渲染时遇到意外错误，已为您保护其它工作区正常运行。</p>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => this.setState({ error: null })}
+            >
+              重新加载视图
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => window.location.reload()}
+            >
+              刷新页面
+            </button>
+          </div>
+          <details style={{ marginTop: '16px', fontSize: '11px', color: 'var(--text-dim)', textAlign: 'left', maxWidth: '520px', width: '100%' }}>
+            <summary style={{ cursor: 'pointer', userSelect: 'none' }}>查看技术诊断信息</summary>
+            <pre style={{ marginTop: '8px', padding: '8px', background: 'var(--om-surface)', borderRadius: '6px', overflowX: 'auto', maxHeight: '160px' }}>
+              {this.state.error.stack || this.state.error.message || '未知异常'}
+            </pre>
+          </details>
         </div>
       );
     }

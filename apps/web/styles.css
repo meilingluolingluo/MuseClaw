@@ -6470,7 +6470,8 @@ details[open] .thought-toggle::after {
 
 /* ── 目标页：状态、反馈与响应式 ─────────────────────────────────────── */
 
-.goal-load-error {
+.goal-load-error,
+.view-load-error {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -6482,14 +6483,22 @@ details[open] .thought-toggle::after {
   color: var(--accent-red);
   font-size: 12.5px;
 }
-.goal-load-error span { flex: 1; }
-.goal-load-error button {
+.goal-load-error span,
+.view-load-error span { flex: 1; }
+.goal-load-error button,
+.view-load-error button {
   border: none;
   background: none;
   color: var(--om-accent);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.audit-card-highlighted {
+  border-color: var(--om-accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--om-accent) 40%, transparent) !important;
+  transition: all 0.3s ease;
 }
 
 .goal-count { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }

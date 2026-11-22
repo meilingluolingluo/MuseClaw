@@ -19,7 +19,8 @@ export class FeishuCrypto {
    * 校验飞书回调签名 (X-Lark-Signature)
    */
   public verifySignature(timestamp: string, nonce: string, body: string, signature: string): boolean {
-    if (!this.encryptKey) return true; // 未配置 key 时跳过强校验
+    if (!this.encryptKey) return false;
+    if (!timestamp || !nonce || !signature) return false;
     const strToSign = timestamp + nonce + this.encryptKey + body;
     const computed = crypto.createHash('sha256').update(strToSign).digest('hex');
     return computed === signature;
