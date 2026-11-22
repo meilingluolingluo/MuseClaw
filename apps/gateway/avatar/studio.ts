@@ -12,6 +12,7 @@ import type {
 } from '@museclaw/protocol';
 import type { BotRegistry } from '../bots/registry.ts';
 import { globalModelStore } from '../bots/provider-store.ts';
+import { resolveApiKey } from '../../../packages/sandbox-core/src/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -211,16 +212,16 @@ export class AvatarStudio {
     const siliconProv = globalModelStore?.getProviderConfig?.('siliconflow');
     const googleProv = globalModelStore?.getProviderConfig?.('google');
 
-    const envDashscopeKey = process.env.DASHSCOPE_API_KEY || qwenProv?.apiKey || '';
-    const envSiliconKey = process.env.SILICONFLOW_API_KEY || siliconProv?.apiKey || '';
-    const envOpenAiKey = process.env.OPENAI_API_KEY || openAiProv?.apiKey || '';
-    const envGoogleKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || googleProv?.apiKey || '';
+    const envGoogleKey = resolveApiKey(googleProv?.apiKey, 'google');
+    const envDashscopeKey = resolveApiKey(qwenProv?.apiKey, 'dashscope');
+    const envSiliconKey = resolveApiKey(siliconProv?.apiKey, 'siliconflow');
+    const envOpenAiKey = resolveApiKey(openAiProv?.apiKey, 'openai');
 
     if (envGoogleKey) {
       return {
         available: true,
         provider: 'google',
-        model: googleProv?.model || 'imagen-3.0-generate-002',
+        model: googleProv?.model || 'gemini-2.5-flash-image',
         videoModel: '',
         apiKey: envGoogleKey,
         baseUrl: googleProv?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta',
@@ -611,9 +612,31 @@ export class AvatarStudio {
   ): Promise<Buffer> {
     if (ep.provider === 'google' && ep.apiKey) {
       try {
-        const model = ep.model || 'imagen-3.0-generate-002';
-        const url = `${ep.baseUrl}/models/${model}:predict?key=${ep.apiKey}`;
-        const resp = await fetch(url, {
+        const model = ep.model || 'gemini-2.5-flash-image';
+        // 优先调用 Google 官方多模态 generateContent 图像生成通道
+        const genUrl = `${ep.baseUrl}/models/${model}:generateContent?key=${ep.apiKey}`;
+        const genResp = await fetch(genUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': ep.apiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: `Generate a character image: ${prompt}` }] }],
+            generationConfig: {
+              responseModalities: ['IMAGE'],
+            },
+          }),
+        });
+        if (genResp.ok) {
+          const data = (await genResp.json()) as any;
+          const inlineBase64 = data.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData?.data;
+          if (inlineBase64) return Buffer.from(inlineBase64, 'base64');
+        }
+
+        // 备用尝试 predict 端点
+        const predictUrl = `${ep.baseUrl}/models/${model}:predict?key=${ep.apiKey}`;
+        const predictResp = await fetch(predictUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -621,23 +644,19 @@ export class AvatarStudio {
           },
           body: JSON.stringify({
             instances: [{ prompt }],
-            parameters: {
-              sampleCount: 1,
-              aspectRatio: '1:1',
-              outputMimeType: 'image/jpeg',
-            },
+            parameters: { sampleCount: 1, aspectRatio: '1:1', outputMimeType: 'image/jpeg' },
           }),
         });
-        if (resp.ok) {
-          const data = (await resp.json()) as any;
+        if (predictResp.ok) {
+          const data = (await predictResp.json()) as any;
           const b64 = data.predictions?.[0]?.bytesBase64Encoded;
           if (b64) return Buffer.from(b64, 'base64');
-        } else {
-          const errText = await resp.text();
-          console.warn(`[AvatarStudio] Google Imagen 3 接口响应异常 (${resp.status}):`, errText);
         }
+
+        const errText = await genResp.text();
+        console.warn(`[AvatarStudio] Google 图像服务接口返回异常 (${genResp.status}):`, errText.slice(0, 200));
       } catch (e) {
-        console.warn('[AvatarStudio] Google Imagen 3 图像接口调用失败，降级至内置生成器:', e);
+        console.warn('[AvatarStudio] Google 图像接口调用失败，降级至内置生成器:', e);
       }
     }
 

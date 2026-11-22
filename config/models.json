@@ -5,16 +5,14 @@
       "id": "google",
       "name": "Google Gemini & Imagen 3",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
-      "model": "imagen-3.0-generate-002",
+      "model": "gemini-2.5-flash-image",
       "candidateModels": [
-        "imagen-3.0-generate-002",
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash"
+        "gemini-2.5-flash-image",
+        "gemini-3.1-flash-image",
+        "gemini-3-pro-image",
+        "imagen-3.0-generate-002"
       ],
-      "description": "Google 官方 Imagen 3 高清画图引擎与 Gemini 多模态旗舰",
-      "apiKey": "",
-      "isLocalAgent": false
+      "description": "Google 官方 Imagen 3 高清画图引擎与 Gemini 多模态旗舰"
     },
     {
       "id": "deepseek",
@@ -53,9 +51,10 @@
       "candidateModels": [
         "llama3.2",
         "qwen2.5-coder",
-        "deepseek-r1:8b",
-        "mistral"
+        "deepseek-r1:8b"
       ],
+      "isLocalAgent": true,
+      "protocol": "openai-http",
       "description": "无需联网与 API Key，完全在本地硬件私有化运行"
     },
     {
@@ -254,5 +253,5 @@
       "description": "支持任意企业内网代理、中转或私有大模型网关"
     }
   ],
-  "updatedAt": 1795324709814
+  "updatedAt": 1795354212575
 }
