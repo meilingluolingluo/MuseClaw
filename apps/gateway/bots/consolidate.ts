@@ -9,7 +9,7 @@
  * 5. 变更留痕与一键撤销：输出结构化审计报告，支持原子级 Undo 回滚。
  */
 
-export type MemoryCategory = 'profile' | 'preference' | 'people' | 'routine' | 'constraint' | 'general';
+export type MemoryCategory = 'profile' | 'preference' | 'people' | 'routine' | 'constraint' | 'interest' | 'general';
 
 export interface CategoryMeta {
   key: MemoryCategory;
@@ -21,6 +21,7 @@ export interface CategoryMeta {
 export const MEMORY_CATEGORIES: CategoryMeta[] = [
   { key: 'profile', label: '用户画像与身份', header: '## 用户画像与核心身份 (Profile)', description: '核心职业、角色定位、技术背景与专长领域' },
   { key: 'preference', label: '偏好与习惯', header: '## 偏好与工作习惯 (Preferences)', description: '技术偏好、代码规范、沟通风格与工具习惯' },
+  { key: 'interest', label: '兴趣与关注', header: '## 兴趣与关注领域 (Interests)', description: '长期关注的技术方向、行业话题与信息订阅偏好' },
   { key: 'people', label: '关键人物与协作', header: '## 关键人物与协作关系 (People)', description: '核心利益相关方、团队成员与角色分工' },
   { key: 'routine', label: '例行约定与流程', header: '## 例行约定与流程 (Routines)', description: '周期性任务、例会时间点与规范流程' },
   { key: 'constraint', label: '业务约束与红线', header: '## 业务约束与红线 (Constraints)', description: '安全准则、权限边界与绝对禁止操作' },
@@ -30,6 +31,7 @@ export const MEMORY_CATEGORIES: CategoryMeta[] = [
 export const CATEGORY_KEYWORDS: Record<MemoryCategory, string[]> = {
   profile: ['profile', '用户画像', '身份', '画像', '角色', '职业', '工号', '姓名', '员工', '核心身份'],
   preference: ['preference', 'preferences', '偏好', '习惯', '工作习惯', '偏好与习惯', '偏好与工作习惯', '风格', '排版', '格式', '响应'],
+  interest: ['interest', 'interests', '兴趣', '关注', '爱好', '订阅', '热点', '资讯'],
   people: ['people', '关键人物', '协作', '人物', '领导', '汇报', '同事', '团队', '干系人', '协作关系'],
   routine: ['routine', 'routines', '例行', '约定', '流程', '例会', '巡检', '周期', '日常', '定期'],
   constraint: ['constraint', 'constraints', '约束', '红线', '业务约束', '禁止', '权限', '安全', '许可', '破坏性'],
@@ -44,6 +46,9 @@ export interface MemoryItem {
   protected: boolean;
   rawLine: string;
   prefix: string; // 如 "- ", "* ", "1. "
+  until?: string; // 过期日期 YYYY-MM-DD
+  origin?: 'owner' | 'agent' | 'feedback';
+  weight?: number; // 权重（默认 1）
 }
 
 export interface MemoryStats {
@@ -111,6 +116,7 @@ export function detectCategoryFromHeader(headerLine: string): MemoryCategory {
   const lower = headerLine.toLowerCase();
   if (/画像|身份|profile|identity|who/i.test(lower)) return 'profile';
   if (/偏好|习惯|preference|style|habit/i.test(lower)) return 'preference';
+  if (/兴趣|关注|interest/i.test(lower)) return 'interest';
   if (/人物|成员|协作|people|team|stakeholder|colleague/i.test(lower)) return 'people';
   if (/例行|约定|流程|routine|schedule|workflow/i.test(lower)) return 'routine';
   if (/约束|规则|红线|安全|constraint|policy|rule|boundary/i.test(lower)) return 'constraint';
@@ -157,6 +163,33 @@ export function parseMemoryMarkdown(markdown: string): { items: MemoryItem[]; li
       text = text.replace(/\[(user|用户声明|用户)\]/gi, '').trim();
     }
 
+    // 解析时效截止日期 [until:YYYY-MM-DD]
+    let until: string | undefined;
+    const untilMatch = text.match(/\[until:(\d{4}-\d{2}-\d{2})\]/i);
+    if (untilMatch) {
+      until = untilMatch[1];
+      text = text.replace(/\[until:\d{4}-\d{2}-\d{2}\]/gi, '').trim();
+    }
+
+    // 解析来源标记 [origin:owner|agent|feedback]
+    let origin: 'owner' | 'agent' | 'feedback' | undefined = source === 'user' ? 'owner' : undefined;
+    const originMatch = text.match(/\[origin:(owner|agent|feedback)\]/i);
+    if (originMatch) {
+      origin = originMatch[1].toLowerCase() as 'owner' | 'agent' | 'feedback';
+      text = text.replace(/\[origin:(owner|agent|feedback)\]/gi, '').trim();
+    }
+
+    // 解析权重标记 [w:N]
+    let weight = 1;
+    const weightMatch = text.match(/\[w:(\d+(?:\.\d+)?)\]/i);
+    if (weightMatch) {
+      const parsedW = Number(weightMatch[1]);
+      if (Number.isFinite(parsedW) && parsedW > 0) {
+        weight = parsedW;
+      }
+      text = text.replace(/\[w:\d+(?:\.\d+)?\]/gi, '').trim();
+    }
+
     const id = `m_${itemIndex++}`;
     items.push({
       id,
@@ -165,7 +198,10 @@ export function parseMemoryMarkdown(markdown: string): { items: MemoryItem[]; li
       category: currentCategory,
       protected: source === 'user',
       rawLine: line,
-      prefix
+      prefix,
+      ...(until ? { until } : {}),
+      ...(origin ? { origin } : {}),
+      weight
     });
   }
 
@@ -356,6 +392,35 @@ export function searchMemoryItems(
   return results.sort((a, b) => b.score - a.score);
 }
 
+export interface InsertItemOptions {
+  until?: string;
+  origin?: 'owner' | 'agent' | 'feedback';
+  weight?: number;
+}
+
+/**
+ * 组装单条记忆的 Markdown 行文本
+ */
+export function formatMemoryItemLine(
+  prefix: string,
+  content: string,
+  isUser: boolean,
+  options?: InsertItemOptions
+): string {
+  const tags: string[] = [];
+  if (isUser) tags.push('[user]');
+  if (options?.until && /^\d{4}-\d{2}-\d{2}$/.test(options.until)) {
+    tags.push(`[until:${options.until}]`);
+  }
+  if (options?.origin && !(isUser && options.origin === 'owner')) {
+    tags.push(`[origin:${options.origin}]`);
+  }
+  if (options?.weight !== undefined && options.weight !== 1 && Number.isFinite(options.weight) && options.weight > 0) {
+    tags.push(`[w:${Math.round(options.weight * 100) / 100}]`);
+  }
+  return `${prefix}${content.trim()}${tags.length > 0 ? ` ${tags.join(' ')}` : ''}`;
+}
+
 /**
  * 向 Markdown 文本中追加或插入单条记忆事实
  */
@@ -363,11 +428,14 @@ export function insertItemToMarkdown(
   markdown: string,
   content: string,
   category: MemoryCategory = 'general',
-  isUser = false
+  isUser = false,
+  options?: InsertItemOptions
 ): string {
   const trimmedContent = content.trim();
-  const lineToAdd = `- ${trimmedContent}${isUser ? ' [user]' : ''}`;
-  const targetCategoryMeta = MEMORY_CATEGORIES.find((c) => c.key === category) || MEMORY_CATEGORIES[5];
+  const lineToAdd = formatMemoryItemLine('- ', trimmedContent, isUser, options);
+  const targetCategoryMeta =
+    MEMORY_CATEGORIES.find((c) => c.key === category) ||
+    MEMORY_CATEGORIES.find((c) => c.key === 'general')!;
 
   const lines = (markdown || '').split('\n');
   let headerIndex = -1;
@@ -411,7 +479,8 @@ export function updateItemInMarkdown(
   markdown: string,
   itemId: string,
   newContent: string,
-  newCategory?: MemoryCategory
+  newCategory?: MemoryCategory,
+  options?: InsertItemOptions
 ): { newMarkdown: string; updatedItem?: MemoryItem } {
   const { items, lines } = parseMemoryMarkdown(markdown);
   const target = items.find((i) => i.id === itemId);
@@ -421,25 +490,30 @@ export function updateItemInMarkdown(
 
   const categoryChanged = newCategory && newCategory !== target.category;
   const isUser = target.source === 'user';
+  const mergedOptions: InsertItemOptions = {
+    until: options?.until !== undefined ? options.until : target.until,
+    origin: options?.origin !== undefined ? options.origin : target.origin,
+    weight: options?.weight !== undefined ? options.weight : target.weight
+  };
 
   if (!categoryChanged) {
     // 同分类下就地替换内容
-    const updatedLine = `${target.prefix}${newContent.trim()}${isUser ? ' [user]' : ''}`;
+    const updatedLine = formatMemoryItemLine(target.prefix, newContent.trim(), isUser, mergedOptions);
     const newLines = lines.map((l) => (l.trim() === target.rawLine.trim() ? updatedLine : l));
     return {
       newMarkdown: newLines.join('\n'),
-      updatedItem: { ...target, content: newContent.trim(), rawLine: updatedLine }
+      updatedItem: { ...target, content: newContent.trim(), rawLine: updatedLine, ...mergedOptions }
     };
   }
 
   // 跨分类移动：先移除原位置，再插入目标分类
   const filteredLines = lines.filter((l) => l.trim() !== target.rawLine.trim());
   const removedMarkdown = filteredLines.join('\n');
-  const finalMarkdown = insertItemToMarkdown(removedMarkdown, newContent, newCategory, isUser);
+  const finalMarkdown = insertItemToMarkdown(removedMarkdown, newContent, newCategory, isUser, mergedOptions);
 
   return {
     newMarkdown: finalMarkdown,
-    updatedItem: { ...target, content: newContent.trim(), category: newCategory }
+    updatedItem: { ...target, content: newContent.trim(), category: newCategory, ...mergedOptions }
   };
 }
 

@@ -17,9 +17,32 @@ export interface SkillsProvider {
 
 export interface MemoryProvider {
   getMemory?: (botId: string, userId?: string) => string;
-  addItem?: (botId: string, content: string, category?: string, isUser?: boolean, userId?: string) => { success: boolean; item?: any; warning?: string; error?: string };
+  addItem?: (
+    botId: string,
+    content: string,
+    category?: string,
+    isUser?: boolean,
+    userId?: string,
+    options?: { until?: string; origin?: 'owner' | 'agent' | 'feedback'; weight?: number }
+  ) => { success: boolean; item?: any; warning?: string; error?: string };
   search?: (botId: string, query: string, userId?: string, options?: { category?: string; userId?: string }) => Array<{ item: any; score: number }>;
   deleteItem?: (botId: string, itemId: string, userId?: string) => { success: boolean; error?: string };
+  listTopics?: (botId: string, userId?: string) => Array<{ slug: string; name: string; description: string; aliases: string[]; entryCount: number }>;
+  getTopic?: (botId: string, slug: string, userId?: string) => { slug: string; name: string; description: string; aliases: string[]; content: string; items: any[] } | null;
+  upsertTopic?: (
+    botId: string,
+    topic: string,
+    entry: string,
+    meta?: { description?: string; aliases?: string[]; until?: string; origin?: 'owner' | 'agent' | 'feedback' },
+    userId?: string
+  ) => { success: boolean; topic?: any; error?: string };
+  createIntent?: (
+    botId: string,
+    input: { description: string; triggers: string[]; cooldownSeconds?: number; maxFires?: number },
+    userId?: string
+  ) => { success: boolean; intent?: any; error?: string };
+  listIntents?: (botId: string, userId?: string) => Array<any>;
+  cancelIntent?: (botId: string, intentId: string, userId?: string) => { success: boolean; error?: string };
 }
 
 export interface GoalProvider {
@@ -199,24 +222,32 @@ export function createDefaultTools(options?: {
         }
       }
     },
-    // 长期受控记忆检索与事实持久化沉淀
+    // 长期受控记忆检索、主题知识按需展开与事件意图管理
     {
       name: 'memory',
-      description: '数字员工受控长期记忆检索与事实沉淀工具。action="recall" 检索已有关键事实、偏好习惯与业务准则；action="remember" 沉淀新发现的重要规则、环境信息或协作偏好；action="forget" 遗忘特定过时条目。',
+      description: '数字员工分层认知记忆与前瞻事件管理工具。action="recall" 检索记忆；action="remember" 沉淀事实/偏好/兴趣（支持 until 过期日期或 topic 主题归档）；action="forget" 遗忘条目；action="list_topics" 列出主题目录；action="open_topic" 按需展开指定主题细节；action="add_intent" 登记“当提到某事件时提醒我”的触发意图；action="list_intents" / "cancel_intent" 查看或取消事件意图。',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['recall', 'remember', 'forget'], description: '操作类型' },
-          content: { type: 'string', description: '要沉淀的事实文本（remember 时必填）' },
+          action: {
+            type: 'string',
+            enum: ['recall', 'remember', 'forget', 'list_topics', 'open_topic', 'add_intent', 'list_intents', 'cancel_intent'],
+            description: '操作类型'
+          },
+          content: { type: 'string', description: '要沉淀的事实文本或事件意图描述（remember / add_intent 时必填）' },
           category: {
             type: 'string',
-            enum: ['profile', 'preference', 'people', 'routine', 'constraint', 'general'],
-            description: '记忆分类：profile(身份画像), preference(偏好习惯), people(关键人物), routine(例行约定), constraint(业务红线), general(通用知识)'
+            enum: ['profile', 'preference', 'interest', 'people', 'routine', 'constraint', 'general'],
+            description: '记忆分类：profile(身份画像), preference(偏好习惯), interest(兴趣与关注), people(关键人物), routine(例行约定), constraint(业务红线), general(通用知识)'
           },
           query: {
             type: 'string',
-            description: '检索查询词或待遗忘的条目 ID/关键词。recall 时选填（留空或传 "*" / "all" / "全部" 可检索当前员工名下的全部受控记忆条目；可输入分类、偏好、身份、流程等关键词检索）'
+            description: '检索查询词或待遗忘的条目 ID/关键词。recall 时选填（留空或传 "*" / "all" / "全部" 可检索当前员工名下的全部受控记忆条目）'
           },
+          topic: { type: 'string', description: '主题名称或 slug（remember 按主题归档，或 open_topic 按需展开主题时使用）' },
+          until: { type: 'string', description: '可选时效截止日期 YYYY-MM-DD（过期后自动清理，适用于短期安排）' },
+          triggers: { type: 'array', items: { type: 'string' }, description: 'add_intent 时的触发关键词列表' },
+          intent_id: { type: 'string', description: 'cancel_intent 时指定的意图 ID' },
           botId: { type: 'string', description: '目标员工标识，默认为当前员工' }
         },
         required: ['action']
@@ -253,6 +284,7 @@ export function createDefaultTools(options?: {
                   category: r.item.category,
                   source: r.item.source,
                   content: r.item.content,
+                  until: r.item.until,
                   protected: r.item.protected,
                   score: Math.round(r.score * 100) / 100
                 }))
@@ -264,16 +296,34 @@ export function createDefaultTools(options?: {
           if (action === 'remember') {
             const text = String(args.content || '').trim();
             if (!text) return { error: '沉淀记忆事实时 content 不能为空' };
+            const until = typeof args.until === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.until.trim()) ? args.until.trim() : undefined;
+            const topic = typeof args.topic === 'string' ? args.topic.trim() : '';
+            if (topic && memoryProvider.upsertTopic) {
+              const res = memoryProvider.upsertTopic(targetBot, topic, text, { until, origin: 'owner' }, targetUser);
+              return {
+                success: res.success,
+                botId: targetBot,
+                userId: targetUser,
+                topic: res.topic?.slug || topic,
+                recorded: text,
+                until,
+                error: res.error
+              };
+            }
             const cat = (args.category || 'general') as any;
             const isUser = typeof args.isUser === 'boolean' ? args.isUser : true;
             if (memoryProvider.addItem) {
-              const res = memoryProvider.addItem(targetBot, text, cat, isUser, targetUser);
+              const res = memoryProvider.addItem(targetBot, text, cat, isUser, targetUser, {
+                until,
+                origin: isUser ? 'owner' : 'agent'
+              });
               return {
                 success: res.success,
                 botId: targetBot,
                 userId: targetUser,
                 recorded: text,
                 category: cat,
+                until,
                 item: res.item,
                 warning: res.warning,
                 error: res.error
@@ -296,6 +346,55 @@ export function createDefaultTools(options?: {
               };
             }
             return { error: '当前记忆管理器不支持 deleteItem 方法' };
+          }
+
+          if (action === 'list_topics') {
+            if (!memoryProvider.listTopics) {
+              return { error: '当前记忆管理器未启用主题知识库' };
+            }
+            const topics = memoryProvider.listTopics(targetBot, targetUser);
+            return { success: true, count: topics.length, topics };
+          }
+
+          if (action === 'open_topic') {
+            const topicName = String(args.topic || args.query || '').trim();
+            if (!topicName) return { error: 'open_topic 需要提供 topic 参数' };
+            if (!memoryProvider.getTopic) {
+              return { error: '当前记忆管理器未启用主题知识库' };
+            }
+            const detail = memoryProvider.getTopic(targetBot, topicName, targetUser);
+            if (!detail) {
+              const available = (memoryProvider.listTopics?.(targetBot, targetUser) || []).map((t) => t.slug);
+              return { error: `未找到主题 "${topicName}"`, availableTopics: available };
+            }
+            return { success: true, topic: detail };
+          }
+
+          if (action === 'add_intent') {
+            if (!memoryProvider.createIntent) {
+              return { error: '当前记忆管理器未启用前瞻事件意图' };
+            }
+            const description = String(args.content || '').trim();
+            const triggers = Array.isArray(args.triggers) ? args.triggers.map(String) : [];
+            const res = memoryProvider.createIntent(targetBot, { description, triggers }, targetUser);
+            return { success: res.success, intent: res.intent, error: res.error };
+          }
+
+          if (action === 'list_intents') {
+            if (!memoryProvider.listIntents) {
+              return { error: '当前记忆管理器未启用前瞻事件意图' };
+            }
+            const intents = memoryProvider.listIntents(targetBot, targetUser);
+            return { success: true, count: intents.length, intents };
+          }
+
+          if (action === 'cancel_intent') {
+            if (!memoryProvider.cancelIntent) {
+              return { error: '当前记忆管理器未启用前瞻事件意图' };
+            }
+            const intentId = String(args.intent_id || args.query || '').trim();
+            if (!intentId) return { error: 'cancel_intent 需要提供 intent_id' };
+            return memoryProvider.cancelIntent(targetBot, intentId, targetUser);
           }
 
           return { error: `未知操作 action: ${action}` };

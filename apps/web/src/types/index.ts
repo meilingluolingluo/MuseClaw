@@ -213,7 +213,7 @@ export interface Routine {
   updatedAt?: number;
 }
 
-export type MemoryCategory = 'profile' | 'preference' | 'people' | 'routine' | 'constraint' | 'general';
+export type MemoryCategory = 'profile' | 'preference' | 'people' | 'routine' | 'constraint' | 'interest' | 'general';
 
 export interface MemoryItem {
   id: string;
@@ -223,6 +223,46 @@ export interface MemoryItem {
   protected?: boolean;
   rawLine?: string;
   section?: string;
+  until?: string;
+  origin?: 'owner' | 'agent' | 'feedback';
+  weight?: number;
+}
+
+export interface MemoryTopicSummary {
+  slug: string;
+  name: string;
+  description: string;
+  aliases: string[];
+  readOnly: boolean;
+  entryCount: number;
+  updatedAt: number;
+}
+
+export interface MemoryTopicDetail extends MemoryTopicSummary {
+  content: string;
+  items: MemoryItem[];
+}
+
+export interface StandingIntent {
+  id: string;
+  description: string;
+  triggers: string[];
+  cooldownSeconds: number;
+  maxFires: number;
+  fireCount: number;
+  lastFiredAt?: number;
+  expiresAt: number;
+  status: 'armed' | 'done' | 'expired' | 'cancelled';
+  createdAt: number;
+}
+
+export interface ReflectionIdea {
+  id: string;
+  text: string;
+  fromSessions: number[];
+  status: 'pending' | 'accepted' | 'dismissed';
+  createdAt: number;
+  updatedAt?: number;
 }
 
 export interface MemoryStats {
@@ -343,6 +383,21 @@ export interface FeedPost {
   routineId?: string;
   routineName?: string;
   reactions?: Record<string, number>;
+  sourceUrl?: string;
+  sourceName?: string;
+  imageUrl?: string;
+  liked?: boolean;
+  dismissed?: boolean;
+  kind?: 'intel' | 'insight' | 'brief';
+}
+
+export interface ProactiveStatus {
+  enabled: boolean;
+  quietStart: string;
+  quietEnd: string;
+  lastActiveAt: number;
+  lastBriefAt: number;
+  lastBriefDay: string;
 }
 
 export interface FeedActivity {

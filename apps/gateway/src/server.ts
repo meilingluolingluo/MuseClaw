@@ -23,7 +23,16 @@ import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
 import { createFeishuChannel } from '../channels/feishu/index.ts';
 import { ProactiveManager } from '../proactive/index.ts';
-import { BotRegistry, SessionStore, SessionRouter, BotMemoryManager, FeedStore } from '../bots/index.ts';
+import {
+  BotRegistry,
+  SessionStore,
+  SessionRouter,
+  BotMemoryManager,
+  MemoryPipeline,
+  FeedStore,
+  ProactiveBriefEngine,
+  type FeedSearchHit
+} from '../bots/index.ts';
 import { GoalStore, GoalEngine } from '../goals/index.ts';
 import { McpClientManager } from '../mcp/client.ts';
 import { ConnectorManager } from './connectors.ts';
@@ -89,7 +98,39 @@ process.on('unhandledRejection', (reason) => {
 
 const sentinel = new SentinelPolicyManager();
 const botMemory = new BotMemoryManager();
+const memoryPipeline = new MemoryPipeline(botMemory);
+const proactiveBrief = new ProactiveBriefEngine();
 const goalStore = new GoalStore();
+const reflectionTurnCounter = new Map<string, number>();
+
+async function searchWebForFeed(query: string, count = 4): Promise<FeedSearchHit[]> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey || !query.trim()) return [];
+  try {
+    const res = await fetch('https://api.deepseek.com/v1/tools/search', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey.replace(/[^\x00-\x7F]/g, '').trim()}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: query.trim(), count, need_content: false })
+    });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    const list = Array.isArray(data?.results) ? data.results : [];
+    return list
+      .map((r: any) => ({
+        title: String(r?.title || '').trim(),
+        url: String(r?.url || '').trim(),
+        snippet: String(r?.snippet || r?.content || '').trim().slice(0, 300),
+        source: String(r?.site || r?.source || '').trim() || undefined,
+        image: typeof r?.image === 'string' ? r.image : undefined
+      }))
+      .filter((r: FeedSearchHit) => r.title && /^https?:\/\//i.test(r.url));
+  } catch {
+    return [];
+  }
+}
 
 function findWorkspaceRoot(startDir: string = process.cwd()): string {
   let cur = path.resolve(startDir);
@@ -108,10 +149,17 @@ const baseTools = createDefaultTools({
   skillsProvider: globalSkillStore,
   memoryProvider: {
     getMemory: (botId, userId) => botMemory.getMemory(botId, userId || 'user_web'),
-    addItem: (botId, content, category, isUser, userId) =>
-      botMemory.addMemoryItem(botId, content, category as any, isUser ?? true, userId || 'user_web'),
+    addItem: (botId, content, category, isUser, userId, options) =>
+      botMemory.addMemoryItem(botId, content, category as any, isUser ?? true, userId || 'user_web', options),
     search: (botId, query, userId, options) => botMemory.searchMemory(botId, query, userId || 'user_web', options),
-    deleteItem: (botId, itemId, userId) => botMemory.deleteMemoryItem(botId, itemId, userId || 'user_web', false)
+    deleteItem: (botId, itemId, userId) => botMemory.deleteMemoryItem(botId, itemId, userId || 'user_web', false),
+    listTopics: (botId, userId) => botMemory.listTopics(botId, userId || 'user_web'),
+    getTopic: (botId, slug, userId) => botMemory.getTopic(botId, slug, userId || 'user_web'),
+    upsertTopic: (botId, topic, entry, meta, userId) =>
+      botMemory.upsertTopicEntry(botId, topic, entry, meta, userId || 'user_web'),
+    createIntent: (botId, input, userId) => botMemory.createIntent(botId, input, userId || 'user_web'),
+    listIntents: (botId, userId) => botMemory.listIntents(botId, userId || 'user_web'),
+    cancelIntent: (botId, intentId, userId) => botMemory.cancelIntent(botId, intentId, userId || 'user_web')
   },
   goalProvider: {
     create: (data) => goalStore.create(data),
@@ -1021,6 +1069,114 @@ export function startGatewayServer(defaultPort = 8799) {
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(session));
+    }
+
+    // 完整分层记忆视图 (GET /api/bots/:id/memory/full)
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/full$/)) {
+      const id = url.pathname.split('/')[3] || 'muse';
+      const targetUserId = currentUser?.username || 'user_web';
+      botMemory.pruneExpiredMemories(id, targetUserId);
+      const data = botMemory.getMemoryData(id, targetUserId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        bot_id: id,
+        userId: targetUserId,
+        memory: data.content,
+        content: data.content,
+        items: data.items,
+        stats: data.stats,
+        reports: data.reports,
+        userProfile: {
+          content: botMemory.getUserProfile(targetUserId),
+          items: botMemory.getUserProfileItems(targetUserId)
+        },
+        topics: botMemory.listTopics(id, targetUserId),
+        intents: botMemory.listIntents(id, targetUserId),
+        ideas: memoryPipeline.getReflectionIdeas(id, targetUserId)
+      }));
+    }
+
+    // 获取单个主题记忆详情 (GET /api/bots/:id/memory/topics/:slug)
+    if (req.method === 'GET' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/topics\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const id = parts[3] || 'muse';
+      const slug = decodeURIComponent(parts[6] || '');
+      const targetUserId = currentUser?.username || 'user_web';
+      const detail = botMemory.getTopic(id, slug, targetUserId);
+      res.writeHead(detail ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(detail || { error: 'Topic not found' }));
+    }
+
+    // 跨会话反思 (POST /api/bots/:id/memory/reflect)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/reflect$/)) {
+      const id = url.pathname.split('/')[3] || 'muse';
+      const targetUserId = currentUser?.username || 'user_web';
+      const bot = botRegistry.get(id);
+      const caller = globalModelStore.getActiveCaller({ userId: targetUserId });
+      const sessions = sessionStore.list(id, targetUserId, false);
+      const result = await memoryPipeline.reflectAcrossSessions({
+        botId: id,
+        botName: bot?.name || id,
+        userId: targetUserId,
+        sessions,
+        caller
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        success: true,
+        bot_id: id,
+        userId: targetUserId,
+        ...result,
+        ideas: memoryPipeline.getReflectionIdeas(id, targetUserId)
+      }));
+    }
+
+    // 前瞻性事件意图管理 (POST / DELETE /api/bots/:id/memory/intents)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/intents$/)) {
+      const id = url.pathname.split('/')[3] || 'muse';
+      const targetUserId = currentUser?.username || 'user_web';
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = safeJsonParse(body, {});
+      const result = botMemory.createIntent(
+        id,
+        {
+          description: String(parsed.description || ''),
+          triggers: Array.isArray(parsed.triggers)
+            ? parsed.triggers
+            : String(parsed.triggers || '').split(/[,，\s]+/).filter(Boolean),
+          cooldownSeconds: typeof parsed.cooldownSeconds === 'number' ? parsed.cooldownSeconds : undefined,
+          maxFires: typeof parsed.maxFires === 'number' ? parsed.maxFires : undefined
+        },
+        targetUserId
+      );
+      res.writeHead(result.success ? 201 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ...result, intents: botMemory.listIntents(id, targetUserId) }));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/intents\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const id = parts[3] || 'muse';
+      const intentId = decodeURIComponent(parts[6] || '');
+      const targetUserId = currentUser?.username || 'user_web';
+      const result = botMemory.cancelIntent(id, intentId, targetUserId);
+      res.writeHead(result.success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ...result, intents: botMemory.listIntents(id, targetUserId) }));
+    }
+
+    // 反思建议状态更新 (POST /api/bots/:id/memory/ideas/:ideaId)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/bots\/[^/]+\/memory\/ideas\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const id = parts[3] || 'muse';
+      const ideaId = decodeURIComponent(parts[6] || '');
+      const targetUserId = currentUser?.username || 'user_web';
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = safeJsonParse(body, {});
+      const status = parsed.status === 'accepted' ? 'accepted' : 'dismissed';
+      const result = memoryPipeline.updateReflectionIdeaStatus(id, targetUserId, ideaId, status);
+      res.writeHead(result.success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
     }
 
     // 获取指定 Bot 长期记忆、结构化事实与配额健康指标
@@ -2639,6 +2795,90 @@ fi
       return res.end(JSON.stringify(data));
     }
 
+    // 动态交互反馈闭环：点赞 / 不感兴趣 / 讨论 (POST /api/feed/posts/:id/like|dismiss|discuss)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/feed\/posts\/[^/]+\/(like|dismiss|discuss)$/)) {
+      const parts = url.pathname.split('/');
+      const postId = decodeURIComponent(parts[4] || '');
+      const action = parts[5] as 'like' | 'dismiss' | 'discuss';
+      const userId = currentUser?.username || 'user_web';
+
+      if (action === 'like') {
+        const resLike = feedStore.toggleLikePost(userId, postId);
+        if (resLike.success && resLike.post?.liked) {
+          memoryPipeline.recordFeedFeedback(userId, 'muse', {
+            action: 'like',
+            title: resLike.post.title,
+            tags: resLike.post.tags,
+            area: resLike.post.area
+          });
+        }
+        res.writeHead(resLike.success ? 200 : 404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(resLike));
+      }
+
+      if (action === 'dismiss') {
+        const resDismiss = feedStore.dismissPost(userId, postId);
+        if (resDismiss.success && resDismiss.post) {
+          memoryPipeline.recordFeedFeedback(userId, 'muse', {
+            action: 'dismiss',
+            title: resDismiss.post.title,
+            tags: resDismiss.post.tags,
+            area: resDismiss.post.area
+          });
+        }
+        res.writeHead(resDismiss.success ? 200 : 404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(resDismiss));
+      }
+
+      const post = feedStore.getFeedPosts(userId).posts.find((p) => p.id === postId);
+      if (post) {
+        memoryPipeline.recordFeedFeedback(userId, 'muse', {
+          action: 'discuss',
+          title: post.title,
+          tags: post.tags,
+          area: post.area
+        });
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, post }));
+    }
+
+    // 主动聊天与简报设置与触发 (/api/proactive/status|settings|check)
+    if (req.method === 'GET' && url.pathname === '/api/proactive/status') {
+      const userId = currentUser?.username || 'user_web';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(proactiveBrief.getSettings(userId)));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/proactive/settings') {
+      const userId = currentUser?.username || 'user_web';
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = safeJsonParse(body, {});
+      const settings = proactiveBrief.updateSettings(userId, parsed);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(settings));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/proactive/check') {
+      const userId = currentUser?.username || 'user_web';
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = safeJsonParse(body, {});
+      const result = proactiveBrief.evaluateAndEmitBrief({
+        userId,
+        botId: parsed.botId || 'muse',
+        force: parsed.force !== false,
+        botMemory,
+        memoryPipeline,
+        feedStore,
+        goalStore,
+        sessionStore
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
     // 立即撰写并生成动态 (POST /api/feed 或 POST /api/feed/posts/refresh)
     if (req.method === 'POST' && (url.pathname === '/api/feed' || url.pathname === '/api/feed/posts/refresh')) {
       const userId = currentUser?.username || 'user_web';
@@ -2646,6 +2886,13 @@ fi
 
       const contextLines: string[] = [];
       contextLines.push(`- 当前用户名: ${currentUser?.displayName || currentUser?.username || '员工'}`);
+
+      const userProfileItems = botMemory.getUserProfileItems(userId);
+      if (userProfileItems.length > 0) {
+        contextLines.push(
+          `- 共享用户画像与偏好:\n${userProfileItems.slice(0, 12).map((i) => `  * ${i.content}`).join('\n')}`
+        );
+      }
 
       const memory = botMemory.getMemory('muse', userId);
       if (memory) {
@@ -2683,7 +2930,14 @@ fi
 
       contextLines.push(`- 当前系统时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
 
-      const result = await feedStore.writeFeedPosts(userId, caller, contextLines, 3);
+      const interests = botMemory.getUserInterests(userId, 'muse');
+      const feedback = memoryPipeline.getFeedbackProfile(userId);
+      const result = await feedStore.writeFeedPosts(userId, caller, contextLines, 3, {
+        searchWeb: searchWebForFeed,
+        interests,
+        likedTopics: feedback.likedTopics,
+        dismissedTopics: feedback.dismissedTopics
+      });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(result));
     }
@@ -2852,11 +3106,15 @@ fi
         return;
       }
 
-      // 启动 Agent Loop，注入该 Bot 的 Profile 及专属静态记忆 (按当前用户隔离)
+      // 记录用户活跃在场时间（用于主动聊天分寸感门禁）
+      proactiveBrief.touchPresence(userId);
+
+      // 启动 Agent Loop，注入冻结记忆快照（L0 用户档案 + Bot 核心记忆 + L1 主题索引）并匹配前瞻事件意图
       const botWithMemory: AgentProfile = {
         ...bot,
-        memory: botMemory.getMemory(bot.id, userId)
+        memory: botMemory.getFrozenMemoryContext(session.id, bot.id, userId)
       };
+      const triggeredIntents = botMemory.matchAndFireIntents(bot.id, text, userId);
 
       const userScopedCaller: LLMCaller = async (messages, tools, onChunk) => {
         const caller = globalModelStore.getActiveCaller({ userId });
@@ -2930,7 +3188,8 @@ fi
           profile: botWithMemory,
           maxSteps: 15,
           skills: getBotSkills(bot.id),
-          historyMessages
+          historyMessages,
+          triggeredIntents
         }
       );
 
@@ -3067,6 +3326,49 @@ fi
             sessionId: session.id,
             sessionTitle: session.title
           });
+
+          // 异步后台运行认知记忆提取与周期性跨会话反思（不阻塞流式输出响应）
+          const turnIsTainted = sentinel.isSessionTainted(session.id);
+          void (async () => {
+            try {
+              const capRes = await memoryPipeline.captureTurnMemory({
+                botId: bot.id,
+                botName: bot.name,
+                userId,
+                sessionId: session.id,
+                userText: text,
+                assistantText: fullAssistantText,
+                caller: userScopedCaller,
+                isTainted: turnIsTainted,
+                sessionKind: 'interactive',
+                isHidden: isHiddenTurn
+              });
+              if (capRes.capturedCount > 0) {
+                console.log(`[MemoryPipeline] 会话 ${session.id} 静默沉淀 ${capRes.capturedCount} 条记忆`);
+              }
+
+              const counterKey = `${userId}::${bot.id}`;
+              const nextTurns = (reflectionTurnCounter.get(counterKey) || 0) + 1;
+              reflectionTurnCounter.set(counterKey, nextTurns);
+              if (nextTurns % 5 === 0) {
+                const recentSessions = sessionStore.list(bot.id, userId, false);
+                const refRes = await memoryPipeline.reflectAcrossSessions({
+                  botId: bot.id,
+                  botName: bot.name,
+                  userId,
+                  sessions: recentSessions,
+                  caller: userScopedCaller
+                });
+                if (!refRes.skipped) {
+                  console.log(
+                    `[MemoryPipeline] 自动跨会话反思完成 (bot=${bot.id}): +${refRes.learnedCount} 模式, ~${refRes.outdatedCount} 纠偏, +${refRes.ideasCount} 建议`
+                  );
+                }
+              }
+            } catch (memErr: any) {
+              console.warn(`[MemoryPipeline] 异步记忆处理异常: ${memErr?.message || memErr}`);
+            }
+          })();
         } else {
           console.log(`[Chat] 客户端已断开，本轮终止: session=${session.id}`);
         }
@@ -3286,6 +3588,52 @@ fi
 
     // 启动长周期目标 Check-in 自驱推进调度器 (每 60 秒心跳)
     goalEngine.startScheduler(60000);
+
+    // 启动每日定时动态与信号驱动主动简报调度器 (每 10 分钟检查一次)
+    let cognitiveTickRunning = false;
+    const cognitiveTimer = setInterval(async () => {
+      if (cognitiveTickRunning) return;
+      cognitiveTickRunning = true;
+      try {
+        const usersRoot = path.resolve(__dirname, '../data/users');
+        if (!fs.existsSync(usersRoot)) return;
+        const userDirs = fs.readdirSync(usersRoot, { withFileTypes: true }).filter((d) => d.isDirectory());
+        for (const d of userDirs) {
+          const uid = d.name;
+          if (feedStore.isDailyFeedDue(uid)) {
+            const caller = globalModelStore.getActiveCaller({ userId: uid });
+            const interests = botMemory.getUserInterests(uid, 'muse');
+            const feedback = memoryPipeline.getFeedbackProfile(uid);
+            const ctx: string[] = [];
+            const activeGoals = goalStore.list('active').filter((g) => !g.userId || g.userId === uid);
+            for (const g of activeGoals.slice(0, 4)) {
+              ctx.push(`- 活跃目标: ${g.title} (${g.progress}%)`);
+            }
+            await feedStore.writeFeedPosts(uid, caller, ctx, 3, {
+              searchWeb: searchWebForFeed,
+              interests,
+              likedTopics: feedback.likedTopics,
+              dismissedTopics: feedback.dismissedTopics
+            });
+          }
+
+          proactiveBrief.evaluateAndEmitBrief({
+            userId: uid,
+            botId: 'muse',
+            botMemory,
+            memoryPipeline,
+            feedStore,
+            goalStore,
+            sessionStore
+          });
+        }
+      } catch (tickErr: any) {
+        console.warn(`[CognitiveScheduler] 周期调度异常: ${tickErr?.message || tickErr}`);
+      } finally {
+        cognitiveTickRunning = false;
+      }
+    }, 10 * 60_000);
+    cognitiveTimer.unref?.();
 
     // 尝试启动飞书 WebSocket 长连接 (若已在后台开启长连接订阅)
     if (feishuAppId && feishuAppSecret) {

@@ -8,6 +8,11 @@ import type {
   MemoryReport,
   MemoryCategory,
   MemoryStats,
+  MemoryTopicSummary,
+  MemoryTopicDetail,
+  StandingIntent,
+  ReflectionIdea,
+  ProactiveStatus,
   Artifact,
   AuditLog,
   Grant,
@@ -218,6 +223,45 @@ export const api = {
       stats?: MemoryStats;
       reports: MemoryReport[];
     }>(`/api/memory/${botId}`),
+  getFullMemory: (botId: string) =>
+    request<{
+      content: string;
+      items: MemoryItem[];
+      stats?: MemoryStats;
+      reports: MemoryReport[];
+      userProfile?: { content: string; items: MemoryItem[] };
+      topics?: MemoryTopicSummary[];
+      intents?: StandingIntent[];
+      ideas?: ReflectionIdea[];
+    }>(`/api/bots/${encodeURIComponent(botId)}/memory/full`),
+  getMemoryTopic: (botId: string, slug: string) =>
+    request<MemoryTopicDetail>(`/api/bots/${encodeURIComponent(botId)}/memory/topics/${encodeURIComponent(slug)}`),
+  triggerReflect: (botId: string) =>
+    request<{
+      success: boolean;
+      skipped?: boolean;
+      reason?: string;
+      prunedCount: number;
+      learnedCount: number;
+      outdatedCount: number;
+      ideasCount: number;
+      ideas: ReflectionIdea[];
+    }>(`/api/bots/${encodeURIComponent(botId)}/memory/reflect`, { method: 'POST', body: '{}' }),
+  createIntent: (botId: string, data: { description: string; triggers: string[]; cooldownSeconds?: number; maxFires?: number }) =>
+    request<{ success: boolean; intent?: StandingIntent; intents: StandingIntent[]; error?: string }>(
+      `/api/bots/${encodeURIComponent(botId)}/memory/intents`,
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+  cancelIntent: (botId: string, intentId: string) =>
+    request<{ success: boolean; intents: StandingIntent[]; error?: string }>(
+      `/api/bots/${encodeURIComponent(botId)}/memory/intents/${encodeURIComponent(intentId)}`,
+      { method: 'DELETE' }
+    ),
+  updateIdeaStatus: (botId: string, ideaId: string, status: 'accepted' | 'dismissed') =>
+    request<{ success: boolean; ideas: ReflectionIdea[] }>(
+      `/api/bots/${encodeURIComponent(botId)}/memory/ideas/${encodeURIComponent(ideaId)}`,
+      { method: 'POST', body: JSON.stringify({ status }) }
+    ),
   updateMemory: (botId: string, content: string) =>
     request<{ success: boolean; content: string; items: MemoryItem[]; stats: MemoryStats }>(
       `/api/memory/${botId}`,
@@ -252,15 +296,29 @@ export const api = {
       { method: 'POST' }
     ),
 
-  // Feed
+  // Feed & Proactive Brief
   getFeed: () => request<{ posts: FeedPost[]; settings?: any }>('/api/feed'),
   triggerFeedWrite: (instructions?: string) =>
     request<any>('/api/feed', { method: 'POST', body: JSON.stringify({ instructions }) }),
   getFeedSettings: () => request<{ daily: boolean; time: string; instructions: string }>('/api/feed/settings'),
   saveFeedSettings: (data: { daily: boolean; time: string; instructions: string }) =>
-    request<{ success: boolean }>('/api/feed/settings', { method: 'POST', body: JSON.stringify(data) }),
+    request<any>('/api/feed/settings', { method: 'POST', body: JSON.stringify(data) }),
   getFeedActivities: () => request<FeedActivity[]>('/api/feed/activity'),
-  deleteFeedPost: (id: string) => request<{ ok: boolean }>(`/api/feed/posts/${id}`, { method: 'DELETE' }),
+  deleteFeedPost: (id: string) => request<{ ok: boolean }>(`/api/feed/posts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  likeFeedPost: (id: string) =>
+    request<{ success: boolean; post?: FeedPost }>(`/api/feed/posts/${encodeURIComponent(id)}/like`, { method: 'POST', body: '{}' }),
+  dismissFeedPost: (id: string) =>
+    request<{ success: boolean; post?: FeedPost }>(`/api/feed/posts/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: '{}' }),
+  discussFeedPost: (id: string) =>
+    request<{ success: boolean; post?: FeedPost }>(`/api/feed/posts/${encodeURIComponent(id)}/discuss`, { method: 'POST', body: '{}' }),
+  getProactiveStatus: () => request<ProactiveStatus>('/api/proactive/status'),
+  saveProactiveSettings: (data: { enabled?: boolean; quietStart?: string; quietEnd?: string }) =>
+    request<ProactiveStatus>('/api/proactive/settings', { method: 'POST', body: JSON.stringify(data) }),
+  triggerProactiveCheck: (force = true) =>
+    request<{ emitted: boolean; reason?: string; sessionId?: string; message?: string; signalCount?: number }>(
+      '/api/proactive/check',
+      { method: 'POST', body: JSON.stringify({ force }) }
+    ),
 
   // Sandbox & MCP
   getSandboxStatus: async (): Promise<SandboxStatus> => {

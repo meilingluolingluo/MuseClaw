@@ -13,11 +13,17 @@ import {
   Check,
   X,
   AlertTriangle,
+  Heart,
+  ExternalLink,
+  SlidersHorizontal,
+  BellRing,
+  ThumbsDown,
 } from 'lucide-react';
-import type { FeedPost, FeedActivity } from '../../types';
+import type { FeedPost, FeedActivity, ProactiveStatus } from '../../types';
 import { api } from '../../services/api';
 import { renderMarkdown } from '../../utils/markdown';
 import { formatRelativeTime } from '../../utils/format';
+import { Modal } from '../common/Modal';
 
 const AREA_CONFIG: Record<string, { emoji: string; label: string }> = {
   planning: { emoji: '🗓️', label: '规划巡检' },
@@ -47,9 +53,20 @@ const FeedPostCard = React.memo<{
   isConfirmingDelete?: boolean;
   onDelete: (postId: string) => void;
   onDiscuss: (post: FeedPost) => void;
-}>(({ post, html, isConfirmingDelete, onDelete, onDiscuss }) => {
+  onLike: (postId: string) => void;
+  onDismiss: (postId: string) => void;
+}>(({ post, html, isConfirmingDelete, onDelete, onDiscuss, onLike, onDismiss }) => {
   const area = AREA_CONFIG[post.area || ''] || { emoji: '📝', label: '工作动态' };
   const postDate = formatRelativeTime(post.ts || post.date);
+  const sourceLabel = useMemo(() => {
+    if (post.sourceName) return post.sourceName;
+    if (!post.sourceUrl) return '';
+    try {
+      return new URL(post.sourceUrl).hostname.replace(/^www\./, '');
+    } catch {
+      return '参考链接';
+    }
+  }, [post.sourceName, post.sourceUrl]);
 
   return (
     <article className="feed-card feed-post-card">
@@ -66,6 +83,9 @@ const FeedPostCard = React.memo<{
               <span className="pill-badge pill-blue feed-post-area-pill">
                 {area.label}
               </span>
+              {post.kind === 'intel' && (
+                <span className="feed-kind-pill">联网情报</span>
+              )}
             </div>
             <div className="feed-post-meta">
               <span className="feed-post-date">{postDate}</span>
@@ -82,7 +102,33 @@ const FeedPostCard = React.memo<{
             </div>
           </div>
 
+          {post.sourceUrl && (
+            <div className="feed-post-source-row">
+              <a
+                href={post.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="feed-post-source-link"
+                title={post.sourceUrl}
+              >
+                <ExternalLink size={12} />
+                <span>{sourceLabel}</span>
+              </a>
+            </div>
+          )}
+
           <div className="feed-post-body markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+
+          {post.imageUrl && (
+            <div className="feed-post-image-wrap">
+              <img
+                src={post.imageUrl}
+                alt={post.title}
+                loading="lazy"
+                className="feed-post-cover"
+              />
+            </div>
+          )}
 
           {post.tags && post.tags.length > 0 && (
             <div className="feed-post-tags">
@@ -94,21 +140,36 @@ const FeedPostCard = React.memo<{
             </div>
           )}
 
-          {post.prompt && (
-            <div className="feed-post-actions">
-              <button
-                type="button"
-                className="feed-action-btn"
-                onClick={() => onDiscuss(post)}
-                title="一键就此条目进入对话深入探讨"
-              >
-                <MessageSquare size={14} /> 一键跟进讨论
-              </button>
-              <span className="feed-post-prompt-snippet" title={post.prompt}>
-                “{post.prompt}”
-              </span>
-            </div>
-          )}
+          <div className="feed-post-actions feed-post-footer-bar">
+            <button
+              type="button"
+              className={`feed-feedback-btn ${post.liked ? 'is-liked' : ''}`}
+              onClick={() => onLike(post.id)}
+              title="点赞后将提高此类兴趣话题权重"
+            >
+              <Heart size={14} className={post.liked ? 'feed-heart-filled' : ''} />
+              <span>{post.liked ? '已赞' : '喜欢'}</span>
+            </button>
+
+            <button
+              type="button"
+              className="feed-action-btn"
+              onClick={() => onDiscuss(post)}
+              title="一键就此条目进入对话深入探讨"
+            >
+              <MessageSquare size={14} /> 讨论
+            </button>
+
+            <button
+              type="button"
+              className="feed-feedback-btn is-dismiss"
+              onClick={() => onDismiss(post.id)}
+              title="减少此类话题推送"
+            >
+              <ThumbsDown size={13} />
+              <span>不感兴趣</span>
+            </button>
+          </div>
         </div>
       </div>
     </article>
@@ -224,15 +285,43 @@ export const FeedView: React.FC = () => {
   const deletePostTimerRef = useRef<any>(null);
   const loadSeq = useRef(0);
 
+  // 动态版块说明 & 主动聊天设置弹窗
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [feedInstructions, setFeedInstructions] = useState('');
+  const [feedDaily, setFeedDaily] = useState(true);
+  const [feedTime, setFeedTime] = useState('08:00');
+  const [proactiveCfg, setProactiveCfg] = useState<ProactiveStatus>({
+    enabled: true,
+    quietStart: '23:00',
+    quietEnd: '07:30',
+    lastActiveAt: 0,
+    lastBriefAt: 0,
+    lastBriefDay: ''
+  });
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [checkingBrief, setCheckingBrief] = useState(false);
+
   const loadFeed = useCallback(async () => {
     const seq = ++loadSeq.current;
     setLoading(true);
     setLoadError(null);
     try {
-      const [feedData, actData] = await Promise.all([api.getFeed(), api.getFeedActivities()]);
+      const [feedData, actData, proStatus] = await Promise.all([
+        api.getFeed(),
+        api.getFeedActivities(),
+        api.getProactiveStatus().catch(() => null)
+      ]);
       if (seq !== loadSeq.current) return;
       setPosts(Array.isArray(feedData?.posts) ? feedData.posts : []);
       setActivities(Array.isArray(actData) ? actData : []);
+      if (feedData?.settings) {
+        setFeedInstructions(feedData.settings.instructions || '');
+        setFeedDaily(feedData.settings.daily !== false);
+        setFeedTime(feedData.settings.time || '08:00');
+      }
+      if (proStatus) {
+        setProactiveCfg(proStatus);
+      }
     } catch (err: any) {
       if (seq !== loadSeq.current) return;
       console.error('Failed to load feed:', err);
@@ -296,17 +385,96 @@ export const FeedView: React.FC = () => {
 
   const handleDiscuss = useCallback(
     (post: FeedPost) => {
-      const prompt = post.prompt || `关于动态【${post.title}】：请帮我进一步分析评估，并给出具体落地建议。`;
+      api.discussFeedPost(post.id).catch(() => {});
+      const sourceNote = post.sourceUrl ? `\n参考链接：${post.sourceUrl}` : '';
+      const prompt =
+        post.prompt ||
+        `关于动态【${post.title}】：请结合我的当前工作与关注领域进一步分析，并给出具体落地建议。${sourceNote}`;
       sessionStorage.setItem('museclaw_chat_draft', prompt);
       window.dispatchEvent(new CustomEvent('museclaw:chat_draft', { detail: prompt }));
       if (post.sessionId) {
         selectSession(post.sessionId);
       }
       setTab('chat');
-      showToast(`已就「${post.title}」进入对话并填充草稿`, 'info');
+      showToast(`已就「${post.title}」进入对话并记录兴趣偏好`, 'info');
     },
     [selectSession, setTab, showToast]
   );
+
+  const handleLikePost = useCallback(
+    async (postId: string) => {
+      try {
+        const res = await api.likeFeedPost(postId);
+        if (res.success && res.post) {
+          setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, liked: res.post?.liked } : p)));
+          if (res.post.liked) {
+            showToast('已点赞，同类感兴趣主题权重已提升', 'success');
+          }
+        }
+      } catch (err: any) {
+        showToast(`操作失败: ${err.message}`, 'error');
+      }
+    },
+    [showToast]
+  );
+
+  const handleDismissPost = useCallback(
+    async (postId: string) => {
+      try {
+        await api.dismissFeedPost(postId);
+        setPosts((prev) => prev.filter((p) => p.id !== postId));
+        showToast('已标记不感兴趣，后续将减少同类主题', 'info');
+      } catch (err: any) {
+        showToast(`操作失败: ${err.message}`, 'error');
+      }
+    },
+    [showToast]
+  );
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      await Promise.all([
+        api.saveFeedSettings({
+          instructions: feedInstructions,
+          daily: feedDaily,
+          time: feedTime
+        }),
+        api.saveProactiveSettings({
+          enabled: proactiveCfg.enabled,
+          quietStart: proactiveCfg.quietStart,
+          quietEnd: proactiveCfg.quietEnd
+        })
+      ]);
+      setIsSettingsOpen(false);
+      showToast('动态版块说明与主动简报设置已保存', 'success');
+    } catch (err: any) {
+      showToast(`保存失败: ${err.message}`, 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleCheckProactiveBrief = async () => {
+    setCheckingBrief(true);
+    try {
+      const res = await api.triggerProactiveCheck(true);
+      if (res.emitted) {
+        showToast(`已生成主动简报（含 ${res.signalCount || 1} 项信号）并推送至主聊`, 'success');
+        if (res.sessionId) {
+          selectSession(res.sessionId);
+          setTab('chat');
+        }
+      } else {
+        showToast('当前暂无到期提醒或新信号，保持静默', 'info');
+      }
+    } catch (err: any) {
+      showToast(`检查简报失败: ${err.message}`, 'error');
+    } finally {
+      setCheckingBrief(false);
+    }
+  };
 
   const handleDecision = useCallback(
     async (act: FeedActivity, approved: boolean) => {
@@ -357,6 +525,23 @@ export const FeedView: React.FC = () => {
           <div className="view-sub">基于工作习惯、长期记忆、近期对话与目标自动提炼的态势简报</div>
         </div>
         <div className="view-header-actions">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setIsSettingsOpen(true)}
+            title="设置动态版块说明、每日时间与主动聊天免打扰"
+          >
+            <SlidersHorizontal size={14} /> 版块说明
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleCheckProactiveBrief}
+            disabled={checkingBrief}
+            title="立即检查到期事件、目标卡点与新动态，生成主动简报"
+          >
+            <BellRing size={14} /> {checkingBrief ? '检查中...' : '主动简报'}
+          </button>
           <button type="button" className="btn-secondary" onClick={() => setTab('routines')} title="配置与管理定时任务">
             <Clock size={14} /> 定时任务
           </button>
@@ -365,7 +550,7 @@ export const FeedView: React.FC = () => {
             className="btn-primary"
             onClick={handleWriteNow}
             disabled={isWriting}
-            title="立即触发智能体撰写新动态"
+            title="立即触发智能体结合兴趣画像与联网搜索撰写新动态"
           >
             <Sparkles size={14} /> {isWriting ? '撰写中...' : '立即撰写'}
           </button>
@@ -407,6 +592,8 @@ export const FeedView: React.FC = () => {
                 isConfirmingDelete={deletingPostId === post.id}
                 onDelete={handleDeletePost}
                 onDiscuss={handleDiscuss}
+                onLike={handleLikePost}
+                onDismiss={handleDismissPost}
               />
             ))
           )}
@@ -451,6 +638,95 @@ export const FeedView: React.FC = () => {
           </div>
         </div>
       </div>
+      <Modal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        title="动态版块说明与主动简报设置"
+        icon={<SlidersHorizontal size={18} />}
+        maxWidth="560px"
+        footer={
+          <div className="modal-actions-bar w-full">
+            <div />
+            <div className="modal-actions-right">
+              <button type="button" className="btn-secondary" onClick={() => setIsSettingsOpen(false)}>
+                取消
+              </button>
+              <button
+                type="submit"
+                form="feed-settings-form"
+                className="btn-primary"
+                disabled={savingSettings}
+              >
+                {savingSettings ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <form id="feed-settings-form" onSubmit={handleSaveSettings} className="feed-settings-form">
+          <p className="feed-settings-desc">
+            你的动态版块由以下提示提供支持。你对此提示做出的任何编辑都将应用于今后的动态版块帖子。
+          </p>
+          <textarea
+            className="form-control feed-settings-textarea"
+            rows={5}
+            value={feedInstructions}
+            onChange={(e) => setFeedInstructions(e.target.value)}
+            placeholder="例如：为我打造一个关于我兴趣的动态版块，保持内容简短直白，避免标题党，尽量给出真实来源，使用中文展示。"
+          />
+
+          <div className="feed-settings-grid">
+            <label className="feed-settings-toggle">
+              <input
+                type="checkbox"
+                checked={feedDaily}
+                onChange={(e) => setFeedDaily(e.target.checked)}
+              />
+              <span>每日定时自动更新动态</span>
+            </label>
+            <div className="feed-settings-time-row">
+              <span>每日生成时间</span>
+              <input
+                type="time"
+                className="form-control feed-settings-time-input"
+                value={feedTime}
+                onChange={(e) => setFeedTime(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="feed-settings-divider" />
+
+          <div className="feed-settings-proactive-block">
+            <label className="feed-settings-toggle">
+              <input
+                type="checkbox"
+                checked={proactiveCfg.enabled}
+                onChange={(e) => setProactiveCfg((p) => ({ ...p, enabled: e.target.checked }))}
+              />
+              <span>允许根据记忆、到期日程与目标在主聊主动发简报（有事才开口）</span>
+            </label>
+            <div className="feed-settings-time-row">
+              <span>免打扰时段</span>
+              <div className="feed-quiet-range">
+                <input
+                  type="time"
+                  className="form-control feed-settings-time-input"
+                  value={proactiveCfg.quietStart}
+                  onChange={(e) => setProactiveCfg((p) => ({ ...p, quietStart: e.target.value }))}
+                />
+                <span>至</span>
+                <input
+                  type="time"
+                  className="form-control feed-settings-time-input"
+                  value={proactiveCfg.quietEnd}
+                  onChange={(e) => setProactiveCfg((p) => ({ ...p, quietEnd: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+        </form>
+      </Modal>
     </section>
   );
 };

@@ -18,9 +18,24 @@ import {
   FileText,
   Code,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  FolderOpen,
+  Bell,
+  Lightbulb,
+  CheckCircle2,
+  XCircle,
+  MessageSquare
 } from 'lucide-react';
-import type { MemoryItem, MemoryReport, MemoryCategory, MemoryStats } from '../../types';
+import type {
+  MemoryItem,
+  MemoryReport,
+  MemoryCategory,
+  MemoryStats,
+  MemoryTopicSummary,
+  MemoryTopicDetail,
+  StandingIntent,
+  ReflectionIdea
+} from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { Modal } from '../common/Modal';
@@ -44,6 +59,14 @@ const CATEGORY_CONFIG: Record<
     bg: 'rgba(139, 92, 246, 0.08)',
     border: 'rgba(139, 92, 246, 0.25)',
     description: '技术偏好、代码规范、沟通风格与工具习惯'
+  },
+  interest: {
+    label: '兴趣与关注',
+    icon: <Sparkles size={14} />,
+    color: 'var(--om-accent)',
+    bg: 'var(--om-accent-soft)',
+    border: 'color-mix(in srgb, var(--om-accent) 28%, transparent)',
+    description: '长期关注的技术方向、行业话题与动态订阅偏好'
   },
   people: {
     label: '关键人物与协作',
@@ -97,14 +120,24 @@ function fallbackCopy(text: string, done: () => void): void {
 }
 
 export const MemoryView: React.FC = () => {
-  const { bots, activeBot, showToast } = useApp();
+  const { bots, activeBot, showToast, setTab } = useApp();
 
   // 当前选中的 Bot
   const selectedBotId = activeBot?.id || 'muse';
   const currentBot = useMemo(() => bots.find((b) => b.id === selectedBotId) || activeBot, [bots, selectedBotId, activeBot]);
 
+  const [activeSubTab, setActiveSubTab] = useState<'core' | 'topics' | 'intents' | 'ideas'>('core');
   const [content, setContent] = useState('');
   const [items, setItems] = useState<MemoryItem[]>([]);
+  const [userProfileItems, setUserProfileItems] = useState<MemoryItem[]>([]);
+  const [topics, setTopics] = useState<MemoryTopicSummary[]>([]);
+  const [selectedTopic, setSelectedTopic] = useState<MemoryTopicDetail | null>(null);
+  const [intents, setIntents] = useState<StandingIntent[]>([]);
+  const [ideas, setIdeas] = useState<ReflectionIdea[]>([]);
+  const [isReflecting, setIsReflecting] = useState(false);
+  const [intentDesc, setIntentDesc] = useState('');
+  const [intentTriggers, setIntentTriggers] = useState('');
+  const [isCreatingIntent, setIsCreatingIntent] = useState(false);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [reports, setReports] = useState<MemoryReport[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -149,12 +182,17 @@ export const MemoryView: React.FC = () => {
     const seq = ++memLoadSeq.current;
     setIsLoading(true);
     try {
-      const data = await api.getMemory(botId);
+      const data = await api.getFullMemory(botId);
       if (seq !== memLoadSeq.current) return;
       setContent(data.content || '');
       setItems(Array.isArray(data.items) ? data.items : []);
       setStats(data.stats || null);
       setReports(Array.isArray(data.reports) ? data.reports : []);
+      setUserProfileItems(Array.isArray(data.userProfile?.items) ? data.userProfile!.items : []);
+      setTopics(Array.isArray(data.topics) ? data.topics : []);
+      setIntents(Array.isArray(data.intents) ? data.intents : []);
+      setIdeas(Array.isArray(data.ideas) ? data.ideas : []);
+      setSelectedTopic(null);
     } catch (err: any) {
       if (seq !== memLoadSeq.current) return;
       console.error('Failed to load memory:', err);
@@ -362,6 +400,95 @@ export const MemoryView: React.FC = () => {
     }
   };
 
+  const handleReflect = async () => {
+    setIsReflecting(true);
+    showToast('正在跨会话分析历史对话，提炼长期模式与建议...', 'info');
+    try {
+      const res = await api.triggerReflect(selectedBotId);
+      await loadMemory(selectedBotId);
+      if (res.skipped) {
+        showToast('有效交互会话不足 2 场，暂未触发跨会话提炼（已自动清理过期条目）', 'info');
+      } else {
+        showToast(
+          `跨会话反思完成：新增 ${res.learnedCount} 条模式，纠偏 ${res.outdatedCount} 条，产生 ${res.ideasCount} 条建议`,
+          'success'
+        );
+      }
+    } catch (err: any) {
+      showToast(`跨会话反思失败: ${err.message}`, 'error');
+    } finally {
+      setIsReflecting(false);
+    }
+  };
+
+  const handleOpenTopic = async (slug: string) => {
+    try {
+      const detail = await api.getMemoryTopic(selectedBotId, slug);
+      setSelectedTopic(detail);
+    } catch (err: any) {
+      showToast(`加载主题失败: ${err.message}`, 'error');
+    }
+  };
+
+  const handleCreateIntent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const triggers = intentTriggers
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!intentDesc.trim() || triggers.length === 0) {
+      showToast('请填写提醒说明及至少一个触发关键词', 'warning');
+      return;
+    }
+    setIsCreatingIntent(true);
+    try {
+      const res = await api.createIntent(selectedBotId, {
+        description: intentDesc.trim(),
+        triggers
+      });
+      if (res.success) {
+        setIntents(res.intents || []);
+        setIntentDesc('');
+        setIntentTriggers('');
+        showToast('前瞻事件意图已登记', 'success');
+      } else {
+        showToast(res.error || '创建失败', 'error');
+      }
+    } catch (err: any) {
+      showToast(`创建失败: ${err.message}`, 'error');
+    } finally {
+      setIsCreatingIntent(false);
+    }
+  };
+
+  const handleCancelIntent = async (intentId: string) => {
+    try {
+      const res = await api.cancelIntent(selectedBotId, intentId);
+      setIntents(res.intents || []);
+      showToast('已取消该事件提醒', 'info');
+    } catch (err: any) {
+      showToast(`取消失败: ${err.message}`, 'error');
+    }
+  };
+
+  const handleIdeaAction = async (idea: ReflectionIdea, status: 'accepted' | 'dismissed') => {
+    try {
+      const res = await api.updateIdeaStatus(selectedBotId, idea.id, status);
+      setIdeas(res.ideas || []);
+      if (status === 'accepted') {
+        const draft = `请帮我落地这项协同优化建议：${idea.text}`;
+        sessionStorage.setItem('museclaw_chat_draft', draft);
+        window.dispatchEvent(new CustomEvent('museclaw:chat_draft', { detail: draft }));
+        setTab('chat');
+        showToast('已采纳建议并填充至对话草稿', 'success');
+      } else {
+        showToast('已忽略该建议', 'info');
+      }
+    } catch (err: any) {
+      showToast(`操作失败: ${err.message}`, 'error');
+    }
+  };
+
   // 过滤后的条目清单
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -450,6 +577,16 @@ export const MemoryView: React.FC = () => {
           <button
             type="button"
             className="btn-secondary memory-hdr-btn"
+            onClick={handleReflect}
+            disabled={isReflecting}
+            title="跨最近多段会话提炼长期习惯、兴趣与纠偏建议"
+          >
+            <Lightbulb size={13} className={isReflecting ? 'spin' : ''} />
+            <span>{isReflecting ? '反思中...' : '跨会话反思'}</span>
+          </button>
+          <button
+            type="button"
+            className="btn-secondary memory-hdr-btn"
             onClick={handleStartDryRun}
             disabled={isConsolidating || items.length < 2}
             title={items.length < 2 ? '记忆少于 2 条，暂时不需要整理' : '检查重复和过时的内容，预览整理建议'}
@@ -528,6 +665,77 @@ export const MemoryView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 认知记忆子面板导航 */}
+      <div className="memory-subtabs" role="tablist" aria-label="记忆层级视图">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === 'core'}
+          className={`memory-subtab-btn ${activeSubTab === 'core' ? 'is-active' : ''}`}
+          onClick={() => setActiveSubTab('core')}
+        >
+          <Brain size={14} />
+          <span>核心记忆 ({items.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === 'topics'}
+          className={`memory-subtab-btn ${activeSubTab === 'topics' ? 'is-active' : ''}`}
+          onClick={() => setActiveSubTab('topics')}
+        >
+          <FolderOpen size={14} />
+          <span>主题知识库 ({topics.length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === 'intents'}
+          className={`memory-subtab-btn ${activeSubTab === 'intents' ? 'is-active' : ''}`}
+          onClick={() => setActiveSubTab('intents')}
+        >
+          <Bell size={14} />
+          <span>事件提醒 ({intents.filter((i) => i.status === 'armed').length})</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === 'ideas'}
+          className={`memory-subtab-btn ${activeSubTab === 'ideas' ? 'is-active' : ''}`}
+          onClick={() => setActiveSubTab('ideas')}
+        >
+          <Lightbulb size={14} />
+          <span>反思建议 ({ideas.filter((i) => i.status === 'pending').length})</span>
+        </button>
+      </div>
+
+      {activeSubTab === 'core' && (
+        <>
+          {userProfileItems.length > 0 && (
+            <div className="memory-shared-profile-card">
+              <div className="memory-shared-profile-header">
+                <span className="memory-shared-profile-title">
+                  🌐 跨员工共享用户档案与兴趣画像 (USER.md · {userProfileItems.length} 条)
+                </span>
+                <span className="memory-shared-profile-sub">
+                  由对话自动提取与动态反馈持续演进，自动同步给所有数字员工
+                </span>
+              </div>
+              <div className="memory-shared-chips">
+                {userProfileItems.slice(0, 12).map((uItem) => (
+                  <span
+                    key={uItem.id}
+                    className={`memory-shared-chip ${uItem.category === 'interest' ? 'is-interest' : ''}`}
+                    title={uItem.until ? `有效期至 ${uItem.until}` : uItem.category}
+                  >
+                    {uItem.content}
+                    {uItem.weight && uItem.weight > 1 ? ` · ×${uItem.weight}` : ''}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
       {/* 快速沉淀新记忆事实输入卡片 */}
       <div className="memory-create-card">
@@ -722,7 +930,13 @@ export const MemoryView: React.FC = () => {
                         title="智能员工在对话与任务中自主沉淀"
                         className="memory-protect-badge is-auto"
                       >
-                        <span>自动沉淀</span>
+                        <span>{item.origin === 'feedback' ? '反馈沉淀' : '自动沉淀'}</span>
+                      </span>
+                    )}
+                    {item.until && (
+                      <span className="memory-until-badge" title="到期后系统将自动归档清理">
+                        <Clock size={11} />
+                        <span>有效期至 {item.until}</span>
                       </span>
                     )}
                   </div>
@@ -855,6 +1069,180 @@ export const MemoryView: React.FC = () => {
               </div>
             ))}
           </div>
+        </div>
+      )}
+        </>
+      )}
+
+      {activeSubTab === 'topics' && (
+        <div className="memory-panel-grid">
+          <div className="memory-topic-list">
+            {topics.length === 0 ? (
+              <div className="memory-empty-state">
+                <div className="memory-empty-text">暂无按主题拆分的扩展知识库，对话中涉及具体项目或专项领域时会自动归档至此。</div>
+              </div>
+            ) : (
+              topics.map((topic) => (
+                <button
+                  key={topic.slug}
+                  type="button"
+                  className={`memory-topic-card ${selectedTopic?.slug === topic.slug ? 'is-selected' : ''}`}
+                  onClick={() => handleOpenTopic(topic.slug)}
+                >
+                  <div className="memory-topic-card-top">
+                    <span className="memory-topic-name">{topic.name}</span>
+                    <span className="memory-topic-count">{topic.entryCount} 条</span>
+                  </div>
+                  <div className="memory-topic-desc">{topic.description}</div>
+                  {topic.aliases.length > 0 && (
+                    <div className="memory-topic-aliases">
+                      {topic.aliases.slice(0, 4).map((a, idx) => (
+                        <span key={idx} className="memory-topic-alias-pill">{a}</span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+
+          {selectedTopic && (
+            <div className="memory-topic-detail">
+              <div className="memory-topic-detail-head">
+                <div>
+                  <h4 className="memory-topic-detail-title">{selectedTopic.name}</h4>
+                  <div className="memory-topic-detail-sub">topics/{selectedTopic.slug}.md</div>
+                </div>
+                {selectedTopic.readOnly && <span className="memory-protect-badge is-protected">只读保护</span>}
+              </div>
+              <pre className="memory-topic-detail-body">{selectedTopic.content}</pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeSubTab === 'intents' && (
+        <div className="memory-intents-section">
+          <form onSubmit={handleCreateIntent} className="memory-create-card">
+            <div className="memory-create-title">
+              <Bell size={15} className="memory-icon-accent" />
+              <span>新增事件触发提醒 (Standing Intent)</span>
+            </div>
+            <div className="memory-intent-form-grid">
+              <input
+                type="text"
+                className="form-control"
+                placeholder="当提到相关关键词时要做什么？例如：提醒我核对回滚负责人与上线清单"
+                value={intentDesc}
+                onChange={(e) => setIntentDesc(e.target.value)}
+              />
+              <div className="memory-intent-form-row">
+                <input
+                  type="text"
+                  className="form-control flex-1"
+                  placeholder="触发关键词（空格或逗号分隔），例如：发布清单 上线 release"
+                  value={intentTriggers}
+                  onChange={(e) => setIntentTriggers(e.target.value)}
+                />
+                <button type="submit" className="btn-primary" disabled={isCreatingIntent}>
+                  {isCreatingIntent ? '保存中...' : '登记提醒'}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <div className="memory-list-container">
+            {intents.length === 0 ? (
+              <div className="memory-empty-state">
+                <div className="memory-empty-text">暂无前瞻性事件提醒，可登记“下次聊到某关键词时自动提醒”。</div>
+              </div>
+            ) : (
+              intents.map((intent) => (
+                <div key={intent.id} className="memory-item-card">
+                  <div className="memory-item-top-row">
+                    <div className="memory-item-badges">
+                      <span className={`memory-intent-status is-${intent.status}`}>
+                        {intent.status === 'armed'
+                          ? '待命监听'
+                          : intent.status === 'done'
+                          ? '已达次数'
+                          : intent.status === 'expired'
+                          ? '已过期'
+                          : '已取消'}
+                      </span>
+                      <span className="memory-until-badge">
+                        已触发 {intent.fireCount}/{intent.maxFires} 次
+                      </span>
+                    </div>
+                    {intent.status === 'armed' && (
+                      <button
+                        type="button"
+                        className="btn-secondary memory-action-btn"
+                        onClick={() => handleCancelIntent(intent.id)}
+                      >
+                        <XCircle size={12} />
+                        <span>取消</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="memory-item-content">{intent.description}</div>
+                  <div className="memory-topic-aliases">
+                    {intent.triggers.map((t, i) => (
+                      <span key={i} className="memory-topic-alias-pill">#{t}</span>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'ideas' && (
+        <div className="memory-ideas-section">
+          {ideas.length === 0 ? (
+            <div className="memory-empty-state">
+              <div className="memory-empty-text">
+                暂无跨会话反思建议。系统会在积累多轮对话后自动分析，或点击右上角“跨会话反思”立即生成。
+              </div>
+            </div>
+          ) : (
+            ideas.map((idea) => (
+              <div key={idea.id} className="memory-item-card">
+                <div className="memory-item-top-row">
+                  <div className="memory-item-badges">
+                    <span className={`memory-intent-status is-${idea.status === 'pending' ? 'armed' : idea.status === 'accepted' ? 'done' : 'cancelled'}`}>
+                      {idea.status === 'pending' ? '待处理建议' : idea.status === 'accepted' ? '已采纳' : '已忽略'}
+                    </span>
+                    {idea.fromSessions.length > 0 && (
+                      <span className="memory-until-badge">源于 {idea.fromSessions.length} 次历史会话</span>
+                    )}
+                  </div>
+                  {idea.status === 'pending' && (
+                    <div className="memory-item-actions">
+                      <button
+                        type="button"
+                        className="btn-primary memory-action-btn"
+                        onClick={() => handleIdeaAction(idea, 'accepted')}
+                      >
+                        <MessageSquare size={12} />
+                        <span>采纳并去聊</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary memory-action-btn"
+                        onClick={() => handleIdeaAction(idea, 'dismissed')}
+                      >
+                        <CheckCircle2 size={12} />
+                        <span>忽略</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="memory-item-content">{idea.text}</div>
+              </div>
+            ))
+          )}
         </div>
       )}
 

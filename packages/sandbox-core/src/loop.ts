@@ -75,6 +75,7 @@ export async function* runAgentLoop(
     isTainted?: boolean;
     skills?: Array<{ name: string; description: string; category?: string; channel?: string }>;
     historyMessages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string | LLMMessageContent }>;
+    triggeredIntents?: Array<{ id: string; description: string }>;
   }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
@@ -94,6 +95,12 @@ export async function* runAgentLoop(
   if (context.skills && context.skills.length > 0) {
     const skillsList = context.skills.map((s) => `- ${s.name} [${s.category || 'general'}]: ${s.description}`).join('\n');
     effectivePrompt += `\n\n[Available Skills (Agent 技能规程库)]:\n当用户需求与下列预置技能匹配时，第一步请调用 skills(action="use", name="<name>") 获取完整执行指导、配套脚本与步骤；在解决复杂业务后，亦可调用 skills(action="learn", ...) 自主学习沉淀到工坊，或 skills(action="save", ...) 创建新技能。\n${skillsList}`;
+  }
+
+  // 1.2 注入本轮命中的前瞻性事件意图提醒
+  if (context.triggeredIntents && context.triggeredIntents.length > 0) {
+    const intentLines = context.triggeredIntents.map((item) => `- (${item.id}) ${item.description}`).join('\n');
+    effectivePrompt += `\n\n[Triggered Standing Intents (命中的前瞻事件提醒)]:\n用户当前发言命中了预先登记的事件提醒条件，请在本次回复中自然、明确地完成以下提醒或检查：\n${intentLines}`;
   }
 
   // 2. 按 profile 过滤 tool_allowlist
