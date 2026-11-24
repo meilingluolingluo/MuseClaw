@@ -30,7 +30,8 @@ export const AuditDrawer: React.FC<AuditDrawerProps> = ({
   onClose,
   activeSessionId,
 }) => {
-  const { showToast, isTainted, taintReasons, focusApprovalId } = useApp();
+  const { showToast, isTainted, taintReasons } = useApp();
+  const focusApprovalId: string | null = null;
   const [activeTab, setActiveTab] = useState<'trail' | 'grants' | 'policy'>('trail');
   const [policy, setPolicy] = useState<any>({});
   const [grants, setGrants] = useState<Grant[]>([]);

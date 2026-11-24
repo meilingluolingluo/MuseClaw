@@ -1,4 +1,4 @@
-export type TabType = 'chat' | 'feed' | 'goals' | 'routines' | 'memory' | 'skills' | 'audit' | 'artifacts';
+export type TabType = 'chat' | 'feed' | 'goals' | 'routines' | 'memory' | 'skills' | 'artifacts';
 
 export interface User {
   id: string;
@@ -483,18 +483,77 @@ export interface ConnectorItem {
 export type SkillCategory = 'devops' | 'productivity' | 'research' | 'integration' | 'utility' | 'custom';
 export type SkillSource = 'builtin' | 'custom' | 'imported' | 'learned';
 export type SkillChannel = 'api' | 'cli' | 'web' | 'browser' | 'gui' | 'mixed';
+export type SkillLifecycleState = 'active' | 'stale' | 'archived';
+export type SkillTrustLevel = 'builtin' | 'custom' | 'imported' | 'learned';
+export type SkillSecurityVerdict = 'safe' | 'caution' | 'dangerous';
+
+export interface SkillEnvRequirementSpec {
+  name: string;
+  prompt?: string;
+  help?: string;
+  optional?: boolean;
+}
+
+export interface SkillEnvVarStatus {
+  name: string;
+  configured: boolean;
+  source?: 'process' | 'managed';
+  maskedValue?: string;
+  prompt?: string;
+  help?: string;
+  optional?: boolean;
+}
 
 export interface SkillRequirements {
   bins?: string[];
   env?: string[];
+  envSpecs?: SkillEnvRequirementSpec[];
   os?: string[];
 }
 
 export interface SkillReadiness {
   ready: boolean;
+  status?: 'available' | 'setup_needed' | 'unsupported';
   missingBins?: string[];
   missingEnv?: string[];
+  envStatus?: SkillEnvVarStatus[];
   details?: string;
+}
+
+export interface SkillSecurityFinding {
+  id: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  category: string;
+  file: string;
+  message: string;
+}
+
+export interface SkillSecurityReport {
+  trustLevel: SkillTrustLevel;
+  verdict: SkillSecurityVerdict;
+  policyAction: 'allow' | 'ask' | 'block';
+  findings: SkillSecurityFinding[];
+}
+
+export interface SkillLintFinding {
+  severity: 'error' | 'warning';
+  rule: string;
+  message: string;
+}
+
+export interface SkillLintReport {
+  score: number;
+  estimatedTokens: number;
+  findings: SkillLintFinding[];
+}
+
+export interface SkillUsageStats {
+  useCount: number;
+  viewCount: number;
+  patchCount: number;
+  lastUsedAt?: number;
+  pinned?: boolean;
+  lifecycleState: SkillLifecycleState;
 }
 
 export interface SkillFileEntry {
@@ -528,8 +587,30 @@ export interface Skill {
   license?: string;
   compatibility?: string;
   warnings: string[];
+  usage?: SkillUsageStats;
+  lint?: SkillLintReport;
+  security?: SkillSecurityReport;
+  hasBuiltinOverride?: boolean;
   updatedAt?: number;
   createdAt?: number;
+}
+
+export interface ManagedSkillEnvItem extends SkillEnvVarStatus {
+  usedBy: string[];
+}
+
+export interface SkillImportPreview {
+  valid: boolean;
+  error?: string;
+  name?: string;
+  description?: string;
+  category?: SkillCategory;
+  requires?: SkillRequirements;
+  readiness?: SkillReadiness;
+  lint?: SkillLintReport;
+  security?: SkillSecurityReport;
+  conflict?: 'builtin' | 'existing_custom' | null;
+  content?: string;
 }
 
 // 虚拟形象系统类型定义

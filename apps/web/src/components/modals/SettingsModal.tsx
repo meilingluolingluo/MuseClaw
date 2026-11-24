@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
-import type { ConnectorItem, ConnectorCategory } from '../../types';
+import { formatTime } from '../../utils/format';
+import type { ConnectorItem, ConnectorCategory, AuditLog, Grant } from '../../types';
 import {
   Settings,
   Globe,
   LayoutGrid,
   CreditCard,
   Shield,
-  Hand,
   MessageCircle,
   Smartphone,
   Lock,
@@ -23,6 +23,7 @@ import {
   Laptop,
   Check,
   ChevronRight,
+  ChevronDown,
   Info,
   Terminal,
   Cpu,
@@ -48,6 +49,7 @@ import {
   Code2,
   Loader2,
   Activity,
+  Download,
 } from 'lucide-react';
 
 type SettingsTab =
@@ -56,7 +58,7 @@ type SettingsTab =
   | 'connectors'
   | 'wallet'
   | 'storage'
-  | 'permissions'
+  | 'security'
   | 'channels'
   | 'devices'
   | 'data'
@@ -118,6 +120,8 @@ export const SettingsModal: React.FC = () => {
   const {
     isSettingsModalOpen,
     setIsSettingsModalOpen,
+    settingsInitialTab,
+    setSettingsInitialTab,
     theme,
     setTheme,
     accentColor,
@@ -132,8 +136,19 @@ export const SettingsModal: React.FC = () => {
   const [inviteCode, setInviteCode] = useState('');
   const [showInviteInput, setShowInviteInput] = useState(false);
   const [browserHeadless, setBrowserHeadless] = useState(false);
-  const [approvalMode, setApprovalMode] = useState<'prompt' | 'auto_safe' | 'full_auto'>('auto_safe');
   const [notifyFeed, setNotifyFeed] = useState(true);
+
+  // 安全中心状态管理
+  const [securityPolicy, setSecurityPolicy] = useState<Record<string, unknown>>({});
+  const [securityGrants, setSecurityGrants] = useState<Grant[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [securityLoading, setSecurityLoading] = useState(false);
+  const [securityError, setSecurityError] = useState<string | null>(null);
+  const [showAllAuditLogs, setShowAllAuditLogs] = useState(false);
+  const [expandedAuditKeys, setExpandedAuditKeys] = useState<Record<string, boolean>>({});
+  const [showPolicyJson, setShowPolicyJson] = useState(false);
+  const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
+  const revokeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 连接器状态管理
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
@@ -198,6 +213,95 @@ export const SettingsModal: React.FC = () => {
       setLoadingConnectors(false);
     }
   }, [activeConnectorDetail]);
+
+  useEffect(() => {
+    if (isSettingsModalOpen && settingsInitialTab) {
+      const validTabs: SettingsTab[] = [
+        'general',
+        'browser',
+        'connectors',
+        'wallet',
+        'storage',
+        'security',
+        'channels',
+        'devices',
+        'data',
+        'help',
+        'legal',
+      ];
+      if (validTabs.includes(settingsInitialTab as SettingsTab)) {
+        setActiveTab(settingsInitialTab as SettingsTab);
+      }
+      setSettingsInitialTab(null);
+    }
+  }, [isSettingsModalOpen, settingsInitialTab, setSettingsInitialTab]);
+
+  const loadSecurityData = useCallback(async () => {
+    setSecurityLoading(true);
+    setSecurityError(null);
+    try {
+      const [p, g, a] = await Promise.all([
+        api.getPolicy(),
+        api.getGrants(),
+        api.getAuditLogs(undefined, 100),
+      ]);
+      setSecurityPolicy(p && typeof p === 'object' ? p : {});
+      setSecurityGrants(Array.isArray(g) ? g : []);
+      setAuditLogs(Array.isArray(a) ? a : []);
+    } catch (err: any) {
+      setSecurityError(err?.message || '安全审计数据加载失败');
+    } finally {
+      setSecurityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSettingsModalOpen && activeTab === 'security') {
+      loadSecurityData();
+    }
+  }, [isSettingsModalOpen, activeTab, loadSecurityData]);
+
+  useEffect(() => {
+    return () => {
+      if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+    };
+  }, []);
+
+  const handleExportAuditLogs = () => {
+    if (auditLogs.length === 0) {
+      showToast('暂无可导出的审计日志', 'warning');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(auditLogs, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'museclaw-audit-logs.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`已导出 ${auditLogs.length} 条审计日志`, 'success');
+  };
+
+  const handleRevokeGrant = async (id: string) => {
+    if (revokingGrantId !== id) {
+      setRevokingGrantId(id);
+      if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+      revokeTimerRef.current = setTimeout(() => setRevokingGrantId(null), 3500);
+      return;
+    }
+    if (revokeTimerRef.current) clearTimeout(revokeTimerRef.current);
+    setRevokingGrantId(null);
+
+    try {
+      await api.revokeGrant(id);
+      setSecurityGrants((prev) => prev.filter((g) => g.id !== id));
+      showToast('已撤销该复用授权条目', 'success');
+    } catch (err: any) {
+      showToast(`撤销失败: ${err?.message || '请重试'}`, 'error');
+    }
+  };
 
   useEffect(() => {
     if (isSettingsModalOpen && activeTab === 'connectors') {
@@ -470,11 +574,11 @@ export const SettingsModal: React.FC = () => {
 
             <button
               type="button"
-              className={`settings-nav-item ${activeTab === 'permissions' ? 'is-active' : ''}`}
-              onClick={() => setActiveTab('permissions')}
+              className={`settings-nav-item ${activeTab === 'security' ? 'is-active' : ''}`}
+              onClick={() => setActiveTab('security')}
             >
-              <Hand size={18} className="settings-nav-icon" />
-              <span>权限</span>
+              <ShieldCheck size={18} className="settings-nav-icon" />
+              <span>安全中心</span>
             </button>
 
             <button
@@ -544,7 +648,7 @@ export const SettingsModal: React.FC = () => {
               {activeTab === 'connectors' && '连接器'}
               {activeTab === 'wallet' && '钱包'}
               {activeTab === 'storage' && '安全存储'}
-              {activeTab === 'permissions' && '权限'}
+              {activeTab === 'security' && '安全中心'}
               {activeTab === 'channels' && '消息渠道'}
               {activeTab === 'devices' && '设备'}
               {activeTab === 'data' && '数据控制'}
@@ -1216,51 +1320,181 @@ export const SettingsModal: React.FC = () => {
               </div>
             )}
 
-            {/* 6. 权限 (Permissions) */}
-            {activeTab === 'permissions' && (
+            {/* 6. 安全中心 (Security) */}
+            {activeTab === 'security' && (
               <div className="settings-pane-wrap">
-                <div className="settings-card">
-                  <div className="settings-section-caption">数字员工工具自主调用授权</div>
-                  <div className="settings-radio-group">
-                    <label className="settings-radio-label">
-                      <input
-                        type="radio"
-                        name="approvalMode"
-                        checked={approvalMode === 'prompt'}
-                        onChange={() => setApprovalMode('prompt')}
-                      />
-                      <div>
-                        <strong>逐项人工确认 (Strict)</strong>
-                        <p>任何沙箱命令与工具调用前均需人工点击授权</p>
-                      </div>
-                    </label>
-
-                    <label className="settings-radio-label">
-                      <input
-                        type="radio"
-                        name="approvalMode"
-                        checked={approvalMode === 'auto_safe'}
-                        onChange={() => setApprovalMode('auto_safe')}
-                      />
-                      <div>
-                        <strong>自动放行安全工具 (Smart Balanced · 推荐)</strong>
-                        <p>查询与只读类操作自主流转，高危写操作与外部请求拦截审批</p>
-                      </div>
-                    </label>
-
-                    <label className="settings-radio-label">
-                      <input
-                        type="radio"
-                        name="approvalMode"
-                        checked={approvalMode === 'full_auto'}
-                        onChange={() => setApprovalMode('full_auto')}
-                      />
-                      <div>
-                        <strong>全自动流转 (Autonomous)</strong>
-                        <p>在隔离沙箱内全速自主执行，仅记录审计日志</p>
-                      </div>
-                    </label>
+                {securityError && (
+                  <div className="connector-error-alert" role="alert">
+                    <AlertCircle size={14} />
+                    <span>{securityError}</span>
                   </div>
+                )}
+
+                {/* 卡片 1：审计中心 */}
+                <div className="settings-card">
+                  <div className="settings-audit-header">
+                    <div>
+                      <div className="settings-toggle-title">审计中心</div>
+                      <div className="settings-toggle-desc">拦截/放行记录与日志导出。</div>
+                    </div>
+                    <div className="settings-audit-actions">
+                      <button
+                        type="button"
+                        className="connector-action-btn"
+                        onClick={handleExportAuditLogs}
+                        disabled={auditLogs.length === 0}
+                      >
+                        <Download size={13} />
+                        <span>导出日志</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="connector-action-btn"
+                        onClick={loadSecurityData}
+                        disabled={securityLoading}
+                      >
+                        <RefreshCw size={13} className={securityLoading ? 'spin' : ''} />
+                        <span>刷新</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {auditLogs.length === 0 ? (
+                    <div className="settings-audit-empty">
+                      {securityLoading ? '正在加载审计记录...' : '暂无拦截或放行记录'}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="settings-audit-list">
+                        {(showAllAuditLogs ? auditLogs : auditLogs.slice(0, 5)).map((log, idx) => {
+                          const eventLabel = log.eventType || log.event || 'EVENT';
+                          const rowKey = log.id || `${eventLabel}_${idx}_${log.ts || log.timestamp || idx}`;
+                          const isExpanded = Boolean(expandedAuditKeys[rowKey]);
+                          const rawDetail =
+                            typeof log.details === 'string'
+                              ? log.details
+                              : log.details?.reason ||
+                                log.details?.actionSummary ||
+                                log.details?.command ||
+                                log.target ||
+                                (typeof log.decision === 'string' ? log.decision : '') ||
+                                '';
+                          const toolPrefix = log.tool ? `${log.tool}: ` : '';
+                          const summaryText = `[${eventLabel}] ${toolPrefix}${rawDetail || '安全检查记录'}`;
+                          const timeValue = log.timestamp || log.ts;
+
+                          return (
+                            <div key={rowKey} className="settings-audit-row">
+                              <button
+                                type="button"
+                                className="settings-audit-row-main"
+                                onClick={() =>
+                                  setExpandedAuditKeys((prev) => ({
+                                    ...prev,
+                                    [rowKey]: !prev[rowKey],
+                                  }))
+                                }
+                                aria-expanded={isExpanded}
+                              >
+                                <span className="settings-audit-summary" title={summaryText}>
+                                  {summaryText}
+                                </span>
+                                <span className="settings-audit-time">
+                                  {timeValue ? formatTime(timeValue) : '-'}
+                                </span>
+                              </button>
+                              {isExpanded && (
+                                <pre className="settings-audit-detail">
+                                  {JSON.stringify(log, null, 2)}
+                                </pre>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {auditLogs.length > 5 && (
+                        <button
+                          type="button"
+                          className="settings-audit-more"
+                          onClick={() => setShowAllAuditLogs((prev) => !prev)}
+                        >
+                          <span>{showAllAuditLogs ? '收起' : `查看全部 (${auditLogs.length}) >`}</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* 卡片 2：活跃复用授权 */}
+                <div className="settings-card">
+                  <div className="settings-audit-header">
+                    <div>
+                      <div className="settings-toggle-title">活跃复用授权</div>
+                      <div className="settings-toggle-desc">
+                        当前已记住 {securityGrants.length} 条免确认规则，撤销后将恢复门禁询问。
+                      </div>
+                    </div>
+                  </div>
+
+                  {securityGrants.length === 0 ? (
+                    <div className="settings-audit-empty">暂无活跃复用授权</div>
+                  ) : (
+                    <div className="settings-audit-list">
+                      {securityGrants.map((grant, idx) => {
+                        const permText =
+                          typeof grant.permission === 'object'
+                            ? JSON.stringify(grant.permission)
+                            : String(grant.permission || '');
+                        return (
+                          <div key={grant.id || idx} className="settings-grant-row">
+                            <div className="settings-grant-info">
+                              <span className="settings-grant-scope">{grant.scope || 'general'}</span>
+                              <span className="settings-grant-perm" title={permText}>
+                                {permText}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeGrant(grant.id)}
+                              className={`connector-action-btn ${
+                                revokingGrantId === grant.id ? 'btn-danger' : ''
+                              }`}
+                              title={revokingGrantId === grant.id ? '再次点击确认撤销' : '撤销该授权'}
+                            >
+                              <Trash2 size={12} />
+                              <span>{revokingGrantId === grant.id ? '确认撤销' : '撤销'}</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 卡片 3：默认安全策略 */}
+                <div className="settings-card">
+                  <button
+                    type="button"
+                    className="settings-card-clickable-row settings-policy-toggle"
+                    onClick={() => setShowPolicyJson((prev) => !prev)}
+                    aria-expanded={showPolicyJson}
+                  >
+                    <div className="settings-card-icon-title">
+                      <Shield size={16} className="settings-icon-blue" />
+                      <span>查看生效策略配置</span>
+                    </div>
+                    {showPolicyJson ? (
+                      <ChevronDown size={16} className="settings-chevron" />
+                    ) : (
+                      <ChevronRight size={16} className="settings-chevron" />
+                    )}
+                  </button>
+                  {showPolicyJson && (
+                    <pre className="settings-policy-pre">
+                      {JSON.stringify(securityPolicy, null, 2)}
+                    </pre>
+                  )}
                 </div>
               </div>
             )}

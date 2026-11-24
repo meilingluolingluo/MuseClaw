@@ -110,12 +110,6 @@ export const SideDrawer: React.FC = () => {
           ) : (
             filteredBots.map((bot) => {
               const isActive = bot.id === activeBotId;
-              const approvalClass =
-                bot.approvalMode === 'FULL'
-                  ? 'pill-green'
-                  : bot.approvalMode === 'AUTO_EDITS'
-                  ? 'pill-blue'
-                  : 'pill-amber';
 
               return (
                 <div
@@ -147,9 +141,6 @@ export const SideDrawer: React.FC = () => {
                     <div className="bot-name">{bot.name}</div>
                     <div className="bot-desc">{bot.role || '智能协同'}</div>
                   </div>
-                  <span className={`pill-badge ${approvalClass} bot-approval-pill`}>
-                    {bot.approvalMode || 'ASK'}
-                  </span>
                 </div>
               );
             })

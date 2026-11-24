@@ -25,9 +25,6 @@ const MemoryView = lazy(() =>
 const SkillsView = lazy(() =>
   import('./components/skills/SkillsView').then((m) => ({ default: m.SkillsView }))
 );
-const AuditView = lazy(() =>
-  import('./components/audit/AuditView').then((m) => ({ default: m.AuditView }))
-);
 const ArtifactsView = lazy(() =>
   import('./components/artifacts/ArtifactsView').then((m) => ({ default: m.ArtifactsView }))
 );
@@ -122,7 +119,6 @@ const VIEWS: Record<Exclude<TabType, 'chat'>, React.LazyExoticComponent<React.FC
   routines: RoutinesView,
   memory: MemoryView,
   skills: SkillsView,
-  audit: AuditView,
   artifacts: ArtifactsView,
 };
 

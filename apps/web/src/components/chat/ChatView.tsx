@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MessageBubble } from './MessageBubble';
 import { ChatComposer } from './ChatComposer';
-import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
 import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw, Home, MessageSquare, Plus } from 'lucide-react';
 import type { Message, MessageAttachment, AvatarMood, WidgetPayload } from '../../types';
@@ -20,8 +19,6 @@ export const ChatView: React.FC = () => {
     setTainted,
     createNewSession,
     loadSessions,
-    isAuditDrawerOpen,
-    setIsAuditDrawerOpen,
     setIsBotModalOpen,
   } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -805,13 +802,6 @@ export const ChatView: React.FC = () => {
           onStop={handleStop}
         />
       </section>
-
-      {/* 右侧伴随式审计检查抽屉 */}
-      <AuditDrawer
-        isOpen={isAuditDrawerOpen}
-        onClose={() => setIsAuditDrawerOpen(false)}
-        activeSessionId={activeSessionId}
-      />
     </div>
   );
 };

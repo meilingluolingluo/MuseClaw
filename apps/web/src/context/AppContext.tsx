@@ -13,6 +13,9 @@ interface AppContextType {
   setAccentColor: (color: string) => void;
   isSettingsModalOpen: boolean;
   setIsSettingsModalOpen: (open: boolean) => void;
+  settingsInitialTab: string | null;
+  setSettingsInitialTab: (tab: string | null) => void;
+  openSettings: (tab?: string) => void;
   user: User | null;
   setUser: (u: User | null) => void;
   bots: Bot[];
@@ -51,17 +54,13 @@ interface AppContextType {
   setIsBotModalOpen: (open: boolean) => void;
   isAvatarStudioOpen: boolean;
   setIsAvatarStudioOpen: (open: boolean) => void;
-  isAuditDrawerOpen: boolean;
-  setIsAuditDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  focusApprovalId: string | null;
-  setFocusApprovalId: (id: string | null) => void;
   toasts: ToastMessage[];
   showToast: (msg: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
   dismissToast: (id: string) => void;
   isTainted: boolean;
   taintReasons: string[];
   setTainted: (tainted: boolean, reason?: string) => void;
-  cycleApprovalMode: () => Promise<void>;
+  setApprovalMode: (mode: 'ASK' | 'AUTO_EDITS' | 'FULL') => Promise<void>;
   initError: string | null;
   retryInit: () => void;
 }
@@ -72,7 +71,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Navigation
   const [tab, setTabState] = useState<TabType>(() => {
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-    const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
+    const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
     return (valid.includes(path as TabType) ? path : 'chat') as TabType;
   });
 
@@ -88,7 +87,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const onPopState = () => {
       const path = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
+      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
       setTabState((valid.includes(path as TabType) ? path : 'chat') as TabType);
     };
     window.addEventListener('popstate', onPopState);
@@ -154,6 +153,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // 系统设置弹窗状态控制
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<string | null>(null);
+  const openSettings = useCallback((initialTab?: string) => {
+    if (initialTab) {
+      setSettingsInitialTab(initialTab);
+    }
+    setIsSettingsModalOpen(true);
+  }, []);
 
   // User
   const [user, setUser] = useState<User | null>(null);
@@ -212,8 +218,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isBotModalOpen, setIsBotModalOpen] = useState(false);
   const [isAvatarStudioOpen, setIsAvatarStudioOpen] = useState(false);
-  const [isAuditDrawerOpen, setIsAuditDrawerOpen] = useState(false);
-  const [focusApprovalId, setFocusApprovalId] = useState<string | null>(null);
 
   // Taint & Security
   const [isTainted, setIsTainted] = useState(false);
@@ -503,28 +507,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [activeSessionId, sessions, mainSession, switchToMainChat, showToast]
   );
 
-  const cycleApprovalMode = useCallback(async () => {
-    if (!activeBotId) return;
-    const bot = bots.find((b) => b.id === activeBotId);
-    if (!bot) return;
+  const setApprovalMode = useCallback(
+    async (mode: 'ASK' | 'AUTO_EDITS' | 'FULL') => {
+      if (!activeBotId) return;
+      const bot = bots.find((b) => b.id === activeBotId);
+      if (!bot) return;
 
-    const modes: Array<'ASK' | 'AUTO_EDITS' | 'FULL'> = ['ASK', 'AUTO_EDITS', 'FULL'];
-    const current = (bot.approvalMode || 'ASK').toUpperCase() as 'ASK' | 'AUTO_EDITS' | 'FULL';
-    const nextIdx = (modes.indexOf(current) + 1) % modes.length;
-    const next = modes[nextIdx];
+      const current = (bot.approvalMode || 'ASK').toUpperCase() as 'ASK' | 'AUTO_EDITS' | 'FULL';
+      if (current === mode) return;
 
-    // 乐观更新前暂存 prev，以便失败时回滚
-    const prevBots = bots;
-    setBots((prev) => prev.map((b) => (b.id === activeBotId ? { ...b, approvalMode: next } : b)));
+      const labels: Record<'ASK' | 'AUTO_EDITS' | 'FULL', string> = {
+        ASK: '逐项确认',
+        AUTO_EDITS: '自动编辑',
+        FULL: '允许完全访问',
+      };
 
-    try {
-      await api.updateBot(activeBotId, { approvalMode: next });
-      showToast(`门禁审批模式已切换为 ${next}`, 'info');
-    } catch (err: any) {
-      setBots(prevBots);
-      showToast(`更新门禁模式失败: ${err.message}`, 'error');
-    }
-  }, [activeBotId, bots, showToast]);
+      const prevBots = bots;
+      setBots((prev) => prev.map((b) => (b.id === activeBotId ? { ...b, approvalMode: mode } : b)));
+
+      try {
+        await api.updateBot(activeBotId, { approvalMode: mode });
+        showToast(`已切换为${labels[mode]}`, 'info');
+      } catch (err: any) {
+        setBots(prevBots);
+        showToast(`更新门禁模式失败: ${err.message}`, 'error');
+      }
+    },
+    [activeBotId, bots, showToast]
+  );
 
   // Initial load
   useEffect(() => {
@@ -566,6 +576,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setAccentColor,
         isSettingsModalOpen,
         setIsSettingsModalOpen,
+        settingsInitialTab,
+        setSettingsInitialTab,
+        openSettings,
         user,
         setUser,
         bots,
@@ -603,17 +616,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsBotModalOpen,
         isAvatarStudioOpen,
         setIsAvatarStudioOpen,
-        isAuditDrawerOpen,
-        setIsAuditDrawerOpen,
-        focusApprovalId,
-        setFocusApprovalId,
         toasts,
         showToast,
         dismissToast,
         isTainted,
         taintReasons,
         setTainted,
-        cycleApprovalMode,
+        setApprovalMode,
         initError,
         retryInit,
       }}

@@ -39,7 +39,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   onWidgetPrompt,
   live,
 }) => {
-  const { setIsAuditDrawerOpen, setFocusApprovalId, showToast, setIsAvatarStudioOpen } = useApp();
+  const { openSettings, showToast, setIsAvatarStudioOpen } = useApp();
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<string | null>(() => {
     if (message.approvalRequest?.status === 'approved') return '已批准';
@@ -165,13 +165,8 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
               <button
                 type="button"
                 className="approval-details-link"
-                onClick={() => {
-                  if (message.approvalRequest?.actionId) {
-                    setFocusApprovalId(message.approvalRequest.actionId);
-                  }
-                  setIsAuditDrawerOpen(true);
-                }}
-                title="打开右侧审计抽屉查看完整策略判定"
+                onClick={() => openSettings('security')}
+                title="打开设置中的安全中心查看审计记录"
               >
                 查看审计详情 →
               </button>
