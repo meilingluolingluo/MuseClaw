@@ -206,10 +206,17 @@ export const api = {
     });
     return (res as any)?.routine ?? (res as unknown as Routine);
   },
-  updateRoutine: (id: string, data: Partial<Routine>) =>
-    request<Routine>(`/api/routines/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  updateRoutine: async (id: string, data: Partial<Routine>): Promise<Routine> => {
+    const res = await request<{ success: boolean; routine: Routine }>(`/api/routines/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    return (res as any)?.routine ?? (res as unknown as Routine);
+  },
   deleteRoutine: (id: string) => request<{ success: boolean }>(`/api/routines/${id}`, { method: 'DELETE' }),
   runRoutine: (id: string) => request<{ success: boolean; message: string; run?: RoutineRun }>(`/api/routines/${id}/run`, { method: 'POST' }),
+  cancelRoutineRun: (runId: string) =>
+    request<{ success: boolean; message?: string }>(`/api/routines/runs/${runId}/cancel`, { method: 'POST' }),
   toggleRoutine: (id: string) => request<{ success: boolean; enabled: boolean }>(`/api/routines/${id}/toggle`, { method: 'POST' }),
   getRoutineRuns: (id: string) => request<RoutineRun[]>(`/api/routines/${id}/runs`),
   triggerRoutineWebhook: (id: string, token?: string, payload?: unknown) =>

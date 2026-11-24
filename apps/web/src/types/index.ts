@@ -166,6 +166,9 @@ export interface RoutineToolCall {
   timestamp?: number;
 }
 
+export type MisfirePolicy = 'skip' | 'run_once';
+export type RoutineRunStatus = 'running' | 'success' | 'failed' | 'cancelled' | 'timeout' | 'interrupted';
+
 export interface RoutineRun {
   id: string;
   routineId: string;
@@ -175,7 +178,10 @@ export interface RoutineRun {
   startedAt: number;
   finishedAt?: number;
   durationMs?: number;
-  status: 'running' | 'success' | 'failed';
+  status: RoutineRunStatus;
+  attempt?: number;
+  maxAttempts?: number;
+  cancelledBy?: 'user' | 'timeout' | 'restart';
   error?: string;
   summary?: string;
   output?: string;
@@ -201,11 +207,21 @@ export interface Routine {
   nextRunAt?: number;
   nextRunTimes?: number[];
   lastRunAt?: number;
-  lastStatus?: string;
+  lastStatus?: RoutineRunStatus | string;
+  recentOutcomes?: RoutineRunStatus[];
   overlap?: OverlapPolicy;
+  misfirePolicy?: MisfirePolicy;
+  jitterSeconds?: number;
+  maxRetries?: number;
+  circuitBreakerThreshold?: number;
+  consecutiveFailures?: number;
+  circuitBrokenAt?: number;
   timeoutSeconds?: number;
   feedPublish?: boolean;
   deliverTo?: DeliverTarget;
+  webhookUrl?: string;
+  modelOverride?: string;
+  hasQueuedRun?: boolean;
   deleteAfterRun?: boolean;
   webhookSecret?: string;
   stats?: RoutineStats;

@@ -1,7 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Routine, RoutineRun, WebhookHook, RoutineToolCall, ScheduleKind, DeliverTarget, OverlapPolicy } from './types.ts';
+import type {
+  Routine,
+  RoutineRun,
+  RoutineRunStatus,
+  WebhookHook,
+  RoutineToolCall,
+  ScheduleKind,
+  DeliverTarget,
+  OverlapPolicy,
+  MisfirePolicy,
+} from './types.ts';
 import { matchesCron, computeNextRun, computeNextRuns, detectScheduleKind, cronToHumanZh } from './cron.ts';
 import { runAgentLoop, type ToolDefinition, type LLMCaller } from '../../../packages/sandbox-core/src/loop.ts';
 import type { SentinelPolicyManager } from '../../sentinel/src/guard.ts';
@@ -9,6 +19,29 @@ import type { ApprovalRequest, Session, AgentProfile } from '../../../packages/p
 import type { BotRegistry, SessionStore, BotMemoryManager } from '../bots/index.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MAX_PERSISTED_RUNS = 200;
+const MISFIRE_GRACE_MS = 5 * 60 * 1000;
+
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    const err = new Error('执行已被中止');
+    err.name = 'AbortError';
+    return Promise.reject(err);
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      const err = new Error(typeof signal?.reason === 'string' ? signal.reason : '执行已被中止');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 export interface ProactiveManagerOptions {
   sentinel: SentinelPolicyManager;
@@ -17,16 +50,34 @@ export interface ProactiveManagerOptions {
   botRegistry?: BotRegistry;
   sessionStore?: SessionStore;
   botMemory?: BotMemoryManager;
+  getBotSkills?: (botId: string) => Array<{ name: string; description: string; category?: string; channel?: string }>;
+  dataDir?: string;
   onApprovalNeeded?: (request: ApprovalRequest, routine: Routine) => Promise<void>;
   onRunCompleted?: (run: RoutineRun, output: string) => Promise<void>;
+}
+
+interface ActiveExecution {
+  controller: AbortController;
+  runId: string;
+  routineId: string;
+  cancelReason?: 'user' | 'timeout';
+}
+
+interface QueuedTrigger {
+  triggerSource: 'schedule' | 'webhook' | 'manual';
+  payload?: unknown;
+  queuedAt: number;
 }
 
 export class ProactiveManager {
   private routines = new Map<string, Routine>();
   private hooks = new Map<string, WebhookHook>();
   private runs: RoutineRun[] = [];
+  private activeExecutions = new Map<string, ActiveExecution>();
+  private pendingQueue = new Map<string, QueuedTrigger>();
   private timer: NodeJS.Timeout | null = null;
-  private dataDir = path.resolve(__dirname, '../data');
+  private dataDir: string;
+  private runsFile: string;
 
   private sentinel: SentinelPolicyManager;
   private callLLM: LLMCaller;
@@ -36,6 +87,8 @@ export class ProactiveManager {
     this.options = options;
     this.sentinel = options.sentinel;
     this.callLLM = options.callLLM;
+    this.dataDir = options.dataDir ? path.resolve(options.dataDir) : path.resolve(__dirname, '../data');
+    this.runsFile = path.join(this.dataDir, 'routine-runs.jsonl');
 
     this.ensureDataDir();
     this.loadData();
@@ -63,12 +116,13 @@ export class ProactiveManager {
       try {
         const list: Routine[] = JSON.parse(fs.readFileSync(routinesFile, 'utf-8'));
         for (const r of list) {
-          // 重启时若处于 running 则重置为 idle
-          if (r.status === 'running') r.status = 'idle';
+          // 重启时若处于 running 或排队态则重置为 idle/paused
+          if (r.status === 'running') r.status = r.enabled ? 'idle' : 'paused';
+          r.hasQueuedRun = false;
           if (!r.scheduleKind) r.scheduleKind = detectScheduleKind(r.cronExpr || '');
           if (!r.scheduleHumanZh) r.scheduleHumanZh = cronToHumanZh(r.cronExpr || '');
           if (!r.nextRunTimes || r.nextRunTimes.length === 0) {
-            r.nextRunTimes = computeNextRuns(r.cronExpr || '');
+            r.nextRunTimes = computeNextRuns(r.cronExpr || '', 3, new Date(), r.timezone);
           }
           if (!r.stats) {
             r.stats = { totalRuns: 0, successRuns: 0, failedRuns: 0, avgDurationMs: 0 };
@@ -77,6 +131,7 @@ export class ProactiveManager {
             r.webhookSecret = `whsec_${Math.random().toString(36).slice(2, 10)}`;
           }
           if (!r.overlap) r.overlap = 'skip';
+          if (!r.misfirePolicy) r.misfirePolicy = 'skip';
           if (!r.deliverTo) r.deliverTo = r.feedPublish ? 'feed' : 'silent';
           this.routines.set(r.id, r);
         }
@@ -87,6 +142,56 @@ export class ProactiveManager {
 
     if (this.routines.size === 0) {
       this.seedDefaultRoutines();
+    }
+
+    // 1.1 加载持久化执行流水，并将重启前未结束的 running 记录标记为 interrupted
+    if (fs.existsSync(this.runsFile)) {
+      try {
+        const lines = fs
+          .readFileSync(this.runsFile, 'utf-8')
+          .split(/\r?\n/)
+          .filter((line) => line.trim().length > 0);
+        const parsed: RoutineRun[] = [];
+        let recoveredInterrupted = false;
+        const bootNow = Date.now();
+        for (const line of lines) {
+          try {
+            const item = JSON.parse(line) as RoutineRun;
+            if (item.status === 'running') {
+              item.status = 'interrupted';
+              item.cancelledBy = 'restart';
+              item.finishedAt = bootNow;
+              item.durationMs = Math.max(0, bootNow - (item.startedAt || bootNow));
+              item.error = '服务重启导致任务中断';
+              item.summary = '服务重启中断';
+              recoveredInterrupted = true;
+            }
+            parsed.push(item);
+          } catch {
+            // ignore malformed JSONL line
+          }
+        }
+        parsed.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        this.runs = parsed.slice(0, MAX_PERSISTED_RUNS);
+        if (recoveredInterrupted) {
+          this.persistRuns();
+        }
+        // 回填最近执行状态与健康色块数组
+        for (const routine of this.routines.values()) {
+          if (!routine.recentOutcomes || routine.recentOutcomes.length === 0) {
+            const history = this.runs
+              .filter((run) => run.routineId === routine.id && run.status !== 'running')
+              .slice(0, 10)
+              .map((run) => run.status);
+            if (history.length > 0) {
+              routine.recentOutcomes = history;
+              routine.lastStatus = history[0];
+            }
+          }
+        }
+      } catch {
+        // ignore runs load error
+      }
     }
 
     // 2. 加载或初始化 Webhook 配置
@@ -189,6 +294,47 @@ export class ProactiveManager {
     }
   }
 
+  public persistRuns() {
+    try {
+      const content =
+        this.runs
+          .slice(0, MAX_PERSISTED_RUNS)
+          .map((r) => JSON.stringify(r))
+          .join('\n') + (this.runs.length > 0 ? '\n' : '');
+      const tmpFile = `${this.runsFile}.tmp`;
+      fs.writeFileSync(tmpFile, content, 'utf-8');
+      fs.renameSync(tmpFile, this.runsFile);
+    } catch (err: any) {
+      console.error('[Proactive] 持久化执行流水异常:', err.message);
+    }
+  }
+
+  public cancelRun(runId: string): boolean {
+    const exec = this.activeExecutions.get(runId);
+    if (!exec) return false;
+    exec.cancelReason = 'user';
+    exec.controller.abort('任务已被手动停止');
+    return true;
+  }
+
+  public cancelRoutineRun(routineId: string): boolean {
+    for (const exec of this.activeExecutions.values()) {
+      if (exec.routineId === routineId) {
+        exec.cancelReason = 'user';
+        exec.controller.abort('任务已被手动停止');
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private hasActiveExecutionForRoutine(routineId: string): boolean {
+    for (const exec of this.activeExecutions.values()) {
+      if (exec.routineId === routineId) return true;
+    }
+    return false;
+  }
+
   /**
    * 启动调度器定时心跳 (Tick)
    */
@@ -212,29 +358,56 @@ export class ProactiveManager {
   }
 
   /**
-   * 心跳匹配与触发
+   * 心跳匹配与触发（支持时区、Misfire 容错窗口、Jitter 抖动与排队防重叠）
    */
   public tick() {
     const now = Date.now();
     for (const routine of this.routines.values()) {
-      if (!routine.enabled || routine.status === 'running') {
+      if (!routine.enabled) {
         continue;
       }
 
-      // 如果到达下一次运行时间或者 cron 命中
-      const isDue = routine.nextRunAt ? now >= routine.nextRunAt : matchesCron(routine.cronExpr, new Date(now));
-      if (isDue) {
-        console.log(`⏰ [Proactive:Cron] 命中例行任务: ${routine.name} (${routine.id})`);
-        routine.nextRunAt = computeNextRun(routine.cronExpr, new Date(now));
-        routine.nextRunTimes = computeNextRuns(routine.cronExpr, new Date(now));
-        if (routine.scheduleKind === 'at' && routine.deleteAfterRun) {
-          routine.enabled = false;
-          routine.status = 'paused';
-        }
-        this.executeRoutine(routine, 'schedule').catch(err => {
-          console.error(`[Proactive:Cron] 执行异常:`, err.message);
-        });
+      const isDue = routine.nextRunAt
+        ? now >= routine.nextRunAt
+        : matchesCron(routine.cronExpr, new Date(now), routine.timezone);
+      if (!isDue) continue;
+
+      const jitter = routine.scheduleKind === 'cron' ? routine.jitterSeconds || 0 : 0;
+
+      // Misfire 保护：停机或阻塞超过宽限期且策略为 skip 时，跳过过期触发直接滚动下一周期
+      if (
+        routine.nextRunAt &&
+        now - routine.nextRunAt > MISFIRE_GRACE_MS &&
+        (routine.misfirePolicy || 'skip') === 'skip'
+      ) {
+        console.log(`⏭️ [Proactive:Misfire] 任务 [${routine.name}] 错过触发窗口，按策略跳过并滚动至下次周期`);
+        routine.nextRunAt = computeNextRun(routine.cronExpr, new Date(now), routine.timezone, jitter);
+        routine.nextRunTimes = computeNextRuns(routine.cronExpr, 3, new Date(now), routine.timezone);
+        this.saveData();
+        continue;
       }
+
+      if (routine.status === 'running') {
+        if ((routine.overlap || 'skip') === 'queue') {
+          this.pendingQueue.set(routine.id, { triggerSource: 'schedule', queuedAt: now });
+          routine.hasQueuedRun = true;
+          routine.nextRunAt = computeNextRun(routine.cronExpr, new Date(now), routine.timezone, jitter);
+          routine.nextRunTimes = computeNextRuns(routine.cronExpr, 3, new Date(now), routine.timezone);
+          this.saveData();
+        }
+        continue;
+      }
+
+      console.log(`⏰ [Proactive:Cron] 命中例行任务: ${routine.name} (${routine.id})`);
+      routine.nextRunAt = computeNextRun(routine.cronExpr, new Date(now), routine.timezone, jitter);
+      routine.nextRunTimes = computeNextRuns(routine.cronExpr, 3, new Date(now), routine.timezone);
+      if (routine.scheduleKind === 'at' && routine.deleteAfterRun) {
+        routine.enabled = false;
+        routine.status = 'paused';
+      }
+      this.executeRoutine(routine, 'schedule').catch((err) => {
+        console.error(`[Proactive:Cron] 执行异常:`, err.message);
+      });
     }
   }
 
@@ -246,21 +419,42 @@ export class ProactiveManager {
     triggerSource: 'schedule' | 'webhook' | 'manual',
     untrustedPayload?: unknown
   ): Promise<RoutineRun> {
-    // 1. 防重叠并发控制 (超时自动解锁僵死状态)
+    // 1. 防重叠并发控制（无活跃执行器且已超时的孤立状态自动复位）
     const STALE_RUN_TIMEOUT = (routine.timeoutSeconds || 300) * 1000;
-    if (routine.status === 'running' && routine.lastRunAt && Date.now() - routine.lastRunAt > STALE_RUN_TIMEOUT) {
-      console.warn(`[Proactive] 检测到任务 [${routine.name}] 超时未恢复 (${Math.round((Date.now() - routine.lastRunAt) / 1000)}s)，自动复位`);
+    if (
+      routine.status === 'running' &&
+      !this.hasActiveExecutionForRoutine(routine.id) &&
+      routine.lastRunAt &&
+      Date.now() - routine.lastRunAt > STALE_RUN_TIMEOUT
+    ) {
+      console.warn(
+        `[Proactive] 检测到任务 [${routine.name}] 超时未恢复 (${Math.round((Date.now() - routine.lastRunAt) / 1000)}s)，自动复位`
+      );
       routine.status = routine.enabled ? 'idle' : 'paused';
     }
 
     if (routine.status === 'running') {
+      if ((routine.overlap || 'skip') === 'queue') {
+        this.pendingQueue.set(routine.id, {
+          triggerSource,
+          payload: untrustedPayload,
+          queuedAt: Date.now(),
+        });
+        routine.hasQueuedRun = true;
+        this.saveData();
+        const existingRun = this.runs.find((r) => r.routineId === routine.id && r.status === 'running');
+        if (existingRun) return existingRun;
+      }
       throw new Error(`任务正在执行中，跳过重叠触发 (${routine.name})`);
     }
 
     routine.status = 'running';
     routine.lastRunAt = Date.now();
+    routine.hasQueuedRun = false;
     this.saveData();
 
+    const maxRetries = Math.min(3, Math.max(0, Number(routine.maxRetries) || 0));
+    const maxAttempts = 1 + maxRetries;
     const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const sessionId = `routine_${routine.id}_${Date.now()}`;
 
@@ -272,18 +466,36 @@ export class ProactiveManager {
       triggerSource,
       startedAt: Date.now(),
       status: 'running',
+      attempt: 1,
+      maxAttempts,
       summary: '正在受控沙箱中执行巡检任务...',
       output: '',
       approvalRequired: false,
       sessionId,
-      toolCalls: []
+      toolCalls: [],
     };
 
     this.runs.unshift(run);
-    if (this.runs.length > 50) this.runs.pop();
+    if (this.runs.length > MAX_PERSISTED_RUNS) this.runs.pop();
+    this.persistRuns();
 
-    const toolCalls: RoutineToolCall[] = [];
+    const controller = new AbortController();
+    const execEntry: ActiveExecution = { controller, runId, routineId: routine.id };
+    this.activeExecutions.set(runId, execEntry);
+
+    const timeoutMs = Math.max(1, Number(routine.timeoutSeconds) || 300) * 1000;
+    const timeoutTimer = setTimeout(() => {
+      execEntry.cancelReason = 'timeout';
+      controller.abort(`任务执行超过 ${Math.round(timeoutMs / 1000)}s 超时限制`);
+    }, timeoutMs);
+
+    let toolCalls: RoutineToolCall[] = [];
     let currentToolCall: RoutineToolCall | null = null;
+
+    const recordOutcome = (status: RoutineRunStatus) => {
+      routine.lastStatus = status;
+      routine.recentOutcomes = [status, ...(routine.recentOutcomes || [])].slice(0, 10);
+    };
 
     try {
       // 2. 构造防注入的 Prompt（外部 payload 隔离为 untrusted 数据块）
@@ -295,10 +507,11 @@ export class ProactiveManager {
       // 3. 关联多 Bot 体系：解析 Profile 与专属记忆，创建专属会话
       let bot: AgentProfile | undefined;
       if (this.options.botRegistry) {
-        bot = this.options.botRegistry.get(routine.agentId) ||
-              this.options.botRegistry.findByName(routine.agentId) ||
-              this.options.botRegistry.getCoordinator() ||
-              this.options.botRegistry.list()[0];
+        bot =
+          this.options.botRegistry.get(routine.agentId) ||
+          this.options.botRegistry.findByName(routine.agentId) ||
+          this.options.botRegistry.getCoordinator() ||
+          this.options.botRegistry.list()[0];
       }
       if (bot && this.options.botMemory) {
         bot = { ...bot, memory: this.options.botMemory.getMemory(bot.id, 'system_proactive') };
@@ -308,50 +521,95 @@ export class ProactiveManager {
 
       let session: Session | undefined;
       if (this.options.sessionStore) {
-        session = this.options.sessionStore.create(sessionId, effectiveBotId, `[例行任务] ${routine.name}`, 'system_proactive');
+        session = this.options.sessionStore.create(
+          sessionId,
+          effectiveBotId,
+          `[例行任务] ${routine.name}`,
+          'system_proactive'
+        );
       }
 
       console.log(`🚀 [Proactive] 启动 Agent 任务 [${routine.name}] (归属 Bot: ${effectiveBotId}), 触发源: ${triggerSource}`);
 
       const routineBotProfile: AgentProfile | undefined = bot
-        ? { ...bot, approval_level: (bot.approval_level || 'full') as any }
+        ? {
+            ...bot,
+            approval_level: (bot.approval_level || 'full') as any,
+            ...(routine.modelOverride ? { model: routine.modelOverride } : {}),
+          }
         : undefined;
 
-      const currentTools = this.getTools();
-      const loop = runAgentLoop(
-        routineBotProfile?.system_prompt || `你是一个企业内部严谨、高效的自动化数字员工，负责执行企业例行巡检与事件响应任务。请按步骤执行。`,
-        fullPrompt,
-        currentTools,
-        this.sentinel,
-        this.callLLM,
-        { sessionId, userId: 'system_proactive', botId: effectiveBotId, profile: routineBotProfile, maxSteps: 8 }
-      );
+      const botSkills = this.options.getBotSkills ? this.options.getBotSkills(effectiveBotId) : undefined;
 
-      let output = '';
-      for await (const event of loop) {
-        if (event.type === 'stream:text-delta') {
-          output += event.text;
-        }
-        if (event.type === 'tool:call_start') {
-          currentToolCall = {
-            tool: event.toolName,
-            args: (event.input as Record<string, unknown>) || {},
-            timestamp: Date.now()
-          };
-          toolCalls.push(currentToolCall);
-        }
-        if (event.type === 'tool:call_end') {
-          if (currentToolCall && currentToolCall.tool === event.toolName) {
-            currentToolCall.output = typeof event.output === 'string' ? event.output : JSON.stringify(event.output);
-            currentToolCall = null;
+      let finalOutput = '';
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        run.attempt = attempt;
+        toolCalls = [];
+        currentToolCall = null;
+        let attemptOutput = '';
+
+        try {
+          const currentTools = this.getTools();
+          const loop = runAgentLoop(
+            routineBotProfile?.system_prompt ||
+              `你是一个企业内部严谨、高效的自动化数字员工，负责执行企业例行巡检与事件响应任务。请按步骤执行。`,
+            fullPrompt,
+            currentTools,
+            this.sentinel,
+            this.callLLM,
+            {
+              sessionId,
+              userId: 'system_proactive',
+              botId: effectiveBotId,
+              profile: routineBotProfile,
+              skills: botSkills,
+              maxSteps: 8,
+              signal: controller.signal,
+            }
+          );
+
+          for await (const event of loop) {
+            if (event.type === 'stream:text-delta') {
+              attemptOutput += event.text;
+            }
+            if (event.type === 'tool:call_start') {
+              currentToolCall = {
+                tool: event.toolName,
+                args: (event.input as Record<string, unknown>) || {},
+                timestamp: Date.now(),
+              };
+              toolCalls.push(currentToolCall);
+            }
+            if (event.type === 'tool:call_end') {
+              if (currentToolCall && currentToolCall.tool === event.toolName) {
+                currentToolCall.output = typeof event.output === 'string' ? event.output : JSON.stringify(event.output);
+                currentToolCall = null;
+              }
+            }
+            if (event.type === 'sentinel:approval_needed') {
+              run.approvalRequired = true;
+              console.log(`⚠️ [Proactive:Sentinel] 例行任务触发高危拦截: ${event.request.actionSummary}`);
+              if (this.options.onApprovalNeeded) {
+                await this.options.onApprovalNeeded(event.request, routine);
+              }
+            }
           }
-        }
-        if (event.type === 'sentinel:approval_needed') {
-          run.approvalRequired = true;
-          console.log(`⚠️ [Proactive:Sentinel] 例行任务触发高危拦截: ${event.request.actionSummary}`);
-          if (this.options.onApprovalNeeded) {
-            await this.options.onApprovalNeeded(event.request, routine);
+
+          finalOutput = attemptOutput;
+          break;
+        } catch (attemptErr: any) {
+          if (controller.signal.aborted || execEntry.cancelReason || attemptErr?.name === 'AbortError') {
+            throw attemptErr;
           }
+          if (attempt < maxAttempts) {
+            const delayMs = Math.min(15000, 1000 * 2 ** (attempt - 1));
+            console.warn(
+              `⚠️ [Proactive] 任务 [${routine.name}] 第 ${attempt}/${maxAttempts} 次执行异常 (${attemptErr?.message})，${delayMs}ms 后指数退避重试`
+            );
+            await sleepWithSignal(delayMs, controller.signal);
+            continue;
+          }
+          throw attemptErr;
         }
       }
 
@@ -361,12 +619,16 @@ export class ProactiveManager {
       run.finishedAt = finishedAt;
       run.durationMs = durationMs;
       run.toolCalls = toolCalls;
-      run.output = output || '任务顺利执行完毕。';
+      run.output = finalOutput || '任务顺利执行完毕。';
       run.summary = run.output.slice(0, 300);
 
       // 静默判定 (Quiet When Green)：输出包含 NOTHING NEW / 【无异常】/ 【正常】 且未触发过审批
       const isQuietPattern = /nothing new|【无异常】|【正常】|"quiet":\s*true/i.test(run.output);
       run.quiet = isQuietPattern && !run.approvalRequired;
+
+      routine.consecutiveFailures = 0;
+      routine.circuitBrokenAt = undefined;
+      recordOutcome('success');
 
       // 更新运行时统计指标
       if (!routine.stats) {
@@ -381,42 +643,95 @@ export class ProactiveManager {
       if (session && this.options.sessionStore) {
         if (!session.messages) session.messages = [];
         session.messages.push({ role: 'user', content: fullPrompt });
-        if (output) {
-          session.messages.push({ role: 'assistant', content: output });
+        if (finalOutput) {
+          session.messages.push({ role: 'assistant', content: finalOutput });
         }
         this.options.sessionStore.save(session, 'system_proactive');
       }
 
       console.log(`✅ [Proactive] 任务执行完毕 [${routine.name}]，用时 ${(durationMs / 1000).toFixed(1)}s`);
 
-      if (this.options.onRunCompleted && routine.deliverTo !== 'silent') {
+      if (this.options.onRunCompleted) {
         await this.options.onRunCompleted(run, run.output);
       }
     } catch (err: any) {
       const finishedAt = Date.now();
       const durationMs = finishedAt - run.startedAt;
-      run.status = 'failed';
+      const errMsg = err?.message || '未知异常';
+      const isTimeout = execEntry.cancelReason === 'timeout';
+      const isUserCancel =
+        !isTimeout && (execEntry.cancelReason === 'user' || err?.name === 'AbortError');
+
+      run.status = isTimeout ? 'timeout' : isUserCancel ? 'cancelled' : 'failed';
+      if (isTimeout) run.cancelledBy = 'timeout';
+      else if (isUserCancel) run.cancelledBy = 'user';
+
       run.finishedAt = finishedAt;
       run.durationMs = durationMs;
       run.toolCalls = toolCalls;
-      run.error = err.message;
-      run.summary = `执行失败: ${err.message}`;
-      run.output = `❌ 任务执行异常: ${err.message}\n${err.stack || ''}`;
+      run.error = errMsg;
+      run.summary = isTimeout
+        ? `执行超时: ${errMsg}`
+        : isUserCancel
+        ? '已手动停止执行'
+        : `执行失败: ${errMsg}`;
+      run.output = isUserCancel
+        ? `⏹ 任务已由用户手动停止（已耗时 ${(durationMs / 1000).toFixed(1)}s）`
+        : `❌ ${isTimeout ? '任务执行超时' : '任务执行异常'}: ${errMsg}\n${err?.stack || ''}`;
+
       if (!routine.stats) {
         routine.stats = { totalRuns: 0, successRuns: 0, failedRuns: 0, avgDurationMs: 0 };
       }
       routine.stats.totalRuns += 1;
-      routine.stats.failedRuns += 1;
-      console.error(`❌ [Proactive] 任务执行失败 [${routine.name}]:`, err.message);
+      if (!isUserCancel) {
+        routine.stats.failedRuns += 1;
+        routine.consecutiveFailures = (routine.consecutiveFailures || 0) + 1;
+        const threshold = Math.max(1, Number(routine.circuitBreakerThreshold) || 5);
+        if (routine.consecutiveFailures >= threshold) {
+          routine.enabled = false;
+          routine.status = 'paused';
+          routine.circuitBrokenAt = finishedAt;
+          console.warn(
+            `🔌 [Proactive:CircuitBreaker] 任务 [${routine.name}] 连续失败 ${routine.consecutiveFailures} 次，已自动熔断暂停`
+          );
+        }
+      }
+      recordOutcome(run.status);
+      console.error(`❌ [Proactive] 任务执行结束 [${routine.name}] (${run.status}):`, errMsg);
     } finally {
-      routine.status = routine.enabled ? 'idle' : 'paused';
+      clearTimeout(timeoutTimer);
+      this.activeExecutions.delete(runId);
+
+      if (!routine.circuitBrokenAt) {
+        routine.status = routine.enabled ? 'idle' : 'paused';
+      }
       if (routine.scheduleKind === 'at' && routine.deleteAfterRun) {
         routine.enabled = false;
         routine.status = 'paused';
       }
-      routine.nextRunAt = computeNextRun(routine.cronExpr);
-      routine.nextRunTimes = computeNextRuns(routine.cronExpr);
-      this.saveData();
+      const jitter = routine.scheduleKind === 'cron' ? routine.jitterSeconds || 0 : 0;
+      routine.nextRunAt = computeNextRun(routine.cronExpr, new Date(), routine.timezone, jitter);
+      routine.nextRunTimes = computeNextRuns(routine.cronExpr, 3, new Date(), routine.timezone);
+
+      const queued = this.pendingQueue.get(routine.id);
+      if (queued && routine.enabled && !routine.circuitBrokenAt) {
+        this.pendingQueue.delete(routine.id);
+        routine.hasQueuedRun = false;
+        this.saveData();
+        this.persistRuns();
+        setImmediate(() => {
+          this.executeRoutine(routine, queued.triggerSource, queued.payload).catch((e) => {
+            console.error(`[Proactive:Queue] 排队任务拉起异常:`, e.message);
+          });
+        });
+      } else {
+        if (queued) {
+          this.pendingQueue.delete(routine.id);
+          routine.hasQueuedRun = false;
+        }
+        this.saveData();
+        this.persistRuns();
+      }
     }
 
     return run;
@@ -496,7 +811,13 @@ export class ProactiveManager {
     enabled?: boolean;
     feedPublish?: boolean;
     deliverTo?: DeliverTarget;
+    webhookUrl?: string;
+    modelOverride?: string;
     overlap?: OverlapPolicy;
+    misfirePolicy?: MisfirePolicy;
+    jitterSeconds?: number;
+    maxRetries?: number;
+    circuitBreakerThreshold?: number;
     timeoutSeconds?: number;
     deleteAfterRun?: boolean;
     timezone?: string;
@@ -506,6 +827,8 @@ export class ProactiveManager {
     const scheduleKind = data.scheduleKind || detectScheduleKind(cronExpr);
     const scheduleHumanZh = cronToHumanZh(cronExpr);
     const isEnabled = data.enabled !== false;
+    const timezone = data.timezone || 'Asia/Shanghai';
+    const jitterSeconds = Math.min(60, Math.max(0, Number(data.jitterSeconds) || 0));
     const routine: Routine = {
       id,
       name: data.name.trim(),
@@ -513,21 +836,29 @@ export class ProactiveManager {
       scheduleKind,
       cronExpr,
       scheduleHumanZh,
-      timezone: data.timezone || 'Asia/Shanghai',
+      timezone,
       agentId: data.agentId || 'muse',
       enabled: isEnabled,
       status: isEnabled ? 'idle' : 'paused',
       feedPublish: data.feedPublish !== false,
       deliverTo: data.deliverTo || (data.feedPublish !== false ? 'feed' : 'silent'),
+      webhookUrl: data.webhookUrl?.trim() || undefined,
+      modelOverride: data.modelOverride?.trim() || undefined,
       overlap: data.overlap || 'skip',
+      misfirePolicy: data.misfirePolicy || 'skip',
+      jitterSeconds,
+      maxRetries: Math.min(3, Math.max(0, Number(data.maxRetries) || 0)),
+      circuitBreakerThreshold: Math.max(1, Number(data.circuitBreakerThreshold) || 5),
+      consecutiveFailures: 0,
       timeoutSeconds: data.timeoutSeconds || 300,
       deleteAfterRun: Boolean(data.deleteAfterRun),
       webhookSecret: `whsec_${Math.random().toString(36).slice(2, 10)}`,
-      nextRunAt: computeNextRun(cronExpr),
-      nextRunTimes: computeNextRuns(cronExpr),
+      nextRunAt: computeNextRun(cronExpr, new Date(), timezone, scheduleKind === 'cron' ? jitterSeconds : 0),
+      nextRunTimes: computeNextRuns(cronExpr, 3, new Date(), timezone),
+      recentOutcomes: [],
       stats: { totalRuns: 0, successRuns: 0, failedRuns: 0, avgDurationMs: 0 },
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     };
     this.routines.set(id, routine);
     this.saveData();
@@ -539,28 +870,43 @@ export class ProactiveManager {
     if (!r) return undefined;
     if (patch.name !== undefined) r.name = patch.name.trim();
     if (patch.instructions !== undefined) r.instructions = patch.instructions.trim();
+    if (patch.timezone !== undefined) r.timezone = patch.timezone;
+    if (patch.jitterSeconds !== undefined) {
+      r.jitterSeconds = Math.min(60, Math.max(0, Number(patch.jitterSeconds) || 0));
+    }
     if (patch.cronExpr !== undefined) {
       r.cronExpr = patch.cronExpr.trim();
       r.scheduleKind = patch.scheduleKind || detectScheduleKind(r.cronExpr);
       r.scheduleHumanZh = cronToHumanZh(r.cronExpr);
-      r.nextRunAt = computeNextRun(r.cronExpr);
-      r.nextRunTimes = computeNextRuns(r.cronExpr);
     }
     if (patch.scheduleKind !== undefined) r.scheduleKind = patch.scheduleKind;
     if (patch.agentId !== undefined) r.agentId = patch.agentId;
     if (patch.deliverTo !== undefined) r.deliverTo = patch.deliverTo;
+    if (patch.webhookUrl !== undefined) r.webhookUrl = patch.webhookUrl?.trim() || undefined;
+    if (patch.modelOverride !== undefined) r.modelOverride = patch.modelOverride?.trim() || undefined;
     if (patch.overlap !== undefined) r.overlap = patch.overlap;
+    if (patch.misfirePolicy !== undefined) r.misfirePolicy = patch.misfirePolicy;
+    if (patch.maxRetries !== undefined) {
+      r.maxRetries = Math.min(3, Math.max(0, Number(patch.maxRetries) || 0));
+    }
+    if (patch.circuitBreakerThreshold !== undefined) {
+      r.circuitBreakerThreshold = Math.max(1, Number(patch.circuitBreakerThreshold) || 5);
+    }
     if (patch.timeoutSeconds !== undefined) r.timeoutSeconds = patch.timeoutSeconds;
     if (patch.deleteAfterRun !== undefined) r.deleteAfterRun = Boolean(patch.deleteAfterRun);
     if (patch.feedPublish !== undefined) r.feedPublish = Boolean(patch.feedPublish);
-    if (patch.timezone !== undefined) r.timezone = patch.timezone;
     if (patch.enabled !== undefined) {
       r.enabled = Boolean(patch.enabled);
       r.status = r.enabled ? 'idle' : 'paused';
       if (r.enabled) {
-        r.nextRunAt = computeNextRun(r.cronExpr);
-        r.nextRunTimes = computeNextRuns(r.cronExpr);
+        r.consecutiveFailures = 0;
+        r.circuitBrokenAt = undefined;
       }
+    }
+    if (patch.cronExpr !== undefined || patch.timezone !== undefined || patch.enabled || patch.jitterSeconds !== undefined) {
+      const jitter = r.scheduleKind === 'cron' ? r.jitterSeconds || 0 : 0;
+      r.nextRunAt = computeNextRun(r.cronExpr, new Date(), r.timezone, jitter);
+      r.nextRunTimes = computeNextRuns(r.cronExpr, 3, new Date(), r.timezone);
     }
     r.updatedAt = Date.now();
     this.saveData();
@@ -570,14 +916,16 @@ export class ProactiveManager {
   public deleteRoutine(id: string): boolean {
     const deleted = this.routines.delete(id);
     if (deleted) {
+      this.pendingQueue.delete(id);
       this.saveData();
     }
     return deleted;
   }
 
   public setRoutine(routine: Routine) {
-    routine.nextRunAt = computeNextRun(routine.cronExpr);
-    routine.nextRunTimes = computeNextRuns(routine.cronExpr);
+    const jitter = routine.scheduleKind === 'cron' ? routine.jitterSeconds || 0 : 0;
+    routine.nextRunAt = computeNextRun(routine.cronExpr, new Date(), routine.timezone, jitter);
+    routine.nextRunTimes = computeNextRuns(routine.cronExpr, 3, new Date(), routine.timezone);
     this.routines.set(routine.id, routine);
     this.saveData();
   }
@@ -587,9 +935,12 @@ export class ProactiveManager {
     if (!r) return false;
     r.enabled = !r.enabled;
     if (r.enabled) {
-      r.nextRunAt = computeNextRun(r.cronExpr);
-      r.nextRunTimes = computeNextRuns(r.cronExpr);
+      const jitter = r.scheduleKind === 'cron' ? r.jitterSeconds || 0 : 0;
+      r.nextRunAt = computeNextRun(r.cronExpr, new Date(), r.timezone, jitter);
+      r.nextRunTimes = computeNextRuns(r.cronExpr, 3, new Date(), r.timezone);
       r.status = 'idle';
+      r.consecutiveFailures = 0;
+      r.circuitBrokenAt = undefined;
     } else {
       r.status = 'paused';
     }
@@ -613,15 +964,33 @@ export class ProactiveManager {
     if (!routine.enabled) {
       return { status: 400, body: { error: 'Routine is currently paused/disabled' } };
     }
-    if (routine.webhookSecret && token && token !== routine.webhookSecret) {
+    if (routine.webhookSecret && (!token || token !== routine.webhookSecret)) {
       return { status: 401, body: { error: 'Unauthorized: invalid webhook token' } };
     }
-    if (routine.status === 'running' && routine.overlap === 'skip') {
+    if (routine.status === 'running') {
+      if ((routine.overlap || 'skip') === 'queue') {
+        this.pendingQueue.set(routine.id, {
+          triggerSource: 'webhook',
+          payload,
+          queuedAt: Date.now(),
+        });
+        routine.hasQueuedRun = true;
+        this.saveData();
+        return {
+          status: 202,
+          body: {
+            success: true,
+            queued: true,
+            message: `Routine [${routine.name}] is running, queued next execution`,
+            routineId: routine.id,
+          },
+        };
+      }
       return { status: 409, body: { error: `Routine [${routine.name}] is already running` } };
     }
 
     // 异步执行
-    this.executeRoutine(routine, 'webhook', payload).catch(err => {
+    this.executeRoutine(routine, 'webhook', payload).catch((err) => {
       console.error(`[RoutineWebhook:${routineId}] 异步执行异常:`, err.message);
     });
 
@@ -630,8 +999,8 @@ export class ProactiveManager {
       body: {
         success: true,
         message: `Routine [${routine.name}] triggered successfully via webhook`,
-        routineId: routine.id
-      }
+        routineId: routine.id,
+      },
     };
   }
 

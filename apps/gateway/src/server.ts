@@ -411,6 +411,7 @@ const proactive = new ProactiveManager({
   botRegistry,
   sessionStore,
   botMemory,
+  getBotSkills,
   onApprovalNeeded: async (request, routine) => {
     console.log(`⚠️ [Proactive] 例行任务触发审批需求: ${routine.name} (${request.approvalId})`);
     feedStore.recordActivity('user_web', {
@@ -441,9 +442,19 @@ const proactive = new ProactiveManager({
       quiet: run.quiet
     });
 
-    // 定时任务执行产出精简展示到动态 (Feed)，并挂接直通完整执行会话的链接
-    const shouldPublishToFeed = (routine?.feedPublish !== false) && !run.quiet && output && output.trim().length > 0;
-    if (shouldPublishToFeed) {
+    const deliverTo = routine?.deliverTo || (routine?.feedPublish === false ? 'silent' : 'feed');
+    if (deliverTo === 'silent') {
+      return;
+    }
+
+    // 静默抑制 (Quiet When Green)：正常无异常时静默沉淀历史，不打扰动态流或外部 IM
+    if (run.quiet) {
+      console.log(`[Proactive] 任务 [${run.routineName}] 运行正常 (NOTHING NEW)，静默沉淀，已抑制外部通知。`);
+      return;
+    }
+
+    // 1. 发布精简结果到团队动态流 (Feed)
+    if ((deliverTo === 'feed' || deliverTo === 'all') && output && output.trim().length > 0) {
       const cleanOutput = output.trim();
       let conciseBody = cleanOutput;
       if (conciseBody.length > 280) {
@@ -460,17 +471,32 @@ const proactive = new ProactiveManager({
       });
     }
 
-    // 静默抑制 (Quiet When Green)：正常无异常时静默沉淀历史，不向飞书/如流骚扰推送
-    if (run.quiet) {
-      console.log(`[Proactive] 任务 [${run.routineName}] 运行正常 (NOTHING NEW)，静默沉淀，已抑制外部通知。`);
-      return;
-    }
-
-    // 推送巡检简报到飞书
-    const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
-    if (alertTarget) {
+    // 2. 投递至外部 IM / Webhook 通道
+    if (deliverTo === 'im_webhook' || deliverTo === 'all') {
       const summaryText = `📋 【MuseClaw 自动化巡检简报】${run.routineName}\n状态: ${run.status === 'success' ? '✅ 顺利完成' : '❌ 存在异常'}\n\n${output.slice(0, 450)}`;
-      feishuChannel.sender.sendMessage(alertTarget, summaryText, 'text').catch(() => {});
+      if (routine?.webhookUrl && /^https?:\/\//i.test(routine.webhookUrl)) {
+        fetch(routine.webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            routineId: run.routineId,
+            routineName: run.routineName,
+            runId: run.id,
+            status: run.status,
+            summary: run.summary || output.slice(0, 450),
+            output,
+            msgtype: 'text',
+            text: { content: summaryText },
+          }),
+          signal: AbortSignal.timeout(10000),
+        }).catch((err: any) => {
+          console.warn(`[Proactive] 外部 Webhook 推送失败 (${routine.name}):`, err?.message || err);
+        });
+      }
+      const alertTarget = process.env.FEISHU_NOTIFY_USER_ID;
+      if (alertTarget) {
+        feishuChannel.sender.sendMessage(alertTarget, summaryText, 'text').catch(() => {});
+      }
     }
   }
 });
@@ -2649,12 +2675,34 @@ fi
       return res.end(JSON.stringify({ success: deleted }));
     }
 
+    if (req.method === 'POST' && url.pathname.startsWith('/api/routines/runs/') && url.pathname.endsWith('/cancel')) {
+      const runId = url.pathname.replace('/api/routines/runs/', '').replace('/cancel', '');
+      const cancelled = proactive.cancelRun(runId);
+      res.writeHead(cancelled ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(
+        JSON.stringify(cancelled ? { success: true, message: '已下发中止指令' } : { error: '未找到运行中的执行记录' })
+      );
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/cancel')) {
+      const id = url.pathname.replace('/api/routines/', '').replace('/cancel', '');
+      const cancelled = proactive.cancelRoutineRun(id);
+      res.writeHead(cancelled ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(
+        JSON.stringify(cancelled ? { success: true, message: '已下发中止指令' } : { error: '当前没有运行中的任务' })
+      );
+    }
+
     if (req.method === 'POST' && url.pathname.startsWith('/api/routines/') && url.pathname.endsWith('/run')) {
       const id = url.pathname.replace('/api/routines/', '').replace('/run', '');
       const r = proactive.getRoutine(id);
       if (!r) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Routine not found' }));
+      }
+      if (r.status === 'running' && (r.overlap || 'skip') === 'skip') {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `任务 [${r.name}] 正在执行中，已跳过重叠触发` }));
       }
       proactive.executeRoutine(r, 'manual').catch(err => {
         console.error(`[Proactive:Manual] 执行异常:`, err.message);

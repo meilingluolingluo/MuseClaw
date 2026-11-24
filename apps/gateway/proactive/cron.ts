@@ -16,8 +16,80 @@ export function detectScheduleKind(expr: string): ScheduleKind {
   return 'cron';
 }
 
-function matchField(pattern: string, val: number, min: number, max: number): boolean {
+interface ZonedDateParts {
+  minute: number;
+  hour: number;
+  dayOfMonth: number;
+  month: number;
+  dayOfWeek: number;
+}
+
+const WEEKDAY_SHORT_MAP: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+const dtfCache = new Map<string, Intl.DateTimeFormat>();
+
+function getFormatter(timezone: string): Intl.DateTimeFormat | null {
+  if (dtfCache.has(timezone)) return dtfCache.get(timezone)!;
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      weekday: 'short',
+      hour12: false,
+    });
+    dtfCache.set(timezone, fmt);
+    return fmt;
+  } catch {
+    return null;
+  }
+}
+
+export function getZonedDateParts(date: Date, timezone?: string): ZonedDateParts {
+  if (timezone) {
+    const fmt = getFormatter(timezone);
+    if (fmt) {
+      const parts = fmt.formatToParts(date);
+      let minute = 0;
+      let hour = 0;
+      let dayOfMonth = 1;
+      let month = 1;
+      let dayOfWeek = date.getDay();
+      for (const p of parts) {
+        if (p.type === 'minute') minute = parseInt(p.value, 10);
+        else if (p.type === 'hour') hour = parseInt(p.value, 10) % 24;
+        else if (p.type === 'day') dayOfMonth = parseInt(p.value, 10);
+        else if (p.type === 'month') month = parseInt(p.value, 10);
+        else if (p.type === 'weekday' && p.value in WEEKDAY_SHORT_MAP) {
+          dayOfWeek = WEEKDAY_SHORT_MAP[p.value];
+        }
+      }
+      return { minute, hour, dayOfMonth, month, dayOfWeek };
+    }
+  }
+  return {
+    minute: date.getMinutes(),
+    hour: date.getHours(),
+    dayOfMonth: date.getDate(),
+    month: date.getMonth() + 1,
+    dayOfWeek: date.getDay(),
+  };
+}
+
+function matchField(pattern: string, val: number, min: number, max: number, isWeekday = false): boolean {
   if (pattern === '*' || pattern === '?') return true;
+  const normalize = (n: number) => (isWeekday && n === 7 ? 0 : n);
 
   // 1. 处理步长 */5 或 10-30/5
   if (pattern.includes('/')) {
@@ -42,30 +114,38 @@ function matchField(pattern: string, val: number, min: number, max: number): boo
 
   // 2. 处理列表 1,3,5
   if (pattern.includes(',')) {
-    return pattern.split(',').some((p) => matchField(p.trim(), val, min, max));
+    return pattern.split(',').some((p) => matchField(p.trim(), val, min, max, isWeekday));
   }
 
   // 3. 处理范围 1-5
   if (pattern.includes('-')) {
-    const [start, end] = pattern.split('-').map(Number);
-    return val >= start && val <= end;
+    const [rawStart, rawEnd] = pattern.split('-').map(Number);
+    const start = normalize(rawStart);
+    const end = normalize(rawEnd);
+    if (start <= end) {
+      return val >= start && val <= end;
+    }
+    return val >= start || val <= end;
   }
 
   // 4. 精确数字匹配
-  return parseInt(pattern, 10) === val;
+  const parsed = parseInt(pattern, 10);
+  if (isNaN(parsed)) return false;
+  return normalize(parsed) === val;
 }
 
 /**
  * 判断指定时间是否命中调度表达式
  */
-export function matchesCron(expr: string, date = new Date()): boolean {
+export function matchesCron(expr: string, date = new Date(), timezone?: string): boolean {
   const trimmed = expr.trim();
+  const zoned = getZonedDateParts(date, timezone);
 
   // 快捷别名支持
-  if (trimmed === '@hourly') return date.getMinutes() === 0;
-  if (trimmed === '@daily') return date.getHours() === 0 && date.getMinutes() === 0;
-  if (trimmed === '@weekly') return date.getDay() === 0 && date.getHours() === 0 && date.getMinutes() === 0;
-  if (trimmed === '@monthly') return date.getDate() === 1 && date.getHours() === 0 && date.getMinutes() === 0;
+  if (trimmed === '@hourly') return zoned.minute === 0;
+  if (trimmed === '@daily') return zoned.hour === 0 && zoned.minute === 0;
+  if (trimmed === '@weekly') return zoned.dayOfWeek === 0 && zoned.hour === 0 && zoned.minute === 0;
+  if (trimmed === '@monthly') return zoned.dayOfMonth === 1 && zoned.hour === 0 && zoned.minute === 0;
 
   if (trimmed.startsWith('@at ')) {
     const timeStr = trimmed.replace('@at ', '').trim();
@@ -82,17 +162,11 @@ export function matchesCron(expr: string, date = new Date()): boolean {
 
   const [minP, hourP, domP, monthP, dowP] = parts;
 
-  const minute = date.getMinutes();
-  const hour = date.getHours();
-  const dayOfMonth = date.getDate();
-  const month = date.getMonth() + 1; // 1-12
-  const dayOfWeek = date.getDay();   // 0-6 (0 is Sunday)
-
-  if (!matchField(minP, minute, 0, 59)) return false;
-  if (!matchField(hourP, hour, 0, 23)) return false;
-  if (!matchField(domP, dayOfMonth, 1, 31)) return false;
-  if (!matchField(monthP, month, 1, 12)) return false;
-  if (!matchField(dowP, dayOfWeek, 0, 6)) return false;
+  if (!matchField(minP, zoned.minute, 0, 59)) return false;
+  if (!matchField(hourP, zoned.hour, 0, 23)) return false;
+  if (!matchField(domP, zoned.dayOfMonth, 1, 31)) return false;
+  if (!matchField(monthP, zoned.month, 1, 12)) return false;
+  if (!matchField(dowP, zoned.dayOfWeek, 0, 6, true)) return false;
 
   return true;
 }
@@ -100,7 +174,12 @@ export function matchesCron(expr: string, date = new Date()): boolean {
 /**
  * 计算调度表达式在指定基准时间之后的下一次执行时间戳
  */
-export function computeNextRun(expr: string, fromDate: Date | number = new Date()): number {
+export function computeNextRun(
+  expr: string,
+  fromDate: Date | number = new Date(),
+  timezone?: string,
+  jitterSeconds = 0
+): number {
   const baseDate = fromDate instanceof Date ? fromDate : new Date(fromDate || Date.now());
   const trimmed = expr.trim();
 
@@ -124,34 +203,74 @@ export function computeNextRun(expr: string, fromDate: Date | number = new Date(
     } else if (durationStr.endsWith('s')) {
       ms = parseInt(durationStr, 10) * 1000;
     }
-    return baseDate.getTime() + ms;
+    return baseDate.getTime() + (isNaN(ms) || ms <= 0 ? 60 * 1000 : ms);
   }
+
+  const applyJitter = (ts: number) => {
+    if (jitterSeconds > 0) {
+      const cap = Math.min(60, Math.max(0, jitterSeconds));
+      return ts + Math.floor(Math.random() * cap * 1000);
+    }
+    return ts;
+  };
 
   if (trimmed === '@hourly') {
     const cursor = new Date(baseDate.getTime());
-    cursor.setMinutes(0, 0, 0);
-    cursor.setHours(cursor.getHours() + 1);
-    return cursor.getTime();
+    cursor.setSeconds(0, 0);
+    cursor.setMinutes(cursor.getMinutes() + 1);
+    for (let i = 0; i < 65; i++) {
+      if (getZonedDateParts(cursor, timezone).minute === 0) return applyJitter(cursor.getTime());
+      cursor.setMinutes(cursor.getMinutes() + 1);
+    }
   }
 
-  if (trimmed === '@daily') {
-    const cursor = new Date(baseDate.getTime());
-    cursor.setHours(0, 0, 0, 0);
-    cursor.setDate(cursor.getDate() + 1);
-    return cursor.getTime();
+  // 3. 5 段式标准 Cron / @daily / @weekly / @monthly：支持最长 366 天快速跳步扫描
+  const normalizedExpr =
+    trimmed === '@daily'
+      ? '0 0 * * *'
+      : trimmed === '@weekly'
+      ? '0 0 * * 0'
+      : trimmed === '@monthly'
+      ? '0 0 1 * *'
+      : trimmed;
+
+  const parts = normalizedExpr.split(/\s+/);
+  if (parts.length !== 5) {
+    return baseDate.getTime() + 3600 * 1000;
   }
 
-  // 3. 从下一分钟的第 0 秒开始向上探测，最多探测 14 天
+  const [minP, hourP, domP, monthP, dowP] = parts;
   const cursor = new Date(baseDate.getTime());
   cursor.setSeconds(0, 0);
   cursor.setMinutes(cursor.getMinutes() + 1);
 
-  const maxChecks = 60 * 24 * 14;
-  for (let i = 0; i < maxChecks; i++) {
-    if (matchesCron(trimmed, cursor)) {
-      return cursor.getTime();
+  const endLimit = baseDate.getTime() + 366 * 24 * 60 * 60 * 1000;
+  let guard = 0;
+  const MAX_ITERATIONS = 30000;
+
+  while (cursor.getTime() <= endLimit && guard < MAX_ITERATIONS) {
+    guard++;
+    const z = getZonedDateParts(cursor, timezone);
+
+    // 按月/日/周快速跳步：不匹配时直接跳到下一小时或下一天，避免逐分钟空转
+    if (!matchField(monthP, z.month, 1, 12) || !matchField(domP, z.dayOfMonth, 1, 31) || !matchField(dowP, z.dayOfWeek, 0, 6, true)) {
+      const minsLeftInDay = (23 - z.hour) * 60 + (60 - z.minute);
+      cursor.setMinutes(cursor.getMinutes() + Math.max(1, minsLeftInDay));
+      continue;
     }
-    cursor.setMinutes(cursor.getMinutes() + 1);
+
+    if (!matchField(hourP, z.hour, 0, 23)) {
+      const minsLeftInHour = 60 - z.minute;
+      cursor.setMinutes(cursor.getMinutes() + Math.max(1, minsLeftInHour));
+      continue;
+    }
+
+    if (!matchField(minP, z.minute, 0, 59)) {
+      cursor.setMinutes(cursor.getMinutes() + 1);
+      continue;
+    }
+
+    return applyJitter(cursor.getTime());
   }
 
   return baseDate.getTime() + 3600 * 1000;
@@ -163,7 +282,8 @@ export function computeNextRun(expr: string, fromDate: Date | number = new Date(
 export function computeNextRuns(
   expr: string,
   arg2?: number | Date,
-  arg3?: number | Date
+  arg3?: number | Date,
+  timezone?: string
 ): number[] {
   let count = 3;
   let fromDate = new Date();
@@ -183,7 +303,7 @@ export function computeNextRuns(
   const results: number[] = [];
   let cursor = fromDate;
   for (let i = 0; i < count; i++) {
-    const next = computeNextRun(expr, cursor);
+    const next = computeNextRun(expr, cursor, timezone, 0);
     results.push(next);
     cursor = new Date(next + 1000);
   }

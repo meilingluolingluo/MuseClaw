@@ -409,7 +409,47 @@ export function formatCronZh(expr: string): string {
   return `${dateStr} ${timeStr} 执行`;
 }
 
-export function previewNextRuns(expr: string, count = 3): string[] {
+function getZonedCronParts(d: Date, timezone?: string) {
+  if (timezone) {
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        weekday: 'short',
+        hour12: false,
+      });
+      const wkMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+      let minute = 0;
+      let hour = 0;
+      let day = 1;
+      let month = 1;
+      let dow = d.getDay();
+      for (const p of fmt.formatToParts(d)) {
+        if (p.type === 'minute') minute = parseInt(p.value, 10);
+        else if (p.type === 'hour') hour = parseInt(p.value, 10) % 24;
+        else if (p.type === 'day') day = parseInt(p.value, 10);
+        else if (p.type === 'month') month = parseInt(p.value, 10);
+        else if (p.type === 'weekday' && p.value in wkMap) dow = wkMap[p.value];
+      }
+      return { minute, hour, day, month, dow };
+    } catch {
+      // fallback to local time
+    }
+  }
+  return {
+    minute: d.getMinutes(),
+    hour: d.getHours(),
+    day: d.getDate(),
+    month: d.getMonth() + 1,
+    dow: d.getDay(),
+  };
+}
+
+export function previewNextRuns(expr: string, count = 3, timezone?: string): string[] {
   if (!expr || !expr.trim()) return [];
   const trimmed = expr.trim();
   const results: string[] = [];
@@ -425,7 +465,7 @@ export function previewNextRuns(expr: string, count = 3): string[] {
 
     for (let i = 1; i <= count; i++) {
       const d = new Date(now.getTime() + i * stepMs);
-      results.push(formatDateTime(d));
+      results.push(formatDateTime(d, timezone));
     }
     return results;
   }
@@ -435,7 +475,7 @@ export function previewNextRuns(expr: string, count = 3): string[] {
     const atVal = trimmed.replace('@at ', '').trim();
     const d = new Date(atVal);
     if (!isNaN(d.getTime())) {
-      results.push(formatDateTime(d));
+      results.push(formatDateTime(d, timezone));
     }
     return results;
   }
@@ -447,36 +487,42 @@ export function previewNextRuns(expr: string, count = 3): string[] {
   else if (trimmed === '@weekly') cronTarget = '0 0 * * 0';
   else if (trimmed === '@monthly') cronTarget = '0 0 1 * *';
 
-  // 4. 经典 cron 步进模拟 (步进 60 秒检查)
+  // 4. 经典 cron 步进模拟 (支持 366 天月级调度快速跳步)
+  const parts = cronTarget.split(/\s+/);
+  if (parts.length !== 5) return results;
+  const [minP, hourP, domP, monthP, dowP] = parts;
+
   const candidate = new Date(now.getTime() + 60000);
   candidate.setSeconds(0, 0);
 
-  const maxChecks = 24 * 60 * 14; // 最多探测 14 天
+  const endLimit = now.getTime() + 366 * 24 * 60 * 60 * 1000;
   let checked = 0;
 
-  while (results.length < count && checked < maxChecks) {
-    if (simpleCronMatch(cronTarget, candidate)) {
-      results.push(formatDateTime(new Date(candidate)));
-    }
-    candidate.setMinutes(candidate.getMinutes() + 1);
+  while (results.length < count && candidate.getTime() <= endLimit && checked < 35000) {
     checked++;
+    const z = getZonedCronParts(candidate, timezone);
+    if (
+      !matchCronField(monthP, z.month, 1) ||
+      !matchCronField(domP, z.day, 1) ||
+      !matchCronField(dowP, z.dow, 0)
+    ) {
+      const minsLeft = (23 - z.hour) * 60 + (60 - z.minute);
+      candidate.setMinutes(candidate.getMinutes() + Math.max(1, minsLeft));
+      continue;
+    }
+    if (!matchCronField(hourP, z.hour, 0)) {
+      candidate.setMinutes(candidate.getMinutes() + Math.max(1, 60 - z.minute));
+      continue;
+    }
+    if (!matchCronField(minP, z.minute, 0)) {
+      candidate.setMinutes(candidate.getMinutes() + 1);
+      continue;
+    }
+    results.push(formatDateTime(new Date(candidate), timezone));
+    candidate.setMinutes(candidate.getMinutes() + 1);
   }
 
   return results;
-}
-
-function simpleCronMatch(expr: string, d: Date): boolean {
-  const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return false;
-  const [minP, hourP, domP, monthP, dowP] = parts;
-
-  return (
-    matchCronField(minP, d.getMinutes(), 0) &&
-    matchCronField(hourP, d.getHours(), 0) &&
-    matchCronField(domP, d.getDate(), 1) &&
-    matchCronField(monthP, d.getMonth() + 1, 1) &&
-    matchCronField(dowP, d.getDay(), 0)
-  );
 }
 
 function matchCronField(pattern: string, val: number, min: number): boolean {
@@ -501,7 +547,49 @@ function matchCronField(pattern: string, val: number, min: number): boolean {
   return parsed === val;
 }
 
-function formatDateTime(d: Date): string {
+function formatDateTime(d: Date, timezone?: string): string {
+  if (timezone) {
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        weekday: 'short',
+        hour12: false,
+      });
+      const wkMap: Record<string, string> = {
+        Sun: '日',
+        Mon: '一',
+        Tue: '二',
+        Wed: '三',
+        Thu: '四',
+        Fri: '五',
+        Sat: '六',
+      };
+      let year = '';
+      let month = '';
+      let day = '';
+      let hour = '';
+      let min = '';
+      let dow = '';
+      for (const p of fmt.formatToParts(d)) {
+        if (p.type === 'year') year = p.value;
+        else if (p.type === 'month') month = p.value;
+        else if (p.type === 'day') day = p.value;
+        else if (p.type === 'hour') hour = String(parseInt(p.value, 10) % 24).padStart(2, '0');
+        else if (p.type === 'minute') min = p.value;
+        else if (p.type === 'weekday') dow = wkMap[p.value] || '';
+      }
+      if (year && month && day) {
+        return `${year}-${month}-${day} (周${dow}) ${hour}:${min}`;
+      }
+    } catch {
+      // fallback below
+    }
+  }
   const year = d.getFullYear();
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
   const day = d.getDate().toString().padStart(2, '0');

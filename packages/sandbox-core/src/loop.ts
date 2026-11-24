@@ -56,6 +56,16 @@ export type LLMCaller = (
   toolCalls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
 }>;
 
+function throwIfAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return;
+  const msg = typeof signal.reason === 'string' && signal.reason.trim()
+    ? signal.reason
+    : '执行已被中止或超时';
+  const err = new Error(msg);
+  err.name = 'AbortError';
+  throw err;
+}
+
 /**
  * Thin-Core Agent Loop
  * 核心极简状态机：思考 -> Sentinel 门禁 -> 执行 -> 观察 -> 轨迹留存
@@ -76,6 +86,7 @@ export async function* runAgentLoop(
     skills?: Array<{ name: string; description: string; category?: string; channel?: string }>;
     historyMessages?: Array<{ role: 'user' | 'assistant' | 'system'; content: string | LLMMessageContent }>;
     triggeredIntents?: Array<{ id: string; description: string }>;
+    signal?: AbortSignal;
   }
 ): AsyncGenerator<MuseEvent, TrajectoryStep[], void> {
   const trajectory: TrajectoryStep[] = [];
@@ -146,59 +157,74 @@ export async function* runAgentLoop(
 
   yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'running' };
 
-  while (step < maxSteps) {
-    if (isLoopGuarded) break;
-    step++;
+  try {
+    while (step < maxSteps) {
+      throwIfAborted(context.signal);
+      if (isLoopGuarded) break;
+      step++;
 
-    // 3. 调用大模型进行下一步推理 (支持真流式 SSE 逐 token 实时推送)
-    const chunkQueue: string[] = [];
-    let notifyChunk: (() => void) | null = null;
-    let isFinished = false;
-    let callerError: any = null;
-    let streamedChunkCount = 0;
+      // 3. 调用大模型进行下一步推理 (支持真流式 SSE 逐 token 实时推送)
+      const chunkQueue: string[] = [];
+      let notifyChunk: (() => void) | null = null;
+      let isFinished = false;
+      let callerError: any = null;
+      let streamedChunkCount = 0;
 
-    const onDelta = (delta: string) => {
-      if (!delta) return;
-      chunkQueue.push(delta);
-      if (notifyChunk) {
-        notifyChunk();
-        notifyChunk = null;
-      }
-    };
-
-    const callPromise = callLLM(keepNewestImages(messages, 2), effectiveTools, onDelta)
-      .then((res) => {
+      const onAbort = () => {
         isFinished = true;
         if (notifyChunk) {
           notifyChunk();
           notifyChunk = null;
         }
-        return res;
-      })
-      .catch((err) => {
-        callerError = err;
-        isFinished = true;
+      };
+      context.signal?.addEventListener('abort', onAbort, { once: true });
+
+      const onDelta = (delta: string) => {
+        if (!delta) return;
+        chunkQueue.push(delta);
         if (notifyChunk) {
           notifyChunk();
           notifyChunk = null;
         }
-      });
+      };
 
-    while (!isFinished || chunkQueue.length > 0) {
-      if (chunkQueue.length > 0) {
-        const text = chunkQueue.shift()!;
-        streamedChunkCount++;
-        yield { type: 'stream:text-delta', text, bot_id: context.botId, session_id: context.sessionId };
-      } else if (!isFinished) {
-        await new Promise<void>((resolve) => {
-          notifyChunk = resolve;
+      const callPromise = callLLM(keepNewestImages(messages, 2), effectiveTools, onDelta)
+        .then((res) => {
+          isFinished = true;
+          if (notifyChunk) {
+            notifyChunk();
+            notifyChunk = null;
+          }
+          return res;
+        })
+        .catch((err) => {
+          callerError = err;
+          isFinished = true;
+          if (notifyChunk) {
+            notifyChunk();
+            notifyChunk = null;
+          }
         });
-      }
-    }
 
-    if (callerError) {
-      throw callerError;
-    }
+      while (!isFinished || chunkQueue.length > 0) {
+        if (context.signal?.aborted) break;
+        if (chunkQueue.length > 0) {
+          const text = chunkQueue.shift()!;
+          streamedChunkCount++;
+          yield { type: 'stream:text-delta', text, bot_id: context.botId, session_id: context.sessionId };
+        } else if (!isFinished) {
+          await new Promise<void>((resolve) => {
+            notifyChunk = resolve;
+          });
+        }
+      }
+
+      context.signal?.removeEventListener('abort', onAbort);
+      throwIfAborted(context.signal);
+
+      if (callerError) {
+        throw callerError;
+      }
 
     const response = await callPromise;
     if (!response) {
@@ -286,8 +312,10 @@ export async function* runAgentLoop(
         yield { type: 'sentinel:approval_needed', request: approvalReq, bot_id: context.botId, session_id: context.sessionId };
         yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'paused' };
 
+        throwIfAborted(context.signal);
         // 挂起等待人类通过 Web 或企微/飞书进行确认
         const approved = await sentinel.waitForApproval(approvalReq);
+        throwIfAborted(context.signal);
         if (!approved) {
           yield { type: 'tool:call_end', toolName: call.name, output: '操作已被用户或管理员拒绝', durationMs: 0, bot_id: context.botId, session_id: context.sessionId };
           messages.push({
@@ -302,6 +330,7 @@ export async function* runAgentLoop(
       }
 
       // 6. 执行具体工具 (自动还原 {{vault:KEY}} 凭据占位符，支持透传执行上下文)
+      throwIfAborted(context.signal);
       const startTime = Date.now();
       let output: unknown;
       try {
@@ -310,6 +339,7 @@ export async function* runAgentLoop(
       } catch (err: unknown) {
         output = { error: err instanceof Error ? err.message : String(err) };
       }
+      throwIfAborted(context.signal);
       const durationMs = Date.now() - startTime;
 
       // 工具输出全局脱敏 (Redact): 杜绝敏感 Key / Secret 在日志或前端泄露
@@ -396,23 +426,24 @@ export async function* runAgentLoop(
     }
   }
 
-  // 9. 若执行到达最大步数且最后一条消息是工具执行结果（尚未产出最终结论），进行最后一轮无工具的纯文本总结输出
-  const lastMsg = messages[messages.length - 1];
-  if (lastMsg && lastMsg.role === 'tool') {
-    try {
-      messages.push({
-        role: 'user',
-        content: '请根据前面所有工具的调用与数据排查结果，总结并输出完整的执行结论与建议。'
-      });
-      const finalResp = await callLLM(messages, []);
-      if (finalResp?.content) {
-        yield { type: 'stream:text-delta', text: `\n\n${finalResp.content}`, bot_id: context.botId, session_id: context.sessionId };
+    // 9. 若执行到达最大步数且最后一条消息是工具执行结果（尚未产出最终结论），进行最后一轮无工具的纯文本总结输出
+    const lastMsg = messages[messages.length - 1];
+    if (!context.signal?.aborted && lastMsg && lastMsg.role === 'tool') {
+      try {
+        messages.push({
+          role: 'user',
+          content: '请根据前面所有工具的调用与数据排查结果，总结并输出完整的执行结论与建议。'
+        });
+        const finalResp = await callLLM(messages, []);
+        if (finalResp?.content) {
+          yield { type: 'stream:text-delta', text: `\n\n${finalResp.content}`, bot_id: context.botId, session_id: context.sessionId };
+        }
+      } catch {
+        // 容错处理
       }
-    } catch {
-      // 容错处理
     }
+  } finally {
+    yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'idle' };
   }
-
-  yield { type: 'agent:state', botId: context.botId, bot_id: context.botId, session_id: context.sessionId, state: 'idle' };
   return trajectory;
 }

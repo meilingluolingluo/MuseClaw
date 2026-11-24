@@ -19,6 +19,7 @@ import {
 
 interface SchedulePickerProps {
   value: string;
+  timezone?: string;
   onChange: (cron: string, kind?: 'cron' | 'every' | 'at') => void;
 }
 
@@ -34,14 +35,13 @@ const NATURAL_SUGGESTIONS = [
   { text: '每月 1 号上午 09:00', icon: '🗓️', desc: '每月初' },
 ];
 
-export const SchedulePicker: React.FC<SchedulePickerProps> = ({ value, onChange }) => {
+export const SchedulePicker: React.FC<SchedulePickerProps> = ({ value, timezone, onChange }) => {
   const [naturalText, setNaturalText] = useState(() => formatCronZh(value) || '工作日早晨 09:00');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState<string | null>(null);
 
   // 当外部 value 改变时同步更新建议激活状态与自然语言描述
   useEffect(() => {
-    const zh = formatCronZh(value);
     // 匹配建议胶囊
     const matched = NATURAL_SUGGESTIONS.find((s) => {
       const parsed = parseNaturalLanguageToCron(s.text);
@@ -71,8 +71,8 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({ value, onChange 
 
   // 未来预估执行时间
   const previewRuns = useMemo(() => {
-    return previewNextRuns(value, 3);
-  }, [value]);
+    return previewNextRuns(value, 3, timezone);
+  }, [value, timezone]);
 
   const humanZh = useMemo(() => {
     return formatCronZh(value);
