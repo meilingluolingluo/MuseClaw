@@ -1,8 +1,10 @@
 ﻿import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { WidgetPayload } from '@museclaw/protocol';
 import type { ToolDefinition } from './loop.js';
 import { BaseEnvironment, MicroSandbox, getSanitizedEnv } from './micro-sandbox.ts';
+import { validateWidgetInput } from './widget-validator.ts';
 
 export { getSanitizedEnv };
 
@@ -786,6 +788,75 @@ export function createDefaultTools(options?: {
         } catch (err: any) {
           return { success: false, error: `Device bridge unreachable: ${err?.message || err}` };
         }
+      }
+    },
+
+    // 阶梯 1 (API/Local): 对话内联交互组件 (HTML / SVG Widget)
+    {
+      name: 'show_widget',
+      description:
+        '在对话流内直接渲染可交互的 HTML/SVG 智能界面组件（如逐层展开的结构图、参数联动计算器、动态图表、对比卡片等）。组件运行在透明无边框的隔离沙箱中，优先使用宿主 CSS 变量（--om-bg, --om-surface, --om-surface-2, --om-border, --om-fg, --om-muted, --om-accent, --om-accent-soft, --accent-green, --accent-amber, --accent-red）以自动适配明暗模式，也可通过 window.museclaw.send(prompt, { hidden?: boolean }) 或 data-muse-send="..." 按钮将交互结果回传给对话。传入 widget_id 可原位替换更新已有组件；请尽量填写 fallback_text 供非网页通道降级展示。',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '交互组件标题（最多 120 字符）' },
+          html: {
+            type: 'string',
+            description: '自包含的 HTML 片段或完整文档，或以 <svg 开头的 SVG 代码'
+          },
+          fallback_text: {
+            type: 'string',
+            description: '可选降级纯文本摘要，用于在飞书/如流或历史回放中展示'
+          },
+          widget_id: {
+            type: 'string',
+            description: '可选，传入已有组件 ID 可原位更新该交互组件'
+          },
+          height: {
+            type: 'number',
+            description: '可选初始高度（像素，自动钳制在 120~1200，渲染后会自动随内容自适应）'
+          }
+        },
+        required: ['title', 'html']
+      },
+      execute: async (args) => {
+        const validation = validateWidgetInput({
+          title: args.title,
+          html: args.html,
+          height: args.height,
+          fallback_text: args.fallback_text,
+          fallbackText: args.fallbackText
+        });
+        if (!validation.ok) {
+          return {
+            success: false,
+            error: validation.error
+          };
+        }
+
+        const now = Date.now();
+        const existingId = typeof args.widget_id === 'string' && args.widget_id.trim() ? args.widget_id.trim() : '';
+        const widgetId = existingId || `wgt_${now}_${Math.random().toString(36).slice(2, 6)}`;
+        const widget: WidgetPayload = {
+          id: widgetId,
+          title: validation.value.title,
+          html: validation.value.html,
+          kind: validation.value.kind,
+          ...(validation.value.height !== undefined ? { height: validation.value.height } : {}),
+          ...(validation.value.fallbackText !== undefined ? { fallbackText: validation.value.fallbackText } : {}),
+          createdAt: now,
+          updatedAt: now
+        };
+
+        console.log(`[Tool:show_widget] 渲染交互组件: ${widget.title} (${widget.id}, ${widget.kind})`);
+        return {
+          success: true,
+          exitCode: 0,
+          widget_id: widget.id,
+          title: widget.title,
+          message: `交互组件「${widget.title}」已渲染展示 (id: ${widget.id})`,
+          __widget: widget
+        };
       }
     },
 

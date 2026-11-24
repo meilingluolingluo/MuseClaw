@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ToolTrace } from './ToolTrace';
 import { AvatarOptionsCard } from './AvatarOptionsCard';
+import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { formatRelativeTime } from '../../utils/format';
@@ -25,6 +26,7 @@ interface MessageBubbleProps {
   bot: Bot | null;
   sessionId?: string;
   onApprovalResolved?: (approvalId: string, approved: boolean) => void;
+  onWidgetPrompt?: (prompt: string, opts?: { hidden?: boolean }) => void;
   /** 流式占位气泡：工具调用默认展开 */
   live?: boolean;
 }
@@ -34,6 +36,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   bot,
   sessionId,
   onApprovalResolved,
+  onWidgetPrompt,
   live,
 }) => {
   const { setIsAuditDrawerOpen, setFocusApprovalId, showToast, setIsAvatarStudioOpen } = useApp();
@@ -257,6 +260,19 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
             dangerouslySetInnerHTML={{ __html: renderedHtml }}
           />
         ) : null}
+
+        {/* 内联交互组件卡片 */}
+        {!isUser && message.widgets && message.widgets.length > 0 && (
+          <div className="message-widgets-list">
+            {message.widgets.map((widget) => (
+              <WidgetCard
+                key={widget.id}
+                widget={widget}
+                onSendPrompt={onWidgetPrompt}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

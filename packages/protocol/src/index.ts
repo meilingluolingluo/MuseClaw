@@ -132,7 +132,22 @@ export interface Session {
     }>;
     /** 模型思考过程（若开启 reasoning） */
     reasoning?: string;
+    /** 内联交互组件列表 */
+    widgets?: WidgetPayload[];
+    /** 是否为前端隐藏的静默交互轮次 */
+    hidden?: boolean;
   }>;
+}
+
+export interface WidgetPayload {
+  id: string;
+  title: string;
+  html: string;
+  kind?: 'html' | 'svg';
+  height?: number;
+  fallbackText?: string;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 // 1.2 入站消息与路由结果类型
@@ -192,6 +207,7 @@ export type MuseEvent =
   | { type: 'ladder:escalation'; sessionId: string; toolName: string; fromRung?: number; toRung: number; channel: ExecutionChannel; bot_id?: string; session_id?: string }
   | { type: 'sandbox:execution'; command: string; engine: 'bwrap' | 'env_scrubbed'; networkBlocked: boolean; bot_id?: string; session_id?: string }
   | { type: 'artifact:created'; artifactType: 'file' | 'report' | 'screenshot'; title: string; url: string; bot_id?: string; session_id?: string }
+  | { type: 'ui:widget'; widget: WidgetPayload; bot_id?: string; session_id?: string }
   | { type: 'avatar'; event: AvatarSession; bot_id?: string; session_id?: string };
 
 // 4. Trajectory Export Format (执行轨迹导出格式，供模型微调与对齐使用)

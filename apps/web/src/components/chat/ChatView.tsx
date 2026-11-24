@@ -5,7 +5,7 @@ import { ChatComposer } from './ChatComposer';
 import { AuditDrawer } from '../audit/AuditDrawer';
 import { AgentCapsule } from './AgentCapsule';
 import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw, Home, MessageSquare, Plus } from 'lucide-react';
-import type { Message, MessageAttachment, AvatarMood } from '../../types';
+import type { Message, MessageAttachment, AvatarMood, WidgetPayload } from '../../types';
 import { api } from '../../services/api';
 
 export const ChatView: React.FC = () => {
@@ -34,6 +34,7 @@ export const ChatView: React.FC = () => {
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
   const [streamingTools, setStreamingTools] = useState<any[]>([]);
+  const [streamingWidgets, setStreamingWidgets] = useState<WidgetPayload[]>([]);
   const [botMood, setBotMood] = useState<AvatarMood>('idle');
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -110,6 +111,7 @@ export const ChatView: React.FC = () => {
       setStreamingContent('');
       setStreamingReasoning('');
       setStreamingTools([]);
+      setStreamingWidgets([]);
     }
 
     if (!activeSessionId) {
@@ -242,7 +244,12 @@ export const ChatView: React.FC = () => {
     setHasNewUnseen(false);
   };
 
-  const handleSendMessage = async (text: string, attachments: MessageAttachment[] = []) => {
+  const handleSendMessage = async (
+    text: string,
+    attachments: MessageAttachment[] = [],
+    options?: { hidden?: boolean }
+  ) => {
+    const isHiddenTurn = Boolean(options?.hidden);
     // 第一条消息不该先让用户「去新建会话」：没有会话就静默开一个
     let sessionId = activeSessionId;
     if (!sessionId) {
@@ -258,20 +265,22 @@ export const ChatView: React.FC = () => {
     const targetSessionId = sessionId;
     currentStreamingSessionIdRef.current = targetSessionId;
 
-    const userMessage: Message = {
-      id: `usr_${Date.now()}`,
-      role: 'user',
-      content: text,
-      attachments,
-      timestamp: Date.now(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    if (!isHiddenTurn) {
+      const userMessage: Message = {
+        id: `usr_${Date.now()}`,
+        role: 'user',
+        content: text,
+        attachments,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+    }
     setIsStreaming(true);
     setBotMood('working');
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingTools([]);
+    setStreamingWidgets([]);
     isAtBottomRef.current = true;
     setShowScrollBottomBtn(false);
     setHasNewUnseen(false);
@@ -296,6 +305,7 @@ export const ChatView: React.FC = () => {
           bot_id: activeBot?.id,
           botId: activeBot?.id,
           attachments,
+          ...(isHiddenTurn ? { hidden: true } : {}),
         }),
       });
 
@@ -310,6 +320,7 @@ export const ChatView: React.FC = () => {
       let buffer = '';
       let accumulatedReasoning = '';
       const toolsAccumulator: any[] = [];
+      const widgetsAccumulator: WidgetPayload[] = [];
 
       let updateRafId: number | null = null;
       let hasApprovalNeeded = false;
@@ -396,6 +407,16 @@ export const ChatView: React.FC = () => {
               if (activeSessionIdRef.current === targetSessionId) {
                 setStreamingTools([...toolsAccumulator]);
               }
+            } else if (event.type === 'ui:widget' && event.widget) {
+              const existingIdx = widgetsAccumulator.findIndex((w) => w.id === event.widget.id);
+              if (existingIdx >= 0) {
+                widgetsAccumulator[existingIdx] = event.widget;
+              } else {
+                widgetsAccumulator.push(event.widget);
+              }
+              if (activeSessionIdRef.current === targetSessionId) {
+                setStreamingWidgets([...widgetsAccumulator]);
+              }
             } else if (event.type === 'sentinel:taint_updated') {
               setTainted(event.isTainted, event.reason);
             } else if (event.type === 'sentinel:approval_needed') {
@@ -446,13 +467,14 @@ export const ChatView: React.FC = () => {
         return;
       }
 
-      if (accumulatedText.trim() || accumulatedReasoning.trim()) {
+      if (accumulatedText.trim() || accumulatedReasoning.trim() || widgetsAccumulator.length > 0) {
         const assistantMsg: Message = {
           id: `asst_${Date.now()}`,
           role: 'assistant',
-          content: accumulatedText.trim() || '（Agent 执行完成）',
+          content: accumulatedText.trim() || (widgetsAccumulator.length > 0 ? '' : '（Agent 执行完成）'),
           reasoning: accumulatedReasoning || undefined,
           toolCalls: toolsAccumulator.length > 0 ? toolsAccumulator : undefined,
+          widgets: widgetsAccumulator.length > 0 ? widgetsAccumulator : undefined,
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
@@ -513,6 +535,7 @@ export const ChatView: React.FC = () => {
         setStreamingContent('');
         setStreamingReasoning('');
         setStreamingTools([]);
+        setStreamingWidgets([]);
       }
       if (currentStreamingSessionIdRef.current === targetSessionId) {
         currentStreamingSessionIdRef.current = null;
@@ -545,8 +568,23 @@ export const ChatView: React.FC = () => {
     );
   };
 
+  const handleWidgetPrompt = useCallback(
+    (prompt: string, opts?: { hidden?: boolean }) => {
+      if (isStreaming) {
+        showToast('当前智能体仍在响应中，请稍后再试', 'info');
+        return;
+      }
+      handleSendMessage(prompt, [], opts);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isStreaming, activeSessionId, activeBot?.id]
+  );
+
+  const visibleMessages = messages.filter((msg) => !msg.hidden);
   const displayedMessages =
-    messages.length > visibleCount ? messages.slice(messages.length - visibleCount) : messages;
+    visibleMessages.length > visibleCount
+      ? visibleMessages.slice(visibleMessages.length - visibleCount)
+      : visibleMessages;
 
   return (
     <div className="chat-stage-wrapper">
@@ -625,7 +663,7 @@ export const ChatView: React.FC = () => {
                 <RotateCcw size={13} /> 重新加载
               </button>
             </div>
-          ) : messages.length === 0 && !isStreaming ? (
+          ) : visibleMessages.length === 0 && !isStreaming ? (
             <div className="chat-empty-state">
               <div className="chat-empty-hero-wrap">
                 <AgentCapsule
@@ -701,11 +739,11 @@ export const ChatView: React.FC = () => {
             </div>
           ) : (
             <>
-              {messages.length > visibleCount && (
+              {visibleMessages.length > visibleCount && (
                 <div className="chat-history-load-more">
                   <button type="button" onClick={handleLoadMoreHistory}>
                     <Clock size={12} />
-                    查看更早的历史记录（还有 {messages.length - visibleCount} 条）
+                    查看更早的历史记录（还有 {visibleMessages.length - visibleCount} 条）
                   </button>
                 </div>
               )}
@@ -716,6 +754,7 @@ export const ChatView: React.FC = () => {
                   bot={activeBot}
                   sessionId={activeSessionId || undefined}
                   onApprovalResolved={handleApprovalResolved}
+                  onWidgetPrompt={handleWidgetPrompt}
                 />
               ))}
             </>
@@ -729,17 +768,17 @@ export const ChatView: React.FC = () => {
                 role: 'assistant',
                 content:
                   streamingContent ||
-                  (streamingReasoning
-                    ? ''
-                    : streamingTools.length > 0
+                  (streamingReasoning || streamingTools.length > 0 || streamingWidgets.length > 0
                     ? ''
                     : messages.some((m) => m.approvalRequest && (!m.approvalRequest.status || m.approvalRequest.status === 'pending'))
                     ? '⚠️ 正在等待人工安全审批授权，请在上方门禁卡片中确认或驳回...'
                     : '正在连接并调度 Agent 推理执行...'),
                 reasoning: streamingReasoning || undefined,
                 toolCalls: streamingTools,
+                widgets: streamingWidgets.length > 0 ? streamingWidgets : undefined,
               }}
               bot={activeBot}
+              onWidgetPrompt={handleWidgetPrompt}
               live
             />
           )}

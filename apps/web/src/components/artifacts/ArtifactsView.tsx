@@ -4,6 +4,7 @@ import type { Artifact } from '../../types';
 import { api } from '../../services/api';
 import { formatFileSize, formatTime } from '../../utils/format';
 import { Modal } from '../common/Modal';
+import { WidgetCard } from '../chat/WidgetCard';
 import { useApp } from '../../context/AppContext';
 import { renderMarkdown } from '../../utils/markdown';
 
@@ -13,6 +14,7 @@ export const ArtifactsView: React.FC = () => {
   const [preview, setPreview] = useState<
     | { loading: true }
     | { html: string }
+    | { widgetHtml: string; title: string; kind: 'html' | 'svg' }
     | { text: string }
     | { imageUrl: string }
     | { binary: true; url: string }
@@ -78,14 +80,21 @@ export const ArtifactsView: React.FC = () => {
         );
       }
       const type = res.headers.get('content-type') || '';
-      if (type.startsWith('image/')) {
+      const isHtmlOrSvg = /\.(html?|svg)$/i.test(name);
+      if (type.startsWith('image/') && !isHtmlOrSvg) {
         const blob = await res.blob();
         const objectUrl = URL.createObjectURL(blob);
         objectUrlRef.current = objectUrl;
         setPreview({ imageUrl: objectUrl });
-      } else if (type.includes('text/') || type.includes('json')) {
+      } else if (type.includes('text/') || type.includes('json') || isHtmlOrSvg) {
         const text = await res.text();
-        setPreview(/\.(md|markdown)$/i.test(name) ? { html: renderMarkdown(text) } : { text });
+        if (/\.svg$/i.test(name)) {
+          setPreview({ widgetHtml: text, title: name, kind: 'svg' });
+        } else if (/\.(html?)$/i.test(name)) {
+          setPreview({ widgetHtml: text, title: name, kind: 'html' });
+        } else {
+          setPreview(/\.(md|markdown)$/i.test(name) ? { html: renderMarkdown(text) } : { text });
+        }
       } else {
         setPreview({ binary: true, url });
       }
@@ -201,7 +210,7 @@ export const ArtifactsView: React.FC = () => {
           onClose={closePreview}
           title={selectedArtifact.title}
           icon={<Package size={18} />}
-          maxWidth="700px"
+          maxWidth={preview && 'widgetHtml' in preview ? '860px' : '700px'}
         >
           <div className="artifact-modal-body">
             <div className="artifact-path-line">
@@ -220,6 +229,17 @@ export const ArtifactsView: React.FC = () => {
             )}
             {preview && 'html' in preview && (
               <div className="artifact-preview markdown-body" dangerouslySetInnerHTML={{ __html: preview.html }} />
+            )}
+            {preview && 'widgetHtml' in preview && (
+              <WidgetCard
+                inModal
+                widget={{
+                  id: `artifact_${selectedArtifact.id || preview.title}`,
+                  title: preview.title,
+                  html: preview.widgetHtml,
+                  kind: preview.kind
+                }}
+              />
             )}
             {preview && 'text' in preview && <pre className="artifact-preview">{preview.text}</pre>}
             {preview && 'imageUrl' in preview && <img className="artifact-preview-image" src={preview.imageUrl} alt={selectedArtifact.title} />}

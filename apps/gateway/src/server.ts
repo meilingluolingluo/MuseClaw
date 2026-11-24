@@ -30,7 +30,13 @@ import { ConnectorManager } from './connectors.ts';
 import { globalSkillStore } from '../skills/index.ts';
 import { authService, parseCookies, type AuthUser } from '../auth/auth-service.ts';
 import { AvatarStudio, parseAvatarRequest, parseAvatarChoice } from '../avatar/index.ts';
-import type { RouteResult, Session, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
+import type { RouteResult, Session, ApprovalRequest, AgentProfile, WidgetPayload } from '@museclaw/protocol';
+
+function formatWidgetFallbackText(widget: WidgetPayload): string {
+  return widget.fallbackText
+    ? `\n\n${widget.fallbackText}`
+    : `\n\n[交互组件：${widget.title}，请在 Web 工作台查看完整交互视图]`;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -260,6 +266,9 @@ const infoflowChannel = createInfoflowChannel(
       if (event.type === 'stream:text-delta') {
         output += event.text;
       }
+      if (event.type === 'ui:widget') {
+        output += formatWidgetFallbackText(event.widget);
+      }
       if (event.type === 'sentinel:approval_needed') {
         // 自动将审批指令卡片推送给如流用户
         await infoflowChannel.approvalBridge.pushApprovalNotice(userId, event.request);
@@ -321,6 +330,9 @@ const feishuChannel = createFeishuChannel(
     for await (const event of loop) {
       if (event.type === 'stream:text-delta') {
         output += event.text;
+      }
+      if (event.type === 'ui:widget') {
+        output += formatWidgetFallbackText(event.widget);
       }
       if (event.type === 'sentinel:approval_needed') {
         // 推送飞书原生互动卡片（带允许/拒绝按钮）
@@ -1373,10 +1385,19 @@ export function startGatewayServer(defaultPort = 8799) {
         return res.end(JSON.stringify({ error: 'Artifact not found' }));
       }
       const content = fs.readFileSync(filePath);
-      const isText = filename.endsWith('.txt') || filename.endsWith('.md') || filename.endsWith('.json') || filename.endsWith('.csv');
+      const lower = filename.toLowerCase();
+      const isText =
+        lower.endsWith('.txt') ||
+        lower.endsWith('.md') ||
+        lower.endsWith('.json') ||
+        lower.endsWith('.csv') ||
+        lower.endsWith('.html') ||
+        lower.endsWith('.htm') ||
+        lower.endsWith('.svg');
       res.writeHead(200, {
         'Content-Type': isText ? 'text/plain; charset=utf-8' : 'application/octet-stream',
-        'Content-Disposition': `inline; filename="${filename}"`
+        'Content-Disposition': `inline; filename="${filename}"`,
+        'X-Content-Type-Options': 'nosniff'
       });
       return res.end(content);
     }
@@ -2696,6 +2717,7 @@ fi
         return res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
       }
       const text = parsed.prompt || parsed.text || parsed.message || '';
+      const isHiddenTurn = Boolean(parsed.hidden);
       const userId = currentUser ? currentUser.username : 'user_web';
       const requestedSessionId = parsed.sessionId || parsed.session_id;
       const requestedBotId = parsed.botId || parsed.bot_id;
@@ -2845,13 +2867,19 @@ fi
       const historyMessages = (session.messages || [])
         .slice(-20)
         .map((m) => {
-          let text = m.content || '';
-          if (text.length > 4000) {
-            text = text.slice(0, 2000) + '\n...[已省略部分过长历史]...\n' + text.slice(-2000);
+          let msgText = m.content || '';
+          if (Array.isArray(m.widgets) && m.widgets.length > 0) {
+            const widgetNotes = m.widgets
+              .map((w) => `[已展示交互组件: ${w.title}]${w.fallbackText ? ` ${w.fallbackText}` : ''}`)
+              .join('\n');
+            msgText = msgText ? `${msgText}\n${widgetNotes}` : widgetNotes;
+          }
+          if (msgText.length > 4000) {
+            msgText = msgText.slice(0, 2000) + '\n...[已省略部分过长历史]...\n' + msgText.slice(-2000);
           }
           return {
             role: m.role as 'user' | 'assistant',
-            content: text
+            content: msgText
           };
         })
         .filter((m) => m.content && m.content.trim().length > 0);
@@ -2909,6 +2937,7 @@ fi
       let fullAssistantText = '';
       let reasoningText = '';
       const toolCalls: Array<Record<string, unknown>> = [];
+      const widgets: WidgetPayload[] = [];
       let clientGone = false;
       let finished = false;
 
@@ -2941,6 +2970,14 @@ fi
           }
           if (event.type === 'stream:reasoning-delta') {
             reasoningText += event.text;
+          }
+          if (event.type === 'ui:widget' && event.widget) {
+            const existingIdx = widgets.findIndex((w) => w.id === event.widget.id);
+            if (existingIdx >= 0) {
+              widgets[existingIdx] = event.widget;
+            } else {
+              widgets.push(event.widget);
+            }
           }
           if (event.type === 'sentinel:approval_needed') {
             session.messages.push({
@@ -2980,7 +3017,17 @@ fi
               running.status = isError ? (rejected ? 'rejected' : 'failed') : 'done';
               running.ok = !isError;
               running.durationMs = event.durationMs || 0;
-              running.result = clipToolOutput(event.output);
+              running.result =
+                event.toolName === 'show_widget' &&
+                typeof event.output === 'object' &&
+                event.output !== null &&
+                (event.output as any).__widget
+                  ? {
+                      success: true,
+                      widget_id: (event.output as any).widget_id,
+                      title: (event.output as any).title
+                    }
+                  : clipToolOutput(event.output);
             }
           }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -2990,9 +3037,10 @@ fi
         session.messages.push({
           role: 'user',
           content: text || (attachments.length ? '（已上传附件）' : ''),
-          ...(attachments.length ? { attachments } : {})
+          ...(attachments.length ? { attachments } : {}),
+          ...(isHiddenTurn ? { hidden: true } : {})
         });
-        if (fullAssistantText || clientGone || toolCalls.length > 0 || reasoningText.trim()) {
+        if (fullAssistantText || clientGone || toolCalls.length > 0 || reasoningText.trim() || widgets.length > 0) {
           const content = clientGone
             ? `${fullAssistantText ? `${fullAssistantText}\n\n` : ''}（已停止）`
             : fullAssistantText;
@@ -3006,7 +3054,8 @@ fi
             role: 'assistant',
             content,
             ...(reasoningText.trim() ? { reasoning: reasoningText.trim() } : {}),
-            ...(toolCalls.length ? { toolCalls } : {})
+            ...(toolCalls.length ? { toolCalls } : {}),
+            ...(widgets.length ? { widgets } : {})
           });
         }
         sessionStore.save(session, userId);
@@ -3014,7 +3063,7 @@ fi
           feedStore.recordActivity(userId, {
             kind: 'chat',
             title: session.title || '任务会话',
-            text: fullAssistantText.slice(0, 150),
+            text: fullAssistantText.slice(0, 150) || widgets.map((w) => `[交互组件] ${w.title}`).join('、'),
             sessionId: session.id,
             sessionTitle: session.title
           });

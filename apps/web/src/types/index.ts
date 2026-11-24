@@ -49,6 +49,17 @@ export interface MessageAttachment {
   artifactId?: string;
 }
 
+export interface WidgetPayload {
+  id: string;
+  title: string;
+  html: string;
+  kind?: 'html' | 'svg';
+  height?: number;
+  fallbackText?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -63,6 +74,8 @@ export interface Message {
     ok?: boolean;
   }>;
   attachments?: MessageAttachment[];
+  widgets?: WidgetPayload[];
+  hidden?: boolean;
   timestamp?: number;
   avatarEvent?: AvatarSession;
   approvalRequest?: {

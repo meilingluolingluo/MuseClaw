@@ -504,5 +504,46 @@ metadata:
    - requires 申明：需要的系统二进制工具 (\`bins\`) 与环境变量 (\`env\`)
 4. 脚本与模板丰富：在 scripts/ 下提供可执行脚本，在 assets/ 提供模板文件。
 5. 指令正文包含：核心前置条件、分步执行流程、边界约束、最终交付格式。`
+  },
+  {
+    name: 'interactive-ui',
+    description: '智能交互界面规范：当用户需要可逐层展开的结构原理图、可调参数实时重算的计算器/清单、动态图表或交互式可视化演示时，通过 show_widget 直接在对话中生成自包含 HTML/SVG 组件。',
+    category: 'productivity',
+    channel: 'web',
+    allowedTools: ['show_widget'],
+    content: `---
+name: interactive-ui
+description: 智能交互界面规范：当用户需要可逐层展开的结构原理图、可调参数实时重算的计算器/清单、动态图表或交互式可视化演示时，通过 show_widget 直接在对话中生成自包含 HTML/SVG 组件。
+category: productivity
+allowed-tools: [show_widget]
+metadata:
+  author: MuseClaw
+  version: "1.0.0"
+---
+
+# 智能交互界面 (Interactive UI) 创作规范
+
+当纯文本或静态表格难以直观表达信息时，优先使用 \`show_widget\` 工具向用户交付直接可操作的交互界面。
+
+## 典型适用场景
+1. **结构拆解与原理演示**：机械/系统分层结构图（如点击部件逐层展开详情、高亮关联模块、缩放切换视图）。
+2. **参数联动计算器与清单**：家宴采购清单、预算/成本估算、配比换算（调节人数滑块、单价或开关，明细与总计实时重算）。
+3. **动态图表与方案对比**：多维度筛选、标签切换、排序对比表、交互式时间线。
+
+## 设计与主题规范
+1. **必须复用宿主 CSS 变量，严禁硬编码固定背景色与文字颜色**，确保在明亮与暗黑模式下均清晰可读：
+   - 背景与表面：\`var(--om-bg)\`, \`var(--om-surface)\`, \`var(--om-surface-2)\`
+   - 边框与分割线：\`var(--om-border)\`
+   - 文字色彩：\`var(--om-fg)\`, \`var(--om-muted)\`
+   - 强调与状态色：\`var(--om-accent)\`, \`var(--om-accent-soft)\`, \`var(--om-accent-soft-fg)\`, \`var(--accent-green)\`, \`var(--accent-amber)\`, \`var(--accent-red)\`
+2. **透明自适应画布**：\`body\` 保持透明背景与零外边距，宽度使用流式布局（\`width: 100%\`），避免出现水平滚动条；在窄容器下自动换行或堆叠。
+3. **自包含与语法可靠**：内联 \`<script>\` 不得存在语法错误；若使用公开 CDN（如 \`cdn.jsdelivr.net\`、\`cdnjs.cloudflare.com\`、\`esm.sh\`、\`unpkg.com\`），需做可用性兜底判断；优先使用轻量原生 SVG + JavaScript 实现。
+
+## 交互回传与原位更新
+1. **触发新一轮对话**：需要让用户点击组件按钮继续深入追问时，可调用 \`window.museclaw.send(prompt, { hidden?: boolean })\`，或在按钮上使用声明式属性 \`data-muse-send="追问内容"\`（可选 \`data-muse-hidden="true"\`）。
+2. **原位更新组件**：修改或刷新已有交互卡片时，传入原 \`widget_id\` 即可原位替换。
+
+## 降级兼容性
+每次调用 \`show_widget\` 时，务必填写简洁完整的 \`fallback_text\`，以便在飞书、如流等纯文本通道或历史记录中依然保留核心结论与数据摘要。`
   }
 ];

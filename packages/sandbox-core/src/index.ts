@@ -7,6 +7,7 @@ export * from './micro-sandbox.ts';
 export * from './channel-ladder.ts';
 export * from './vault.ts';
 export * from './tools.ts';
+export * from './widget-validator.ts';
 export * from './loop.ts';
 export * from './llm.ts';
 export * from './local-agent-prober.ts';

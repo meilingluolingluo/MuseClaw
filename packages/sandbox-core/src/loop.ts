@@ -1,4 +1,4 @@
-import type { MuseEvent, TrajectoryStep, ApprovalRequest, AgentProfile } from '@museclaw/protocol';
+import type { MuseEvent, TrajectoryStep, ApprovalRequest, AgentProfile, WidgetPayload } from '@museclaw/protocol';
 import { defaultVault } from './vault.ts';
 import { keepNewestImages } from './vision.ts';
 
@@ -101,6 +101,12 @@ export async function* runAgentLoop(
   const allowlist = context.profile?.tool_allowlist || context.profile?.defaultTools;
   if (allowlist && allowlist.length > 0 && !allowlist.includes('*')) {
     effectiveTools = tools.filter((t) => allowlist.includes(t.name));
+  }
+
+  // 2.1 若当前员工可用 show_widget，补充智能交互界面引导
+  if (effectiveTools.some((t) => t.name === 'show_widget')) {
+    effectivePrompt +=
+      '\n\n[Interactive UI (智能交互界面能力)]:\n当用户询问需要逐层拆解的结构/原理图、可调参数实时重算的计算器/清单、动态图表或交互式对比演示时，优先调用 show_widget 工具直接在对话流中生成自包含的交互式 HTML/SVG 组件（并使用宿主 CSS 变量 --om-bg / --om-surface / --om-surface-2 / --om-border / --om-fg / --om-muted / --om-accent 适配明暗主题，附带 fallback_text 摘要），再用简短文字做补充说明。';
   }
 
   const messages: LLMMessage[] = [
@@ -310,6 +316,20 @@ export async function* runAgentLoop(
       }
 
       yield { type: 'tool:call_end', toolName: call.name, output: sanitizedOutput, durationMs, bot_id: context.botId, session_id: context.sessionId };
+
+      if (
+        call.name === 'show_widget' &&
+        sanitizedOutput &&
+        typeof sanitizedOutput === 'object' &&
+        (sanitizedOutput as Record<string, unknown>).__widget
+      ) {
+        yield {
+          type: 'ui:widget',
+          widget: (sanitizedOutput as Record<string, unknown>).__widget as WidgetPayload,
+          bot_id: context.botId,
+          session_id: context.sessionId
+        };
+      }
 
       // 7. 动态污点识别：检查当前工具是否为污点源 (Taint Source)
       // 若读取了敏感文件、内网数据库或凭据，立即将当前会话置为受污染 (Tainted) 状态
