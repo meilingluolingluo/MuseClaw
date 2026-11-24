@@ -38,3 +38,7 @@ apps/gateway/apps/
 
 # Graphify knowledge graph outputs (generated, not source)
 graphify-out/
+
+# Impeccable runtime caches (keep shared config.json)
+.impeccable/hook.cache.json
+.impeccable/audit/

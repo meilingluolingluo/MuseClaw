@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "roboto",
+        "createdAt": "2026-11-24T16:21:16.168Z",
+        "reason": "pre-existing fallback font stack in standalone weekly-review HTML export template (apps/gateway/skills/builtin.ts:335)"
+      }
+    ]
+  }
+}
