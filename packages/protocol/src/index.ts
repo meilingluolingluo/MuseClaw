@@ -9,18 +9,77 @@ export type ExecutionChannel = 'api' | 'cli' | 'web' | 'browser' | 'gui' | 'mixe
 // 0.1 Skill Ecosystem Models (Agent Skills 标准化规程与技能包体系)
 export type SkillCategory = 'devops' | 'productivity' | 'research' | 'integration' | 'utility' | 'custom';
 export type SkillSource = 'builtin' | 'custom' | 'imported' | 'learned';
+export type SkillLifecycleState = 'active' | 'stale' | 'archived';
+export type SkillTrustLevel = 'builtin' | 'custom' | 'imported' | 'learned';
+export type SkillSecurityVerdict = 'safe' | 'caution' | 'dangerous';
+
+export interface SkillEnvRequirementSpec {
+  name: string;
+  prompt?: string;
+  help?: string;
+  optional?: boolean;
+}
+
+export interface SkillEnvVarStatus {
+  name: string;
+  configured: boolean;
+  source?: 'process' | 'managed';
+  maskedValue?: string;
+  prompt?: string;
+  help?: string;
+  optional?: boolean;
+}
 
 export interface SkillRequirements {
   bins?: string[];
   env?: string[];
+  envSpecs?: SkillEnvRequirementSpec[];
   os?: string[];
 }
 
 export interface SkillReadiness {
   ready: boolean;
+  status?: 'available' | 'setup_needed' | 'unsupported';
   missingBins?: string[];
   missingEnv?: string[];
+  envStatus?: SkillEnvVarStatus[];
   details?: string;
+}
+
+export interface SkillSecurityFinding {
+  id: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  category: string;
+  file: string;
+  message: string;
+}
+
+export interface SkillSecurityReport {
+  trustLevel: SkillTrustLevel;
+  verdict: SkillSecurityVerdict;
+  policyAction: 'allow' | 'ask' | 'block';
+  findings: SkillSecurityFinding[];
+}
+
+export interface SkillLintFinding {
+  severity: 'error' | 'warning';
+  rule: string;
+  message: string;
+}
+
+export interface SkillLintReport {
+  score: number;
+  estimatedTokens: number;
+  findings: SkillLintFinding[];
+}
+
+export interface SkillUsageStats {
+  useCount: number;
+  viewCount: number;
+  patchCount: number;
+  lastUsedAt?: number;
+  pinned?: boolean;
+  lifecycleState: SkillLifecycleState;
 }
 
 export interface SkillMetadata {
@@ -64,6 +123,10 @@ export interface SkillDefinition {
   license?: string;
   compatibility?: string;
   warnings: string[];
+  usage?: SkillUsageStats;
+  lint?: SkillLintReport;
+  security?: SkillSecurityReport;
+  hasBuiltinOverride?: boolean;
   updatedAt?: number;
   createdAt?: number;
 }

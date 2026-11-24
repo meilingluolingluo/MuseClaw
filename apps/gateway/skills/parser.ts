@@ -18,7 +18,17 @@
  */
 
 import { execSync } from 'node:child_process';
-import type { SkillCategory, SkillDefinition, SkillRequirements, SkillReadiness, SkillSource, ExecutionChannel } from '@museclaw/protocol';
+import type {
+  SkillCategory,
+  SkillDefinition,
+  SkillEnvVarStatus,
+  SkillRequirements,
+  SkillReadiness,
+  SkillSource,
+  ExecutionChannel
+} from '@museclaw/protocol';
+import { scanTextSecurityFindings } from './quality.ts';
+import { maskEnvValue } from './usage.ts';
 
 export const SKILL_NAME_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const MAX_SKILL_NAME_LEN = 64;
@@ -44,6 +54,13 @@ export interface ParsedSkillMd {
 const binCheckCache = new Map<string, boolean>();
 
 /**
+ * 清理系统命令探测缓存，用于手动重新探测运行环境
+ */
+export function clearBinaryCheckCache(): void {
+  binCheckCache.clear();
+}
+
+/**
  * 快速检查可执行文件是否存在于 PATH
  */
 export function isBinaryAvailable(bin: string): boolean {
@@ -59,15 +76,37 @@ export function isBinaryAvailable(bin: string): boolean {
   }
 }
 
+function isCurrentOsSupported(requiredOs?: string[]): boolean {
+  if (!Array.isArray(requiredOs) || requiredOs.length === 0) return true;
+  const current = process.platform;
+  const aliases = new Set<string>([current]);
+  if (current === 'win32') aliases.add('windows');
+  if (current === 'darwin') aliases.add('macos');
+  return requiredOs.some((item) => aliases.has(String(item).trim().toLowerCase()));
+}
+
 /**
- * 校验技能运行环境就绪度 (命令工具与环境变量检测)
+ * 校验技能运行环境就绪度 (平台兼容性、系统命令与环境变量检测)
  */
-export function checkSkillReadiness(requires?: SkillRequirements): SkillReadiness {
+export function checkSkillReadiness(
+  requires?: SkillRequirements,
+  managedEnvLookup?: (key: string) => { value?: string; source?: 'process' | 'managed' }
+): SkillReadiness {
   if (!requires) {
-    return { ready: true, details: '运行环境就绪' };
+    return { ready: true, status: 'available', details: '运行环境就绪' };
   }
+
+  if (!isCurrentOsSupported(requires.os)) {
+    return {
+      ready: false,
+      status: 'unsupported',
+      details: `当前操作系统 (${process.platform}) 不在支持范围 (${requires.os?.join(', ')})`
+    };
+  }
+
   const missingBins: string[] = [];
   const missingEnv: string[] = [];
+  const envStatus: SkillEnvVarStatus[] = [];
 
   if (Array.isArray(requires.bins)) {
     for (const bin of requires.bins) {
@@ -77,23 +116,54 @@ export function checkSkillReadiness(requires?: SkillRequirements): SkillReadines
     }
   }
 
-  if (Array.isArray(requires.env)) {
-    for (const envVar of requires.env) {
-      if (!process.env[envVar]) {
-        missingEnv.push(envVar);
+  const specMap = new Map<string, { prompt?: string; help?: string; optional?: boolean }>();
+  if (Array.isArray(requires.envSpecs)) {
+    for (const spec of requires.envSpecs) {
+      if (spec?.name) {
+        specMap.set(spec.name, { prompt: spec.prompt, help: spec.help, optional: spec.optional });
       }
+    }
+  }
+  const envNames = Array.from(
+    new Set([...(Array.isArray(requires.env) ? requires.env : []), ...Array.from(specMap.keys())].filter(Boolean))
+  );
+
+  for (const envVar of envNames) {
+    const spec = specMap.get(envVar);
+    const resolved = managedEnvLookup ? managedEnvLookup(envVar) : undefined;
+    const rawVal = resolved?.value || process.env[envVar];
+    const source: 'process' | 'managed' | undefined = resolved?.value
+      ? resolved.source || 'managed'
+      : process.env[envVar]
+      ? 'process'
+      : undefined;
+    const configured = Boolean(rawVal && rawVal.trim().length > 0);
+    envStatus.push({
+      name: envVar,
+      configured,
+      source,
+      maskedValue: configured ? maskEnvValue(rawVal!) : undefined,
+      prompt: spec?.prompt,
+      help: spec?.help,
+      optional: spec?.optional
+    });
+    if (!configured && !spec?.optional) {
+      missingEnv.push(envVar);
     }
   }
 
   const ready = missingBins.length === 0 && missingEnv.length === 0;
+  const status = ready ? 'available' : 'setup_needed';
   const missingParts: string[] = [];
   if (missingBins.length > 0) missingParts.push(`缺少命令: ${missingBins.join(', ')}`);
   if (missingEnv.length > 0) missingParts.push(`未配置环境变量: ${missingEnv.join(', ')}`);
 
   return {
     ready,
+    status,
     missingBins: missingBins.length > 0 ? missingBins : undefined,
     missingEnv: missingEnv.length > 0 ? missingEnv : undefined,
+    envStatus: envStatus.length > 0 ? envStatus : undefined,
     details: ready ? '运行环境与依赖就绪' : missingParts.join('；')
   };
 }
@@ -344,30 +414,8 @@ category: ${category}`;
 
 /**
  * 技能代码静态安全审计
- * 检查可疑隐蔽载荷、反弹 Shell、无感 Unicode 字符等
+ * 检查可疑隐蔽载荷、远程执行、凭据外传、无感 Unicode 字符等
  */
 export function scanSkillSafety(rawText: string): string[] {
-  const warnings: string[] = [];
-
-  // 1. 检查是否存在超长 Base64 潜在二进制隐藏载荷
-  if (/[A-Za-z0-9+/]{120,}={0,2}/.test(rawText)) {
-    warnings.push('检测到异常长 Base64 编码数据段，疑似隐蔽脚本或二进制载荷');
-  }
-
-  // 2. 检查危险的 curl / wget 管道直灌 Shell 执行
-  if (/\b(curl|wget)\b[^\n]{0,200}\|\s*(ba|z|da)?sh\b/i.test(rawText)) {
-    warnings.push('检测到直接管道下载并执行脚本 (curl/wget | sh)，高危安全隐患');
-  }
-
-  // 3. 检查零宽字符与双向控制字符 (用于欺骗审核视觉盲区)
-  if (/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/.test(rawText)) {
-    warnings.push('检测到不可见的 Unicode 零宽字符或控制字符，可能存在隐藏提示词注入');
-  }
-
-  // 4. 检查危险的破坏性系统命令
-  if (/\brm\s+-(?:r|rf|fr)\s+[/~]/i.test(rawText) || /\bmkfs\b/i.test(rawText) || />\s*\/dev\/sd[a-z]/i.test(rawText)) {
-    warnings.push('包含可能破坏操作系统关键路径的命令 (如 rm -rf / 或磁盘格式化)');
-  }
-
-  return warnings;
+  return scanTextSecurityFindings(rawText, 'SKILL.md').map((item) => item.message);
 }

@@ -9,10 +9,13 @@ import { validateWidgetInput } from './widget-validator.ts';
 export { getSanitizedEnv };
 
 export interface SkillsProvider {
-  list: (botId?: string) => Array<{ name: string; description: string; source: string; channel: string; enabled: boolean }>;
-  get: (name: string) => { name: string; description: string; content: string; body: string; channel: string; enabled: boolean } | null;
-  save: (data: { name: string; description: string; channel?: string; body?: string }) => { success: boolean; skill?: unknown; error?: string };
+  list: (filter?: any) => Array<any>;
+  get: (name: string) => any | null;
+  save: (data: any) => { success: boolean; skill?: unknown; error?: string };
   remove: (name: string) => { success: boolean; error?: string };
+  recordUsage?: (name: string, kind: 'use' | 'view' | 'patch') => void;
+  patchSkillBody?: (name: string, oldText: string, newText: string) => { success: boolean; skill?: unknown; error?: string };
+  getSkillInstructions?: (name: string) => string | null;
 }
 
 export interface MemoryProvider {
@@ -123,18 +126,20 @@ export function createDefaultTools(options?: {
   };
 
   return [
-    // Agent Skills 规程库加载、执行与自学习沉淀
+    // Agent Skills 规程库加载、执行、修补与自学习沉淀
     {
       name: 'skills',
-      description: 'Agent Skills (规程与能力包)：标准化任务指南与操作手册。action="use" 获取指导与配套脚本，action="list" 列出技能与运行就绪状态，action="save" 新建技能，action="learn" 自主学习沉淀工坊技能，action="remove" 移除自建技能。',
+      description: 'Agent Skills (规程与能力包)：标准化任务指南与操作手册。action="use" 获取完整指导与配套脚本，action="list" 列出技能与运行就绪状态，action="save" 新建技能，action="learn" 自主学习沉淀工坊技能，action="patch" 对已有技能增量打补丁优化，action="remove" 移除自建技能。',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['use', 'list', 'save', 'learn', 'remove'], description: '操作类型' },
+          action: { type: 'string', enum: ['use', 'list', 'save', 'learn', 'patch', 'remove'], description: '操作类型' },
           name: { type: 'string', description: '技能英文名称（如 amap, trip-plan 等）' },
           category: { type: 'string', enum: ['devops', 'productivity', 'research', 'integration', 'utility', 'custom'], description: '技能业务分类（save/learn 时使用）' },
           description: { type: 'string', description: '技能简短说明（仅在 save/learn 时使用）' },
-          instructions: { type: 'string', description: '技能 Markdown 指导正文（仅在 save/learn 时使用）' }
+          instructions: { type: 'string', description: '技能 Markdown 指导正文（仅在 save/learn 时使用）' },
+          oldText: { type: 'string', description: 'action="patch" 时用于精准匹配的原文本片段' },
+          newText: { type: 'string', description: 'action="patch" 时替换后的新文本片段' }
         },
         required: ['action']
       },
@@ -149,7 +154,9 @@ export function createDefaultTools(options?: {
 
         try {
           if (action === 'list') {
-            const list = skillsProvider.list().filter((s: any) => s.enabled);
+            const list = skillsProvider
+              .list()
+              .filter((s: any) => s.enabled && s.usage?.lifecycleState !== 'archived');
             if (list.length === 0) {
               return { message: '当前没有已启用的技能。' };
             }
@@ -159,7 +166,8 @@ export function createDefaultTools(options?: {
                 name: s.name,
                 category: s.category || 'utility',
                 source: s.source,
-                readiness: s.readiness?.ready ? 'ready' : (s.readiness?.details || 'needs_setup'),
+                readiness: s.readiness ? (s.readiness.ready ? 'ready' : s.readiness.details || 'needs_setup') : 'ready',
+                useCount: s.usage?.useCount || 0,
                 description: s.description
               }))
             };
@@ -168,18 +176,24 @@ export function createDefaultTools(options?: {
           if (action === 'use') {
             if (!name) return { error: '参数 name 不能为空' };
             const skill = skillsProvider.get(name);
-            if (!skill || !skill.enabled) {
-              const available = skillsProvider.list().filter((s: any) => s.enabled).map((s: any) => s.name).join(', ');
+            if (!skill || !skill.enabled || skill.usage?.lifecycleState === 'archived') {
+              const available = skillsProvider
+                .list()
+                .filter((s: any) => s.enabled && s.usage?.lifecycleState !== 'archived')
+                .map((s: any) => s.name)
+                .join(', ');
               return { error: `未找到或已禁用的技能 "${name}"。当前可用技能: ${available || '无'}` };
             }
+            skillsProvider.recordUsage?.(skill.name, 'use');
             return {
               name: skill.name,
               category: skill.category || 'utility',
               readiness: skill.readiness,
+              allowedTools: skill.allowedTools || [],
               dirPath: skill.dirPath,
               files: (skill.files || []).map((f: any) => f.path),
               description: skill.description,
-              instructions: skill.body || skill.content
+              instructions: skillsProvider.getSkillInstructions?.(skill.name) || skill.body || skill.content
             };
           }
 
@@ -206,6 +220,24 @@ export function createDefaultTools(options?: {
             return {
               success: true,
               message: `已成功保存${label} "${name}" [${cat}]，后续对话或通过 /${name} 命令可直接调用。`
+            };
+          }
+
+          if (action === 'patch') {
+            if (!name) return { error: '参数 name 不能为空' };
+            const oldText = String(args.oldText || '');
+            const newText = String(args.newText ?? '');
+            if (!oldText) return { error: '参数 oldText 不能为空' };
+            if (!skillsProvider.patchSkillBody) {
+              return { error: '当前运行环境不支持增量修补技能规程。' };
+            }
+            const res = skillsProvider.patchSkillBody(name, oldText, newText);
+            if (!res.success) {
+              return { error: res.error || '修补技能失败' };
+            }
+            return {
+              success: true,
+              message: `已成功增量更新技能 "${name}" 的 SKILL.md 规程并记录修订次数。`
             };
           }
 

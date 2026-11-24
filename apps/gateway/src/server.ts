@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runAgentLoop, type LLMMessage, type LLMCaller } from '../../../packages/sandbox-core/src/loop.ts';
+import { runAgentLoop, type LLMMessage, type LLMCaller, type SentinelHook } from '../../../packages/sandbox-core/src/loop.ts';
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
 import { globalModelStore } from '../bots/provider-store.ts';
@@ -208,22 +208,30 @@ function resolveSkillPrompt(userText: string): string {
   const slashMatch = userText.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i);
   if (slashMatch) {
     const targetSkill = globalSkillStore.get(slashMatch[1]);
-    if (targetSkill && targetSkill.enabled) {
+    if (targetSkill && targetSkill.enabled && targetSkill.usage?.lifecycleState !== 'archived') {
+      globalSkillStore.recordUsage(targetSkill.name, 'use');
       const userQuery = slashMatch[2]?.trim() || '请根据此技能规程执行任务。';
       const instructions = globalSkillStore.getSkillInstructions(targetSkill.name) || targetSkill.body || targetSkill.content;
-      return `[已激活技能规程: ${targetSkill.name} (${targetSkill.category || 'utility'})]\n${instructions}\n\n[用户具体诉求]:\n${userQuery}`;
+      const toolHint =
+        targetSkill.allowedTools && targetSkill.allowedTools.length > 0
+          ? `\n[推荐优先工具]: ${targetSkill.allowedTools.join(', ')}`
+          : '';
+      return `[已激活技能规程: ${targetSkill.name} (${targetSkill.category || 'utility'})]${toolHint}\n${instructions}\n\n[用户具体诉求]:\n${userQuery}`;
     }
   }
   return userText;
 }
 
 function getBotSkills(botId?: string) {
-  return globalSkillStore.list({ botId, enabledOnly: true }).map((s) => ({
-    name: s.name,
-    description: s.description,
-    category: s.category || 'utility',
-    channel: s.channel
-  }));
+  return globalSkillStore
+    .list({ botId, enabledOnly: true })
+    .filter((s) => s.readiness?.ready !== false)
+    .map((s) => ({
+      name: s.name,
+      description: s.description,
+      category: s.category || 'utility',
+      channel: s.channel
+    }));
 }
 
 const callLLM: LLMCaller = async (messages, tools, onChunk) => {
@@ -1704,25 +1712,105 @@ export function startGatewayServer(defaultPort = 8799) {
       const tag = url.searchParams.get('tag') || undefined;
       const source = url.searchParams.get('source') || undefined;
       const readiness = url.searchParams.get('readiness') || undefined;
+      const lifecycle = (url.searchParams.get('lifecycle') || undefined) as any;
+      const includeArchived = url.searchParams.get('includeArchived') === 'true';
       const enabledOnly = url.searchParams.get('enabled') === 'true';
 
-      const skills = globalSkillStore.list({ botId, query, category, channel, tag, source, readiness, enabledOnly });
+      const skills = globalSkillStore.list({
+        botId,
+        query,
+        category,
+        channel,
+        tag,
+        source,
+        readiness,
+        lifecycle,
+        includeArchived,
+        enabledOnly
+      });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ skills, total: skills.length }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/refresh-readiness') {
+      const skills = globalSkillStore.refreshReadiness();
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ skills, total: skills.length }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/skills/env') {
+      const env = globalSkillStore.getEnvOverview();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ env }));
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/skills/env') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body || '{}');
+      const vars = payload?.vars && typeof payload.vars === 'object' ? payload.vars : payload;
+      const result = globalSkillStore.updateEnvVars(vars || {});
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, ...result }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/preview-import') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { text, url: targetUrl } = JSON.parse(body || '{}');
+
+      let skillText = typeof text === 'string' ? text : '';
+      if (!skillText && typeof targetUrl === 'string' && targetUrl.trim()) {
+        const fetched = await globalSkillStore.fetchSkillTextFromUrl(targetUrl.trim());
+        if (!fetched.success) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ valid: false, error: fetched.error }));
+        }
+        skillText = fetched.text;
+      }
+
+      if (!skillText.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ valid: false, error: '请提供 SKILL.md 文本内容或有效的 URL' }));
+      }
+
+      const preview = globalSkillStore.previewImportFromText(skillText, 'imported');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(preview));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/skills/import-url') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { url: targetUrl, force } = JSON.parse(body || '{}');
+      if (!targetUrl || typeof targetUrl !== 'string') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '请提供有效的技能 URL' }));
+      }
+      const result = await globalSkillStore.importFromUrl(targetUrl, { force: Boolean(force) });
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error, preview: result.preview }));
+      }
+      refreshTools();
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: result.skill }));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/skills/import') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { text } = JSON.parse(body || '{}');
+      const { text, force } = JSON.parse(body || '{}');
       if (!text || typeof text !== 'string') {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: '字段 text 不能为空 (必须包含标准的 SKILL.md 格式文本)' }));
       }
-      const result = globalSkillStore.importFromText(text, { source: 'imported' });
+      const result = globalSkillStore.importFromText(text, { source: 'imported', force: Boolean(force) });
       if (!result.success) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: result.error }));
+        return res.end(JSON.stringify({ error: result.error, security: result.security }));
       }
       refreshTools();
       res.writeHead(201, { 'Content-Type': 'application/json' });
@@ -1735,12 +1823,14 @@ export function startGatewayServer(defaultPort = 8799) {
       let rawBuffer = Buffer.concat(chunks);
 
       const contentType = req.headers['content-type'] || '';
+      let force = url.searchParams.get('force') === 'true';
       if (contentType.includes('application/json')) {
         try {
           const json = JSON.parse(rawBuffer.toString('utf-8'));
           if (json.base64) {
             rawBuffer = Buffer.from(json.base64.replace(/^data:.*?;base64,/, ''), 'base64');
           }
+          if (json.force !== undefined) force = Boolean(json.force);
         } catch {}
       }
 
@@ -1749,7 +1839,7 @@ export function startGatewayServer(defaultPort = 8799) {
         return res.end(JSON.stringify({ error: '上传的 ZIP 压缩包数据为空' }));
       }
 
-      const result = await globalSkillStore.importFromZip(rawBuffer, { source: 'imported' });
+      const result = await globalSkillStore.importFromZip(rawBuffer, { source: 'imported', force });
       if (!result.success) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: result.error }));
@@ -1774,6 +1864,18 @@ export function startGatewayServer(defaultPort = 8799) {
       }
       refreshTools();
       res.writeHead(201, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, skill: result.skill }));
+    }
+
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/skills\/[^/]+\/reset-builtin$/)) {
+      const name = decodeURIComponent(url.pathname.split('/')[3]);
+      const result = globalSkillStore.resetBuiltinOverride(name);
+      if (!result.success) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: result.error }));
+      }
+      refreshTools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: true, skill: result.skill }));
     }
 
@@ -1911,6 +2013,16 @@ export function startGatewayServer(defaultPort = 8799) {
       if (Array.isArray(data.assignedBots)) {
         globalSkillStore.assignBots(name, data.assignedBots);
       }
+      if (data.pinned !== undefined) {
+        globalSkillStore.setPinned(name, Boolean(data.pinned));
+      }
+      if (data.lifecycleState === 'active' || data.lifecycleState === 'archived') {
+        const lcRes = globalSkillStore.setLifecycle(name, data.lifecycleState);
+        if (!lcRes.success) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: lcRes.error }));
+        }
+      }
 
       const updated = globalSkillStore.get(name);
       refreshTools();
@@ -1940,20 +2052,109 @@ export function startGatewayServer(defaultPort = 8799) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const { input, botId } = JSON.parse(body || '{}');
-      const testInput = input || '请简要执行此技能的核心功能并展示输出结构。';
+      const testInput = String(input || '').trim() || '请按本技能规程执行一次基础自检或演示核心流程，并给出结果摘要。';
 
       try {
-        const caller = globalModelStore.getActiveCaller();
-        const testPrompt = `你正在试运行 Agent 技能 [${skill.name}]。\n\n[技能说明]\n${skill.description}\n\n[规程步骤 (SKILL.md)]:\n${skill.body || skill.content}\n\n[测试输入指令]:\n${testInput}\n\n请按照技能规程规划并模拟执行，清晰列出执行步骤与模拟交付物。`;
-        const testRes = await caller([{ role: 'system', content: '你是一个严格遵循技能规程的专业 Agent 评测器。' }, { role: 'user', content: testPrompt }], refreshTools());
+        globalSkillStore.recordUsage(skill.name, 'view');
+        const targetBot = (botId ? botRegistry.get(botId) : null) || botRegistry.getCoordinator() || botRegistry.list()[0];
+        const effectiveBotId = targetBot?.id || 'skill_sandbox';
+        const effectiveUserId = currentUser?.username || 'skill_tester';
+        const testSessionId = `skill_test_${skill.name}_${Date.now()}`;
+        const instructions = globalSkillStore.getSkillInstructions(skill.name) || skill.body || skill.content;
+
+        const scopedCaller: LLMCaller = async (msgs, tls, onChunk) => {
+          const active = globalModelStore.getActiveCaller({ userId: effectiveUserId });
+          return active(msgs, tls, onChunk);
+        };
+
+        // 试运行哨兵：复用正常风控规则，遇到需人工审批的高危动作直接返回拒绝以避免 HTTP 请求挂死
+        const testSentinel: SentinelHook = {
+          evaluateToolCall: (tName, args, ctx) => sentinel.evaluateToolCall(tName, args, ctx),
+          waitForApproval: async () => false,
+          isSessionTainted: (sid) => sentinel.isSessionTainted(sid),
+          taintSession: (sid, reason) => sentinel.taintSession(sid, reason),
+          untaintSession: (sid) => sentinel.untaintSession(sid),
+          isTaintSource: (tName, args, out) => sentinel.isTaintSource(tName, args, out),
+          isEgressAction: (tName, args) => sentinel.isEgressAction(tName, args)
+        };
+
+        const goalPrompt = `[技能沙箱试运行模式]\n[已激活技能规程: ${skill.name}]\n${instructions}\n\n[测试任务指令]:\n${testInput}\n\n请严格依据上述规程真实调用必要工具完成任务（如遇受阻或缺失依赖请如实说明），并输出清晰的执行结果。`;
+        const startedAt = Date.now();
+        const loop = runAgentLoop(
+          targetBot?.system_prompt || '你是一个严谨的数字员工技能评测执行器。请按规程真实执行并报告结果。',
+          goalPrompt,
+          refreshTools(),
+          testSentinel,
+          scopedCaller,
+          {
+            sessionId: testSessionId,
+            userId: effectiveUserId,
+            botId: effectiveBotId,
+            profile: targetBot || undefined,
+            maxSteps: 6,
+            skills: getBotSkills(effectiveBotId)
+          }
+        );
+
+        let output = '';
+        let steps = 0;
+        const toolCalls: Array<Record<string, unknown>> = [];
+
+        for await (const event of loop) {
+          if (event.type === 'stream:text-delta') {
+            output += event.text;
+          } else if (event.type === 'ui:widget') {
+            output += formatWidgetFallbackText(event.widget);
+          } else if (event.type === 'tool:call_start') {
+            steps++;
+            toolCalls.push({
+              tool: event.toolName,
+              params: event.input,
+              status: 'running',
+              startedAt: Date.now()
+            });
+          } else if (event.type === 'tool:call_end') {
+            const running = [...toolCalls]
+              .reverse()
+              .find((t) => t.tool === event.toolName && t.status === 'running');
+            if (running) {
+              const rejected = String(event.output || '').includes('拒绝');
+              let isError = rejected;
+              if (typeof event.output === 'object' && event.output !== null) {
+                const outObj = event.output as any;
+                if (outObj.error || (outObj.exitCode !== undefined && outObj.exitCode !== 0)) {
+                  isError = true;
+                }
+              }
+              running.status = isError ? (rejected ? 'rejected' : 'failed') : 'done';
+              running.ok = !isError;
+              running.durationMs = event.durationMs || 0;
+              running.result = clipToolOutput(event.output);
+            }
+          }
+        }
+
+        for (const tc of toolCalls) {
+          if (tc.status === 'running') {
+            tc.status = 'done';
+            tc.ok = true;
+          }
+        }
+
+        const durationMs = Date.now() - startedAt;
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({
-          success: true,
-          skill: skill.name,
-          input: testInput,
-          output: testRes.content,
-          toolCalls: testRes.toolCalls || []
-        }));
+        return res.end(
+          JSON.stringify({
+            success: true,
+            skill: skill.name,
+            input: testInput,
+            output: output.trim() || '规程试运行完成，未产生额外文本输出。',
+            toolCalls,
+            steps,
+            durationMs,
+            readiness: skill.readiness
+          })
+        );
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: `技能试运行失败: ${err.message}` }));

@@ -27,6 +27,9 @@ import type {
   McpServer,
   Skill,
   SkillFileEntry,
+  SkillLifecycleState,
+  ManagedSkillEnvItem,
+  SkillImportPreview,
   User,
   ConnectorItem
 } from '../types';
@@ -384,7 +387,18 @@ export const api = {
     }),
 
   // Skills Ecosystem (Agent Skills 规程与技能管理)
-  getSkills: (params?: { botId?: string; q?: string; category?: string; source?: string; readiness?: string; channel?: string; tag?: string; enabled?: boolean }) => {
+  getSkills: (params?: {
+    botId?: string;
+    q?: string;
+    category?: string;
+    source?: string;
+    readiness?: string;
+    channel?: string;
+    tag?: string;
+    lifecycle?: SkillLifecycleState;
+    includeArchived?: boolean;
+    enabled?: boolean;
+  }) => {
     const sp = new URLSearchParams();
     if (params?.botId) sp.set('botId', params.botId);
     if (params?.q) sp.set('q', params.q);
@@ -393,29 +407,67 @@ export const api = {
     if (params?.readiness && params.readiness !== 'all') sp.set('readiness', params.readiness);
     if (params?.channel && params.channel !== 'all') sp.set('channel', params.channel);
     if (params?.tag && params.tag !== 'all') sp.set('tag', params.tag);
+    if (params?.lifecycle) sp.set('lifecycle', params.lifecycle);
+    if (params?.includeArchived) sp.set('includeArchived', 'true');
     if (params?.enabled !== undefined) sp.set('enabled', String(params.enabled));
     const queryStr = sp.toString();
     return request<{ skills: Skill[]; total: number }>(`/api/skills${queryStr ? `?${queryStr}` : ''}`);
   },
   getSkill: (name: string) => request<{ skill: Skill }>(`/api/skills/${encodeURIComponent(name)}`),
+  refreshSkillsReadiness: () =>
+    request<{ skills: Skill[]; total: number }>('/api/skills/refresh-readiness', { method: 'POST' }),
+  getSkillsEnv: () => request<{ env: ManagedSkillEnvItem[] }>('/api/skills/env'),
+  updateSkillsEnv: (vars: Record<string, string | null>) =>
+    request<{ success: boolean; env: ManagedSkillEnvItem[]; skills: Skill[] }>('/api/skills/env', {
+      method: 'PUT',
+      body: JSON.stringify({ vars }),
+    }),
   createSkill: (data: Partial<Skill>) =>
     request<{ success: boolean; skill: Skill }>('/api/skills', { method: 'POST', body: JSON.stringify(data) }),
-  importSkill: (text: string) =>
-    request<{ success: boolean; skill: Skill }>('/api/skills/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  previewImportSkill: (payload: { text?: string; url?: string }) =>
+    request<SkillImportPreview>('/api/skills/preview-import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  importSkill: (text: string, force?: boolean) =>
+    request<{ success: boolean; skill: Skill }>('/api/skills/import', {
+      method: 'POST',
+      body: JSON.stringify({ text, force }),
+    }),
+  importSkillFromUrl: (url: string, force?: boolean) =>
+    request<{ success: boolean; skill: Skill }>('/api/skills/import-url', {
+      method: 'POST',
+      body: JSON.stringify({ url, force }),
+    }),
   updateSkill: (name: string, data: Partial<Skill>) =>
     request<{ success: boolean; skill: Skill }>(`/api/skills/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSkill: (name: string) =>
     request<{ success: boolean; name: string }>(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  patchSkill: (name: string, patch: { enabled?: boolean; everyBot?: boolean; assignedBots?: string[] }) =>
+  resetBuiltinSkill: (name: string) =>
+    request<{ success: boolean; skill: Skill }>(`/api/skills/${encodeURIComponent(name)}/reset-builtin`, {
+      method: 'POST',
+    }),
+  patchSkill: (
+    name: string,
+    patch: { enabled?: boolean; everyBot?: boolean; assignedBots?: string[]; pinned?: boolean; lifecycleState?: 'active' | 'archived' }
+  ) =>
     request<{ success: boolean; skill: Skill }>(`/api/skills/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   testSkill: (name: string, input?: string, botId?: string) =>
-    request<{ success: boolean; skill: string; input: string; output: string; toolCalls?: any[] }>(`/api/skills/${encodeURIComponent(name)}/test`, {
+    request<{
+      success: boolean;
+      skill: string;
+      input: string;
+      output: string;
+      toolCalls?: any[];
+      steps?: number;
+      durationMs?: number;
+    }>(`/api/skills/${encodeURIComponent(name)}/test`, {
       method: 'POST',
       body: JSON.stringify({ input, botId }),
     }),
   exportSkillUrl: (name: string) => `/api/skills/${encodeURIComponent(name)}/export`,
   exportSkillZipUrl: (name: string) => `/api/skills/${encodeURIComponent(name)}/export-zip`,
-  uploadSkillZip: async (file: File) => {
+  uploadSkillZip: async (file: File, force?: boolean) => {
     const arrayBuffer = await file.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
     let binary = '';
@@ -426,7 +478,7 @@ export const api = {
     const base64 = btoa(binary);
     return request<{ success: boolean; skill: Skill }>('/api/skills/upload-zip', {
       method: 'POST',
-      body: JSON.stringify({ base64 }),
+      body: JSON.stringify({ base64, force }),
     });
   },
   getSkillFiles: (name: string) => request<{ files: SkillFileEntry[] }>(`/api/skills/${encodeURIComponent(name)}/files`),
@@ -435,12 +487,12 @@ export const api = {
       `/api/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(filePath)}`
     ),
   saveSkillFile: (name: string, filePath: string, content: string) =>
-    request<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file`, {
+    request<{ success: boolean; skill?: Skill; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file`, {
       method: 'POST',
       body: JSON.stringify({ path: filePath, content }),
     }),
   deleteSkillFile: (name: string, filePath: string) =>
-    request<{ success: boolean; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(filePath)}`, {
+    request<{ success: boolean; skill?: Skill; error?: string }>(`/api/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(filePath)}`, {
       method: 'DELETE',
     }),
 
