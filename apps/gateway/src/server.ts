@@ -2069,7 +2069,7 @@ export function startGatewayServer(defaultPort = 8799) {
 
         // 试运行哨兵：复用正常风控规则，遇到需人工审批的高危动作直接返回拒绝以避免 HTTP 请求挂死
         const testSentinel: SentinelHook = {
-          evaluateToolCall: (tName, args, ctx) => sentinel.evaluateToolCall(tName, args, ctx),
+          evaluateToolCall: (tName, args, ctx) => sentinel.evaluateToolCall(tName, args, ctx as any),
           waitForApproval: async () => false,
           isSessionTainted: (sid) => sentinel.isSessionTainted(sid),
           taintSession: (sid, reason) => sentinel.taintSession(sid, reason),

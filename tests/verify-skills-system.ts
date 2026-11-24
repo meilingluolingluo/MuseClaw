@@ -100,7 +100,7 @@ async function testSkillsSystem() {
       requires: { env: [envVarName] },
       body: '# 密钥演示\n\n## 何时使用\n当需要验证环境变量动态就绪时使用。\n\n## 步骤\n1. 读取环境变量并校验。'
     });
-    assert.strictEqual(saveRes.success, true);
+    if (!saveRes.success) throw new Error(saveRes.error);
     assert.strictEqual(saveRes.skill.readiness?.ready, false);
     assert.strictEqual(saveRes.skill.readiness?.status, 'setup_needed');
 
@@ -150,7 +150,7 @@ async function testSkillsSystem() {
 
     // 6. 内置技能覆写持久化（重启不丢失）与恢复默认验证
     const origAmap = store.get('amap');
-    assert.ok(origAmap);
+    if (!origAmap) throw new Error('builtin amap should exist');
     const modifiedAmapContent = `${origAmap.content}\n\n## 自定义追加规则\n测试覆写保留。`;
     const overrideSave = store.saveFile('amap', 'SKILL.md', modifiedAmapContent);
     assert.strictEqual(overrideSave.success, true);
@@ -181,7 +181,7 @@ async function testSkillsSystem() {
     assert.strictEqual(previewDanger.security?.policyAction, 'block');
 
     const ssrfRes = await store.fetchSkillTextFromUrl('http://127.0.0.1:8799/SKILL.md');
-    assert.strictEqual(ssrfRes.success, false);
+    if (ssrfRes.success) throw new Error('expected SSRF request to be rejected');
     assert.ok(ssrfRes.error.includes('安全拦截'));
     console.log('  ✅ 7. 导入安全预检与远程拉取 SSRF 拦截验证通过');
 
