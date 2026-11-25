@@ -104,9 +104,25 @@ const proactiveBrief = new ProactiveBriefEngine();
 const goalStore = new GoalStore();
 const reflectionTurnCounter = new Map<string, number>();
 
-async function searchWebForFeed(query: string, count = 4): Promise<FeedSearchHit[]> {
+async function searchWebForFeed(
+  query: string,
+  count = 8,
+  opts?: { afterDate?: string }
+): Promise<FeedSearchHit[]> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey || !query.trim()) return [];
+  let effectiveQuery = query.trim();
+  if (
+    opts?.afterDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(opts.afterDate) &&
+    !/\bafter:\d{4}-\d{2}-\d{2}\b/i.test(effectiveQuery)
+  ) {
+    const suffix = ` after:${opts.afterDate}`;
+    const maxBaseLen = 128 - suffix.length;
+    if (maxBaseLen > 0) {
+      effectiveQuery = `${effectiveQuery.slice(0, maxBaseLen).trim()}${suffix}`;
+    }
+  }
   try {
     const res = await fetch('https://api.deepseek.com/v1/tools/search', {
       method: 'POST',
@@ -114,7 +130,7 @@ async function searchWebForFeed(query: string, count = 4): Promise<FeedSearchHit
         Authorization: `Bearer ${apiKey.replace(/[^\x00-\x7F]/g, '').trim()}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ query: query.trim(), count, need_content: false })
+      body: JSON.stringify({ query: effectiveQuery, count, need_content: false })
     });
     if (!res.ok) return [];
     const data: any = await res.json();
@@ -123,9 +139,15 @@ async function searchWebForFeed(query: string, count = 4): Promise<FeedSearchHit
       .map((r: any) => ({
         title: String(r?.title || '').trim(),
         url: String(r?.url || '').trim(),
-        snippet: String(r?.snippet || r?.content || '').trim().slice(0, 300),
-        source: String(r?.site || r?.source || '').trim() || undefined,
-        image: typeof r?.image === 'string' ? r.image : undefined
+        snippet: String(r?.snippet || r?.summary || r?.content || '').trim().slice(0, 300),
+        source: String(r?.site_name || r?.site || r?.source || '').trim() || undefined,
+        image: typeof r?.image === 'string' ? r.image : undefined,
+        publishedAt:
+          typeof r?.date === 'string' && r.date.trim()
+            ? r.date.trim()
+            : typeof r?.published_at === 'string' && r.published_at.trim()
+              ? r.published_at.trim()
+              : undefined
       }))
       .filter((r: FeedSearchHit) => r.title && /^https?:\/\//i.test(r.url));
   } catch {
@@ -3863,6 +3885,7 @@ fi
             for (const g of activeGoals.slice(0, 4)) {
               ctx.push(`- 活跃目标: ${g.title} (${g.progress}%)`);
             }
+            ctx.push(`- 当前系统时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
             await feedStore.writeFeedPosts(uid, caller, ctx, 3, {
               searchWeb: searchWebForFeed,
               interests,

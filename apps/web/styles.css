@@ -14758,8 +14758,17 @@ html[data-theme="dark"] .cat-pill.is-active { color: var(--om-ink-fg); }
 }
 
 .feed-post-source-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-top: 4px;
   margin-bottom: 6px;
+}
+
+.feed-post-published-date {
+  font-size: 11px;
+  color: var(--om-muted);
 }
 
 .feed-post-source-link {

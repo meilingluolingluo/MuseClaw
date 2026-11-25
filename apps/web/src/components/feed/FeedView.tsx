@@ -102,18 +102,25 @@ const FeedPostCard = React.memo<{
             </div>
           </div>
 
-          {post.sourceUrl && (
+          {(post.sourceUrl || post.publishedAt) && (
             <div className="feed-post-source-row">
-              <a
-                href={post.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="feed-post-source-link"
-                title={post.sourceUrl}
-              >
-                <ExternalLink size={12} />
-                <span>{sourceLabel}</span>
-              </a>
+              {post.sourceUrl && (
+                <a
+                  href={post.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="feed-post-source-link"
+                  title={post.sourceUrl}
+                >
+                  <ExternalLink size={12} />
+                  <span>{sourceLabel}</span>
+                </a>
+              )}
+              {post.publishedAt && (
+                <span className="feed-post-published-date">
+                  发布于 {post.publishedAt.slice(0, 10)}
+                </span>
+              )}
             </div>
           )}
 

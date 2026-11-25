@@ -24,6 +24,7 @@ export interface FeedPost {
   area: FeedArea;
   prompt: string;
   ts: string;
+  publishedAt?: string;
   sessionId?: string;
   routineId?: string;
   routineName?: string;
@@ -42,13 +43,16 @@ export interface FeedSearchHit {
   snippet?: string;
   source?: string;
   image?: string;
+  publishedAt?: string;
 }
 
 export interface WriteFeedOptions {
-  searchWeb?: (query: string, count?: number) => Promise<FeedSearchHit[]>;
+  searchWeb?: (query: string, count?: number, opts?: { afterDate?: string }) => Promise<FeedSearchHit[]>;
   interests?: string[];
   likedTopics?: string[];
   dismissedTopics?: string[];
+  maxAgeDays?: number;
+  now?: number;
 }
 
 export interface FeedPostsData {
@@ -88,8 +92,15 @@ const VALID_AREAS: Set<FeedArea> = new Set([
 const DEFAULT_INSTRUCTIONS =
   '给我做一个关于我关心的事的动态。短一点、直接一点，扫一眼就能看完，别搞标题党。';
 
+const DEFAULT_FEED_MAX_AGE_DAYS = 30;
+
 const FEED_PROMPT_TEMPLATE = `你是一个贴心、懂业务且严谨的企业数字员工助手。你的任务是为当前用户撰写专属的“动态”（Feed）：几条短小精悍、真正有价值、量身定制的动态卡片。
 要求：直白、短小、有信息密度、禁止标题党、扫一眼就能看完。
+
+【当前日期与时效硬性要求】
+- 今天日期: {today}
+- 外部情报仅限近 {maxAgeDays} 天内的新鲜文章、论文或公告。严禁采纳、改写或引用超过 {maxAgeDays} 天的旧新闻、旧会议报道（如半年前的会议回顾等）。
+- 若下方检索结果均不新鲜或未命中有效近期结果，请勿硬编过时资讯，改为结合用户本地记忆与活跃目标生成高质量 'insight' 深度提醒，并将 sourceUrl 留空。
 
 【用户的动态版块说明】
 {instructions}
@@ -128,6 +139,102 @@ function safeExternalUrl(raw: unknown): string | undefined {
 function localDateIso(now = Date.now()): string {
   const d = new Date(now);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function parseDateMs(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function buildValidUtcEndOfDayMs(year: number, month: number, day: number): number | undefined {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  const d = new Date(Date.UTC(year, month - 1, day, 23, 59, 59));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    return undefined;
+  }
+  return d.getTime();
+}
+
+function extractArxivEndOfMonthMs(text: string): number | undefined {
+  if (!text) return undefined;
+  const re = /(?:arxiv\.org\/(?:abs|pdf|html)\/|ar5iv\.labs\.arxiv\.org\/html\/|arXiv[:\s]+)(\d{2})(0[1-9]|1[0-2])\.\d{4,5}/gi;
+  let earliest: number | undefined;
+  for (const m of text.matchAll(re)) {
+    const yy = Number(m[1]);
+    const mm = Number(m[2]);
+    const endOfMonthMs = Date.UTC(2000 + yy, mm, 0, 23, 59, 59);
+    if (earliest === undefined || endOfMonthMs < earliest) {
+      earliest = endOfMonthMs;
+    }
+  }
+  return earliest;
+}
+
+function extractUrlDateMs(url: string): number | undefined {
+  if (!url) return undefined;
+  const m = url.match(/(?:^|[^\d])(20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])(?:[^\d]|$)/);
+  if (!m) return undefined;
+  return buildValidUtcEndOfDayMs(Number(m[1]), Number(m[2]), Number(m[3]));
+}
+
+function extractNewestTextDateMs(text: string): number | undefined {
+  if (!text) return undefined;
+  const re = /(20\d{2})[-/.年](0?[1-9]|1[0-2])[-/.月](0?[1-9]|[12]\d|3[01])日?/g;
+  let newest: number | undefined;
+  for (const m of text.matchAll(re)) {
+    const ms = buildValidUtcEndOfDayMs(Number(m[1]), Number(m[2]), Number(m[3]));
+    if (ms !== undefined && (newest === undefined || ms > newest)) {
+      newest = ms;
+    }
+  }
+  return newest;
+}
+
+function evaluateHitFreshness(
+  hit: FeedSearchHit,
+  nowMs: number,
+  maxAgeDays: number
+): { fresh: boolean; publishedMs?: number; publishedAt?: string } {
+  const maxAgeMs = Math.max(1, maxAgeDays) * 24 * 60 * 60_000;
+  const publishedMs = parseDateMs(hit.publishedAt);
+  if (publishedMs !== undefined && nowMs - publishedMs > maxAgeMs) {
+    return { fresh: false };
+  }
+
+  const text = `${hit.title} ${hit.snippet || ''}`;
+  const arxivMs = extractArxivEndOfMonthMs(hit.url) ?? extractArxivEndOfMonthMs(text);
+  if (arxivMs !== undefined && nowMs - arxivMs > maxAgeMs) {
+    return { fresh: false };
+  }
+
+  const urlDateMs = extractUrlDateMs(hit.url);
+  if (urlDateMs !== undefined && nowMs - urlDateMs > maxAgeMs) {
+    return { fresh: false };
+  }
+
+  if (publishedMs === undefined) {
+    const textDateMs = extractNewestTextDateMs(text);
+    if (textDateMs !== undefined && nowMs - textDateMs > maxAgeMs) {
+      return { fresh: false };
+    }
+  }
+
+  const effectiveMs = publishedMs ?? urlDateMs ?? arxivMs;
+  const publishedAt =
+    publishedMs !== undefined
+      ? new Date(publishedMs).toISOString()
+      : urlDateMs !== undefined
+        ? new Date(urlDateMs).toISOString()
+        : undefined;
+
+  return {
+    fresh: true,
+    publishedMs: effectiveMs,
+    publishedAt
+  };
 }
 
 /**
@@ -308,17 +415,20 @@ export class FeedStore {
     interests: string[],
     likedTopics: string[],
     dismissedTopics: string[],
-    contextLines: string[]
+    contextLines: string[],
+    todayStr: string = localDateIso()
   ): Promise<string[]> {
     const fallback = interests.slice(0, 2);
+    const ym = todayStr.slice(0, 7);
     const planPrompt = [
-      '请根据以下用户关注点与动态定制要求，生成 2 到 3 个用于联网搜索最新资讯的精准搜索关键词。',
+      '请根据以下用户关注点与动态定制要求，生成 2 到 3 个用于联网搜索近期（近 30 天内）最新进展的精准搜索关键词。',
+      `当前日期: ${todayStr}`,
       `定制说明: ${instructions}`,
       interests.length ? `用户兴趣: ${interests.join(', ')}` : '',
       likedTopics.length ? `偏好主题(正向): ${likedTopics.join(', ')}` : '',
       dismissedTopics.length ? `避开主题(负向): ${dismissedTopics.join(', ')}` : '',
       contextLines.length ? `近期上下文:\n${contextLines.slice(0, 6).join('\n')}` : '',
-      '仅输出字符串数组 JSON，例如 ["AI Agent memory architecture 2026", "TypeScript release notes"]。若完全无需外部检索可输出 []。'
+      `仅输出字符串数组 JSON，例如 ["AI Agent memory architecture ${ym}", "TypeScript release notes"]。若完全无需外部检索可输出 []。`
     ]
       .filter(Boolean)
       .join('\n');
@@ -369,10 +479,18 @@ export class FeedStore {
       if (dismissedTopics.length > 0) interestParts.push(`- 历史不感兴趣主题(尽量回避): ${dismissedTopics.join('、')}`);
       const interestSection = interestParts.length > 0 ? interestParts.join('\n') : '- 暂无显式兴趣标签';
 
-      // Step 1: 如具备外部搜索能力，先规划查询词并并发拉取真实资讯
+      const nowMs = options?.now ?? Date.now();
+      const maxAgeDays =
+        typeof options?.maxAgeDays === 'number' && options.maxAgeDays > 0
+          ? options.maxAgeDays
+          : DEFAULT_FEED_MAX_AGE_DAYS;
+      const todayStr = localDateIso(nowMs);
+      const afterDate = localDateIso(nowMs - maxAgeDays * 24 * 60 * 60_000);
+
+      // Step 1: 如具备外部搜索能力，先规划查询词并并发拉取近期真实资讯
       const existingUrls = new Set(data.posts.map((p) => p.sourceUrl).filter(Boolean));
       const existingTitles = data.posts.slice(0, 30).map((p) => p.title.toLowerCase());
-      const collectedHits: FeedSearchHit[] = [];
+      const collectedHits: Array<FeedSearchHit & { _publishedMs?: number }> = [];
 
       if (options?.searchWeb) {
         const queries = await this.planSearchQueries(
@@ -381,11 +499,12 @@ export class FeedStore {
           interests,
           likedTopics,
           dismissedTopics,
-          contextLines
+          contextLines,
+          todayStr
         );
         if (queries.length > 0) {
           const batch = await Promise.all(
-            queries.map((q) => options.searchWeb!(q, 4).catch(() => []))
+            queries.map((q) => options.searchWeb!(q, 8, { afterDate }).catch(() => []))
           );
           const seenUrls = new Set<string>();
           for (const list of batch) {
@@ -395,10 +514,20 @@ export class FeedStore {
               if (!url || !title) continue;
               if (existingUrls.has(url) || seenUrls.has(url)) continue;
               if (existingTitles.some((t) => t === title.toLowerCase())) continue;
+
+              const normalizedHit: FeedSearchHit = { ...hit, url, title };
+              const freshness = evaluateHitFreshness(normalizedHit, nowMs, maxAgeDays);
+              if (!freshness.fresh) continue;
+
               seenUrls.add(url);
-              collectedHits.push({ ...hit, url, title });
+              collectedHits.push({
+                ...normalizedHit,
+                ...(freshness.publishedAt ? { publishedAt: freshness.publishedAt } : {}),
+                ...(freshness.publishedMs !== undefined ? { _publishedMs: freshness.publishedMs } : {})
+              });
             }
           }
+          collectedHits.sort((a, b) => (b._publishedMs ?? -1) - (a._publishedMs ?? -1));
         }
       }
 
@@ -408,14 +537,18 @@ export class FeedStore {
               .slice(0, 10)
               .map(
                 (h, i) =>
-                  `[${i + 1}] 标题: ${h.title}\n    链接: ${h.url}${h.source ? `\n    来源: ${h.source}` : ''}${
+                  `[${i + 1}] 标题: ${h.title}\n    链接: ${h.url}${
+                    h.publishedAt ? `\n    发布日期: ${h.publishedAt.slice(0, 10)}` : ''
+                  }${h.source ? `\n    来源: ${h.source}` : ''}${
                     h.image ? `\n    配图: ${h.image}` : ''
                   }${h.snippet ? `\n    摘要: ${h.snippet.slice(0, 260)}` : ''}`
               )
               .join('\n')
-          : '（本轮未命中外部检索结果，请完全基于用户本地记忆、活跃目标与近期工作聚焦撰写高价值洞察与提醒，sourceUrl 留空）';
+          : '（本轮未命中近期外部检索结果，请完全基于用户本地记忆、活跃目标与近期工作聚焦撰写高价值洞察与提醒，sourceUrl 留空）';
 
-      const prompt = FEED_PROMPT_TEMPLATE.replace('{instructions}', data.instructions || DEFAULT_INSTRUCTIONS)
+      const prompt = FEED_PROMPT_TEMPLATE.replace('{today}', todayStr)
+        .replaceAll('{maxAgeDays}', String(maxAgeDays))
+        .replace('{instructions}', data.instructions || DEFAULT_INSTRUCTIONS)
         .replace('{interestSection}', interestSection)
         .replace('{context}', contextLines.length > 0 ? contextLines.join('\n') : '- 当前尚无额外历史记忆与自驱目标')
         .replace('{searchResults}', searchResultsText)
@@ -439,23 +572,21 @@ export class FeedStore {
       const parsedPosts = this.parsePostsFromJson(rawText);
       const allowedHitUrls = new Set(collectedHits.map((h) => h.url));
 
-      const now = new Date().toISOString();
+      const now = new Date(nowMs).toISOString();
       const newItems: FeedPost[] = parsedPosts.map((p, idx) => {
         const rawSourceUrl = safeExternalUrl(p.sourceUrl);
-        const verifiedUrl =
-          rawSourceUrl && (allowedHitUrls.size === 0 || allowedHitUrls.has(rawSourceUrl))
-            ? rawSourceUrl
-            : undefined;
+        const verifiedUrl = rawSourceUrl && allowedHitUrls.has(rawSourceUrl) ? rawSourceUrl : undefined;
         const matchedHit = verifiedUrl ? collectedHits.find((h) => h.url === verifiedUrl) : undefined;
         const imageUrl = safeExternalUrl(p.imageUrl) || safeExternalUrl(matchedHit?.image);
 
         return {
-          id: `post_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
+          id: `post_${nowMs}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
           title: p.title || '工作简报与推进建议',
           body: p.body || '无详细内容',
           area: VALID_AREAS.has(p.area as FeedArea) ? (p.area as FeedArea) : 'goals',
           prompt: p.prompt || '',
           ts: now,
+          ...(matchedHit?.publishedAt ? { publishedAt: matchedHit.publishedAt } : {}),
           kind: verifiedUrl ? 'intel' : p.kind === 'brief' ? 'brief' : 'insight',
           ...(verifiedUrl ? { sourceUrl: verifiedUrl } : {}),
           ...(p.sourceName || matchedHit?.source ? { sourceName: p.sourceName || matchedHit?.source } : {}),

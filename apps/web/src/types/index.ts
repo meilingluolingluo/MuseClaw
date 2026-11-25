@@ -393,6 +393,7 @@ export interface FeedPost {
   area?: string;
   prompt?: string;
   ts?: string;
+  publishedAt?: string;
   date?: string;
   tags?: string[];
   sessionId?: string;

@@ -305,7 +305,134 @@ async function testCognitiveMemorySystem() {
       tags: hallucinatedPost!.tags
     });
     assert.ok(pipeline.getFeedbackProfile(userId).dismissedTopics.includes('测试'));
-    console.log('  ✅ Feed 2.0 外部情报验证、链接防幻觉与点赞/避坑反馈闭环验证通过');
+
+    // 6.1 Feed 时效过滤与空命中防幻觉链接验证
+    const fixedNow = new Date('2026-11-25T14:00:00.000Z').getTime();
+    let capturedAfterDate: string | undefined;
+    let promptSeenSearchResults = '';
+    const staleFilterUser = 'tester_freshness';
+    const freshnessCaller: LLMCaller = async (messages) => {
+      const userContent = String(messages[1]?.content || '');
+      if (userContent.includes('搜索关键词')) {
+        return { content: '["ICML Agent 2026"]' };
+      }
+      promptSeenSearchResults = userContent;
+      return {
+        content: JSON.stringify([
+          {
+            title: '近30天新鲜Agent动态',
+            body: '2026年11月发布的最新智能体工程实践摘要。',
+            area: 'research',
+            kind: 'intel',
+            sourceUrl: 'https://example.com/fresh-2026-11',
+            sourceName: 'TechBlog',
+            tags: ['Agent'],
+            prompt: '分析最新动态'
+          },
+          {
+            title: '试图引用被拦截的旧文章',
+            body: '半年前的文章不应保留外链。',
+            area: 'research',
+            kind: 'intel',
+            sourceUrl: 'https://www.toutiao.com/article/old-icml-2026-05',
+            tags: ['ICML'],
+            prompt: ''
+          }
+        ])
+      };
+    };
+
+    const freshnessRes = await feedStore.writeFeedPosts(staleFilterUser, freshnessCaller, [], 2, {
+      now: fixedNow,
+      maxAgeDays: 30,
+      searchWeb: async (_q, _c, opts) => {
+        capturedAfterDate = opts?.afterDate;
+        return [
+          {
+            title: 'ICML 2026｜智能体的下半场：为什么「答对」已经不够了？',
+            url: 'https://www.toutiao.com/article/old-icml-2026-05',
+            publishedAt: '2026-05-22T06:09:00.000Z',
+            source: '机器之心Pro'
+          },
+          {
+            title: 'ArXiv 2605 旧论文伪装新抓取时间',
+            url: 'https://arxiv.org/abs/2605.22138',
+            publishedAt: '2026-11-24T00:00:00.000Z',
+            source: 'arXiv'
+          },
+          {
+            title: 'URL 含旧日期的博客',
+            url: 'https://example.com/2026/05/22/old-post',
+            source: 'Blog'
+          },
+          {
+            title: '摘要含旧发布日期的文章',
+            url: 'https://example.com/no-meta-old',
+            snippet: '2026-05-22 14:09 发布于机器之心',
+            source: '机器之心'
+          },
+          {
+            title: '2026年11月最新 Agent 评测基准发布',
+            url: 'https://example.com/fresh-2026-11',
+            publishedAt: '2026-11-20T08:00:00.000Z',
+            source: 'TechBlog'
+          }
+        ];
+      }
+    });
+    assert.strictEqual(capturedAfterDate, '2026-10-26', 'searchWeb 应收到近 30 天的 afterDate 过滤日期');
+    assert.ok(!promptSeenSearchResults.includes('old-icml-2026-05'), '过时文章不应注入 Prompt');
+    assert.ok(!promptSeenSearchResults.includes('2605.22138'), '旧月份 arXiv 论文应被拦截');
+    assert.ok(!promptSeenSearchResults.includes('2026/05/22/old-post'), 'URL 含旧日期的结果应被拦截');
+    assert.ok(!promptSeenSearchResults.includes('no-meta-old'), '摘要含旧日期的无元数据结果应被拦截');
+    const freshPost = freshnessRes.posts.find((p) => p.sourceUrl === 'https://example.com/fresh-2026-11');
+    const blockedOldPost = freshnessRes.posts.find((p) => p.title === '试图引用被拦截的旧文章');
+    assert.ok(freshPost, '近期文章应被保留');
+    assert.strictEqual(freshPost?.publishedAt, '2026-11-20T08:00:00.000Z');
+    assert.strictEqual(blockedOldPost?.sourceUrl, undefined, '被时效门禁拦截的链接不得保留在动态中');
+
+    // 当全部外部命中都被过滤（allowedHitUrls.size === 0）时，捏造链接仍应被清除
+    const emptyHitUser = 'tester_empty_hits';
+    const emptyHitRes = await feedStore.writeFeedPosts(
+      emptyHitUser,
+      async (messages) => {
+        const userContent = String(messages[1]?.content || '');
+        if (userContent.includes('搜索关键词')) {
+          return { content: '["stale topic"]' };
+        }
+        return {
+          content: JSON.stringify([
+            {
+              title: '空命中下模型编造外链测试',
+              body: '当所有搜索结果过时被过滤后，模型捏造的链接必须清空。',
+              area: 'research',
+              kind: 'intel',
+              sourceUrl: 'https://fabricated-when-empty.invalid/article',
+              prompt: ''
+            }
+          ])
+        };
+      },
+      [],
+      1,
+      {
+        now: fixedNow,
+        maxAgeDays: 30,
+        searchWeb: async () => [
+          {
+            title: '半年前旧闻',
+            url: 'https://example.com/half-year-ago',
+            publishedAt: '2026-05-01T00:00:00.000Z'
+          }
+        ]
+      }
+    );
+    assert.strictEqual(
+      emptyHitRes.posts[0]?.sourceUrl,
+      undefined,
+      '全部检索结果被过滤导致 allowedHitUrls 为空时，不得放行模型编造的 sourceUrl'
+    );
+    console.log('  ✅ Feed 2.0 外部情报验证、时效门禁、链接防幻觉与点赞/避坑反馈闭环验证通过');
 
     // 7. Proactive Brief 在场静默 & 信号门禁验证
     goalStore.create({
