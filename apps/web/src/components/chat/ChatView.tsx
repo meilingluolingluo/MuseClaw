@@ -159,6 +159,7 @@ export const ChatView: React.FC = () => {
     setFindQuery('');
     setConfirmClear(false);
     setIsThreadMoreOpen(false);
+    setActiveTimelineId(null);
   }, [sessionClearedTick]);
 
   // 点击外部或 Esc 关闭顶部「更多」菜单
@@ -197,7 +198,10 @@ export const ChatView: React.FC = () => {
     const container = chatContainerRef.current;
     if (!container) return;
     const rows = container.querySelectorAll<HTMLElement>('[data-message-role="user"][data-message-id]');
-    if (rows.length === 0) return;
+    if (rows.length === 0) {
+      setActiveTimelineId(null);
+      return;
+    }
     const containerTop = container.getBoundingClientRect().top;
     let currentId: string | null = rows[0].dataset.messageId || null;
     for (const row of rows) {
@@ -269,6 +273,7 @@ export const ChatView: React.FC = () => {
     setQuoteDraft(null);
     setIsFindOpen(false);
     setFindQuery('');
+    setActiveTimelineId(null);
 
     if (!activeSessionId) {
       setMessages([]);
@@ -1013,6 +1018,15 @@ export const ChatView: React.FC = () => {
         })),
     [displayedMessages]
   );
+
+  useEffect(() => {
+    if (timelineEntries.length === 0) {
+      setActiveTimelineId(null);
+      return;
+    }
+    const raf = requestAnimationFrame(() => updateActiveTimelineFromScroll());
+    return () => cancelAnimationFrame(raf);
+  }, [timelineEntries, updateActiveTimelineFromScroll]);
 
   const jumpToMessageId = useCallback((id: string) => {
     const container = chatContainerRef.current;
