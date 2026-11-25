@@ -26,7 +26,7 @@ import { SkillCreateImportModal } from './SkillCreateImportModal';
 type SummaryQuickFilter = 'all' | 'enabled' | 'ready' | 'missing_deps' | 'workshop' | 'archived';
 
 export const SkillsView: React.FC = () => {
-  const { showToast, setTab } = useApp();
+  const { showToast, setTab, openSettings } = useApp();
 
   const [skills, setSkills] = useState<Skill[]>([]);
   const [sandbox, setSandbox] = useState<SandboxStatus | null>(null);
@@ -213,8 +213,8 @@ export const SkillsView: React.FC = () => {
             <button
               type="button"
               className="env-chip env-chip-link"
-              onClick={() => setTab('mcp')}
-              title="前往 MCP 服务中心配置与调试工具"
+              onClick={() => openSettings('connectors')}
+              title="前往设置中的连接器管理"
             >
               <Cpu size={12} />
               MCP {mcpServers.length} · {mcpTotalTools} 工具

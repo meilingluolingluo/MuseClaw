@@ -1,4 +1,4 @@
-export type TabType = 'chat' | 'feed' | 'goals' | 'routines' | 'memory' | 'skills' | 'mcp' | 'artifacts';
+export type TabType = 'chat' | 'feed' | 'goals' | 'routines' | 'memory' | 'skills' | 'artifacts';
 
 export interface User {
   id: string;

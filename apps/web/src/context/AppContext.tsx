@@ -71,7 +71,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Navigation
   const [tab, setTabState] = useState<TabType>(() => {
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-    const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'mcp', 'artifacts'];
+    const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
     return (valid.includes(path as TabType) ? path : 'chat') as TabType;
   });
 
@@ -87,7 +87,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const onPopState = () => {
       const path = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/')[0];
-      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'mcp', 'artifacts'];
+      const valid: TabType[] = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
       setTabState((valid.includes(path as TabType) ? path : 'chat') as TabType);
     };
     window.addEventListener('popstate', onPopState);

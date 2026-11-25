@@ -3996,7 +3996,6 @@ fi
         '/routines',
         '/memory',
         '/skills',
-        '/mcp',
         '/audit',
         '/artifacts',
         '/sessions',
