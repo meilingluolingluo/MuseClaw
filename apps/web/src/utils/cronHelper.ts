@@ -332,6 +332,10 @@ export function formatCronZh(expr: string): string {
 
   if (trimmed.startsWith('@at ')) {
     const atVal = trimmed.replace('@at ', '').trim();
+    const d = new Date(atVal);
+    if (!isNaN(d.getTime())) {
+      return `单次 ${formatDateTime(d)}`;
+    }
     return `单次定时: ${atVal}`;
   }
 
@@ -825,4 +829,131 @@ export function parseNaturalLanguageRoutine(text: string): {
     scheduleKind: parsedCron.kind,
     humanZh: parsedCron.description,
   };
+}
+
+const CRON_FIELD_BOUNDS: Array<{ label: string; min: number; max: number }> = [
+  { label: '分钟', min: 0, max: 59 },
+  { label: '小时', min: 0, max: 23 },
+  { label: '日期', min: 1, max: 31 },
+  { label: '月份', min: 1, max: 12 },
+  { label: '星期', min: 0, max: 7 },
+];
+
+function isValidCronSegment(field: string, min: number, max: number): boolean {
+  if (!field || !/^[0-9*,/?-]+$/.test(field)) return false;
+  if (field === '*' || field === '?') return true;
+  const items = field.split(',');
+  for (const item of items) {
+    if (!item) return false;
+    const [rangePart, stepPart, ...extra] = item.split('/');
+    if (extra.length > 0) return false;
+    if (stepPart !== undefined) {
+      if (!/^\d+$/.test(stepPart)) return false;
+      const step = parseInt(stepPart, 10);
+      if (step <= 0 || step > max) return false;
+    }
+    if (rangePart === '*') continue;
+    if (rangePart.includes('-')) {
+      const bounds = rangePart.split('-');
+      if (bounds.length !== 2 || !/^\d+$/.test(bounds[0]) || !/^\d+$/.test(bounds[1])) return false;
+      const start = parseInt(bounds[0], 10);
+      const end = parseInt(bounds[1], 10);
+      if (start < min || end > max || start > end) return false;
+    } else if (/^\d+$/.test(rangePart)) {
+      const val = parseInt(rangePart, 10);
+      if (val < min || val > max) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * 校验调度表达式（支持 5 段式 Cron、@every、@at 与标准别名）
+ */
+export function validateCronExpr(expr: string): { valid: boolean; error?: string } {
+  const trimmed = (expr || '').trim();
+  if (!trimmed) {
+    return { valid: false, error: '请输入调度表达式' };
+  }
+
+  if (['@hourly', '@daily', '@weekly', '@monthly'].includes(trimmed)) {
+    return { valid: true };
+  }
+
+  if (trimmed.startsWith('@every ')) {
+    const raw = trimmed.slice(7).trim();
+    const match = /^(\d+)([smhd])$/i.exec(raw);
+    if (!match) {
+      return { valid: false, error: '间隔格式无效，示例：@every 15m 或 @every 2h' };
+    }
+    const num = parseInt(match[1], 10);
+    if (num <= 0) {
+      return { valid: false, error: '间隔数值必须大于 0' };
+    }
+    return { valid: true };
+  }
+
+  if (trimmed.startsWith('@at ')) {
+    const raw = trimmed.slice(4).trim();
+    const ts = new Date(raw).getTime();
+    if (!raw || isNaN(ts)) {
+      return { valid: false, error: '单次触发时间格式无效' };
+    }
+    if (ts <= Date.now()) {
+      return { valid: false, error: '触发时间已过，请选择未来时间' };
+    }
+    return { valid: true };
+  }
+
+  const parts = trimmed.split(/\s+/);
+  if (parts.length !== 5) {
+    return { valid: false, error: '标准 Cron 需包含 5 段（分 时 日 月 周），例如 0 9 * * 1-5' };
+  }
+
+  for (let i = 0; i < 5; i++) {
+    const { label, min, max } = CRON_FIELD_BOUNDS[i];
+    if (!isValidCronSegment(parts[i], min, max)) {
+      return { valid: false, error: `${label}字段 "${parts[i]}" 格式或范围无效 (${min}-${max})` };
+    }
+  }
+
+  const nextRuns = previewNextRuns(trimmed, 1);
+  if (nextRuns.length === 0) {
+    return { valid: false, error: '未来一年内无法匹配到有效触发时间，请检查日期组合' };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * 将下次触发时间戳格式化为直观的相对/日期描述
+ */
+export function formatNextRunFriendly(ts?: number): string {
+  if (!ts || isNaN(ts)) return '按周期调度';
+  const target = new Date(ts);
+  if (isNaN(target.getTime())) return '按周期调度';
+
+  const now = new Date();
+  const diffMs = target.getTime() - now.getTime();
+  if (diffMs <= 0) return '即将执行';
+
+  const diffMin = Math.ceil(diffMs / 60000);
+  if (diffMin < 60) {
+    return `${diffMin} 分钟后`;
+  }
+
+  const timeStr = `${target.getHours().toString().padStart(2, '0')}:${target
+    .getMinutes()
+    .toString()
+    .padStart(2, '0')}`;
+
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const targetDayStart = new Date(target.getFullYear(), target.getMonth(), target.getDate()).getTime();
+  const dayDiff = Math.round((targetDayStart - todayStart) / 86400000);
+
+  if (dayDiff === 0) return `今天 ${timeStr}`;
+  if (dayDiff === 1) return `明天 ${timeStr}`;
+  return `${target.getMonth() + 1}/${target.getDate()} ${timeStr}`;
 }

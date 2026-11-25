@@ -215,10 +215,13 @@ export const api = {
   },
   deleteRoutine: (id: string) => request<{ success: boolean }>(`/api/routines/${id}`, { method: 'DELETE' }),
   runRoutine: (id: string) => request<{ success: boolean; message: string; run?: RoutineRun }>(`/api/routines/${id}/run`, { method: 'POST' }),
+  cancelRoutine: (id: string) =>
+    request<{ success: boolean; message?: string }>(`/api/routines/${id}/cancel`, { method: 'POST' }),
   cancelRoutineRun: (runId: string) =>
     request<{ success: boolean; message?: string }>(`/api/routines/runs/${runId}/cancel`, { method: 'POST' }),
   toggleRoutine: (id: string) => request<{ success: boolean; enabled: boolean }>(`/api/routines/${id}/toggle`, { method: 'POST' }),
   getRoutineRuns: (id: string) => request<RoutineRun[]>(`/api/routines/${id}/runs`),
+  getAllRoutineRuns: () => request<RoutineRun[]>('/api/routines/runs'),
   triggerRoutineWebhook: (id: string, token?: string, payload?: unknown) =>
     request<{ success: boolean; message: string }>(
       `/api/routines/${id}/trigger${token ? `?token=${encodeURIComponent(token)}` : ''}`,
