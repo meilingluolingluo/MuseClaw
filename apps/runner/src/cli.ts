@@ -850,7 +850,8 @@ class MuseClawRunnerClient {
                 const reasoning = parsed.item.text.trim();
                 if (reasoning) {
                   this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', {
-                    chunk: `> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`
+                    chunk: '',
+                    reasoning
                   });
                 }
               } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
@@ -875,7 +876,8 @@ class MuseClawRunnerClient {
               for (const c of parsed.message.content) {
                 if (c.type === 'thinking' && c.thinking) {
                   this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', {
-                    chunk: `> 💭 **思考推理**：\n> ${c.thinking.trim().replace(/\n/g, '\n> ')}\n\n`
+                    chunk: '',
+                    reasoning: c.thinking.trim()
                   });
                 } else if (c.type === 'text' && c.text) {
                   this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: c.text });
@@ -905,17 +907,26 @@ class MuseClawRunnerClient {
     child.on('close', async (code) => {
       const latencyMs = Date.now() - start;
       let extractedText = stdout.trim();
+      let extractedReasoning: string | undefined;
 
       if (task.agentId === 'ducx' || task.agentId === 'codex') {
         const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
         const msgs: string[] = [];
+        const reasoningParts: string[] = [];
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line);
-            if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message' && parsed.item.text) {
-              msgs.push(parsed.item.text);
+            if (parsed.type === 'item.completed' && parsed.item) {
+              if (parsed.item.type === 'reasoning' && parsed.item.text) {
+                reasoningParts.push(parsed.item.text.trim());
+              } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
+                msgs.push(parsed.item.text);
+              }
             }
           } catch {}
+        }
+        if (reasoningParts.length > 0) {
+          extractedReasoning = reasoningParts.join('\n\n');
         }
         if (msgs.length > 0) {
           extractedText = msgs.join('\n\n').replace(/\n\nSkipped:[\s\S]*$/, '').trim();
@@ -923,36 +934,31 @@ class MuseClawRunnerClient {
       } else if (task.agentId === 'ducc') {
         const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
         const textParts: string[] = [];
+        const reasoningParts: string[] = [];
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line.trim());
-            if (parsed.type === 'result' && typeof parsed.result === 'string') {
-              extractedText = parsed.result.trim();
-              break;
-            }
             if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
               for (const c of parsed.message.content) {
-                if (c.type === 'text' && c.text) textParts.push(c.text);
+                if (c.type === 'thinking' && c.thinking) {
+                  reasoningParts.push(c.thinking.trim());
+                } else if (c.type === 'text' && c.text) {
+                  textParts.push(c.text);
+                }
+              }
+            }
+            if (parsed.type === 'result' && typeof parsed.result === 'string') {
+              if (textParts.length === 0) {
+                extractedText = parsed.result.trim();
               }
             }
           } catch {}
         }
-        if (!extractedText && textParts.length > 0) {
+        if (reasoningParts.length > 0) {
+          extractedReasoning = reasoningParts.join('\n\n');
+        }
+        if (textParts.length > 0) {
           extractedText = textParts.join('\n').trim();
-        }
-      }
-        const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
-        const msgs: string[] = [];
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message' && parsed.item.text) {
-              msgs.push(parsed.item.text);
-            }
-          } catch {}
-        }
-        if (msgs.length > 0) {
-          extractedText = msgs.join('\n\n').replace(/\n\nSkipped:[\s\S]*$/, '').trim();
         }
       }
 
@@ -962,6 +968,7 @@ class MuseClawRunnerClient {
       await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
         ok,
         text: extractedText,
+        reasoning: extractedReasoning,
         latencyMs,
         error: ok ? undefined : (stderr.trim() || stdout.trim() || `进程异常退出 (code ${code})`)
       });

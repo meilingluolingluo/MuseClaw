@@ -31,6 +31,66 @@ interface MessageBubbleProps {
   live?: boolean;
 }
 
+/**
+ * 从消息正文中自动解析并分离模型思考过程与正式答复
+ */
+function extractReasoningAndContent(
+  rawContent?: string,
+  rawReasoning?: string
+): { content: string; reasoning?: string } {
+  let content = rawContent || '';
+  let reasoning = rawReasoning || '';
+
+  // 1. 匹配并提取全闭合的 <think>...</think> 标签（DeepSeek R1 / 常见推理模型标准格式）
+  const thinkTagRegex = /<think>([\s\S]*?)<\/think>/gi;
+  let thinkMatch: RegExpExecArray | null;
+  while ((thinkMatch = thinkTagRegex.exec(content)) !== null) {
+    reasoning = (reasoning ? `${reasoning}\n\n` : '') + thinkMatch[1].trim();
+  }
+  content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2. 匹配并提取「> 💭 **思考推理**：...」或「> 💭 思考推理：...」引用块格式
+  const quoteReasoningRegex = /(?:^|\n)(?:>\s*💭\s*(?:\*\*)?思考推理(?:\*\*)?[：:]?\s*\n(?:>[^\n]*\n?)*)+/g;
+  const quoteMatches = content.match(quoteReasoningRegex);
+  if (quoteMatches) {
+    for (const match of quoteMatches) {
+      const extractedLines = match
+        .split('\n')
+        .map((line) => line.replace(/^>\s*/, ''))
+        .filter((line) => !line.includes('💭') && !line.includes('思考推理'))
+        .join('\n')
+        .trim();
+      if (extractedLines) {
+        reasoning = (reasoning ? `${reasoning}\n\n` : '') + extractedLines;
+      }
+    }
+    content = content.replace(quoteReasoningRegex, '').trim();
+  }
+
+  // 3. 匹配并提取未加引用的「💭 **思考推理**：...」或「💭 思考推理：...」段落
+  const unquotedReasoningRegex = /(?:^|\n)💭\s*(?:\*\*)?思考推理(?:\*\*)?[：:]?\s*\n([\s\S]*?)(?=(?:\n\n[^\n]+|$))/g;
+  let unquotedMatch: RegExpExecArray | null;
+  while ((unquotedMatch = unquotedReasoningRegex.exec(content)) !== null) {
+    const th = unquotedMatch[1].trim();
+    if (th) {
+      reasoning = (reasoning ? `${reasoning}\n\n` : '') + th;
+    }
+  }
+  content = content.replace(unquotedReasoningRegex, '').trim();
+
+  // 4. 处理流式输出中尚未闭合的 <think>... 尾部
+  const unclosedThinkMatch = content.match(/<think>([\s\S]*)$/i);
+  if (unclosedThinkMatch) {
+    reasoning = (reasoning ? `${reasoning}\n\n` : '') + unclosedThinkMatch[1].trim();
+    content = content.replace(/<think>[\s\S]*$/i, '').trim();
+  }
+
+  return {
+    content: content.trim(),
+    reasoning: reasoning.trim() || undefined,
+  };
+}
+
 const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
   message,
   bot,
@@ -58,8 +118,14 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
   const isUser = message.role === 'user';
 
+  // 严格分离思考过程与正式回复文本
+  const { reasoning: effectiveReasoning, content: effectiveContent } = useMemo(() => {
+    if (isUser) return { content: message.content || '', reasoning: undefined };
+    return extractReasoningAndContent(message.content, message.reasoning);
+  }, [isUser, message.content, message.reasoning]);
+
   const handleCopy = async () => {
-    const textToCopy = message.content || '';
+    const textToCopy = isUser ? message.content || '' : effectiveContent || message.content || '';
     if (!textToCopy) return;
     const ok = await copyToClipboard(textToCopy);
     if (ok) {
@@ -87,12 +153,12 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
   // 缓存 Markdown 解析结果，避免同一会话内流式渲染其它气泡时反复解析
   const renderedHtml = useMemo(() => {
-    if (isUser || !message.content) return '';
-    const displayClean = message.content
+    if (isUser || !effectiveContent) return '';
+    const displayClean = effectiveContent
       .replace(/<[｜|]{2}DSML[｜|]{2}\s*calls>[\s\S]*?(?:<\/[｜|]{2}DSML[｜|]{2}\s*calls>|$)/gi, '')
       .trim();
     return displayClean ? renderMarkdown(displayClean) : '';
-  }, [isUser, message.content]);
+  }, [isUser, effectiveContent]);
 
   return (
     <div className={`message-row ${message.role}`}>
@@ -111,7 +177,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         <div className="message-meta-bar">
           <span className="message-sender-name">{isUser ? '我' : bot?.name || '数字员工'}</span>
           {formattedTime && <span className="message-timestamp">{formattedTime}</span>}
-          {message.content && (
+          {(effectiveContent || message.content) && (
             <button
               type="button"
               className="message-copy-btn"
@@ -125,7 +191,7 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
         </div>
 
         {/* Assistant Reasoning Collapsible Block */}
-        {message.reasoning && (
+        {effectiveReasoning && (
           <div className="thinking-card">
             <button
               type="button"
@@ -135,14 +201,15 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
             >
               {isReasoningOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               <span className="think-title">
-                {live ? '思考过程中…' : '思考过程 (Reasoning)'}
+                {live ? '思考过程中…' : '思考推理过程'}
               </span>
               {live && <span className="think-pulse-dot" />}
             </button>
             {isReasoningOpen && (
-              <div className="reasoning-content">
-                {message.reasoning}
-              </div>
+              <div
+                className="reasoning-content markdown-body"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(effectiveReasoning) }}
+              />
             )}
           </div>
         )}

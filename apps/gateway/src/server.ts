@@ -17,7 +17,8 @@ import {
   Attachment,
   formatAttachmentNote,
   modelTakesImages,
-  buildMultimodalContent
+  buildMultimodalContent,
+  splitReasoningAndContent
 } from '../../../packages/sandbox-core/src/index.ts';
 import { SentinelPolicyManager } from '../../../apps/sentinel/src/guard.ts';
 import { createInfoflowChannel } from '../channels/infoflow/index.ts';
@@ -2504,7 +2505,7 @@ export function startGatewayServer(defaultPort = 8799) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const data = JSON.parse(body || '{}');
-      globalRunnerMesh.streamTaskChunk(taskId, data.chunk || '');
+      globalRunnerMesh.streamTaskChunk(taskId, data.chunk || '', data.reasoning);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ ok: true }));
     }
@@ -3549,9 +3550,13 @@ fi
           ...(isHiddenTurn ? { hidden: true } : {})
         });
         if (fullAssistantText || clientGone || toolCalls.length > 0 || reasoningText.trim() || widgets.length > 0) {
-          const content = clientGone
+          const rawContent = clientGone
             ? `${fullAssistantText ? `${fullAssistantText}\n\n` : ''}（已停止）`
             : fullAssistantText;
+          const { content, reasoning: extractedReasoning } = splitReasoningAndContent(
+            rawContent,
+            reasoningText.trim() || undefined
+          );
           for (const tc of toolCalls) {
             if (tc.status === 'running') {
               tc.status = clientGone ? 'stopped' : 'done';
@@ -3561,7 +3566,7 @@ fi
           session.messages.push({
             role: 'assistant',
             content,
-            ...(reasoningText.trim() ? { reasoning: reasoningText.trim() } : {}),
+            ...(extractedReasoning ? { reasoning: extractedReasoning } : {}),
             ...(toolCalls.length ? { toolCalls } : {}),
             ...(widgets.length ? { widgets } : {})
           });

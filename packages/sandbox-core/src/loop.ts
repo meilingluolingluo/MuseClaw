@@ -49,7 +49,7 @@ export interface LLMMessage {
 export type LLMCaller = (
   messages: LLMMessage[],
   tools: ToolDefinition[],
-  onChunk?: (delta: string) => void
+  onChunk?: (delta: string, reasoningDelta?: string) => void
 ) => Promise<{
   content: string;
   reasoning_content?: string;
@@ -164,11 +164,12 @@ export async function* runAgentLoop(
       step++;
 
       // 3. 调用大模型进行下一步推理 (支持真流式 SSE 逐 token 实时推送)
-      const chunkQueue: string[] = [];
+      const chunkQueue: Array<{ text?: string; reasoning?: string }> = [];
       let notifyChunk: (() => void) | null = null;
       let isFinished = false;
       let callerError: any = null;
       let streamedChunkCount = 0;
+      let streamedReasoningCount = 0;
 
       const onAbort = () => {
         isFinished = true;
@@ -179,9 +180,9 @@ export async function* runAgentLoop(
       };
       context.signal?.addEventListener('abort', onAbort, { once: true });
 
-      const onDelta = (delta: string) => {
-        if (!delta) return;
-        chunkQueue.push(delta);
+      const onDelta = (delta: string, reasoningDelta?: string) => {
+        if (!delta && !reasoningDelta) return;
+        chunkQueue.push({ text: delta || undefined, reasoning: reasoningDelta || undefined });
         if (notifyChunk) {
           notifyChunk();
           notifyChunk = null;
@@ -209,9 +210,15 @@ export async function* runAgentLoop(
       while (!isFinished || chunkQueue.length > 0) {
         if (context.signal?.aborted) break;
         if (chunkQueue.length > 0) {
-          const text = chunkQueue.shift()!;
-          streamedChunkCount++;
-          yield { type: 'stream:text-delta', text, bot_id: context.botId, session_id: context.sessionId };
+          const item = chunkQueue.shift()!;
+          if (item.reasoning) {
+            streamedReasoningCount++;
+            yield { type: 'stream:reasoning-delta', text: item.reasoning, bot_id: context.botId, session_id: context.sessionId };
+          }
+          if (item.text) {
+            streamedChunkCount++;
+            yield { type: 'stream:text-delta', text: item.text, bot_id: context.botId, session_id: context.sessionId };
+          }
         } else if (!isFinished) {
           await new Promise<void>((resolve) => {
             notifyChunk = resolve;
@@ -229,6 +236,11 @@ export async function* runAgentLoop(
     const response = await callPromise;
     if (!response) {
       break;
+    }
+
+    // 若模型提供了思考过程但流式中未输出，补发思考推理过程
+    if (response.reasoning_content && streamedReasoningCount === 0) {
+      yield { type: 'stream:reasoning-delta', text: response.reasoning_content, bot_id: context.botId, session_id: context.sessionId };
     }
 
     // 若底座模型未接入流式回调，保底产出完整内容

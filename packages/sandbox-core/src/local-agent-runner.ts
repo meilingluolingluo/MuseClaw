@@ -11,6 +11,7 @@ import { globalRunnerMesh } from './runner-mesh.ts';
 import type { LLMCaller, LLMMessage, ToolDefinition } from './loop.ts';
 import type { ModelProviderConfig } from './llm.ts';
 import { resolveApiKey } from './llm.ts';
+import { splitReasoningAndContent } from './reasoning.ts';
 
 export interface LocalAgentRunOptions {
   model?: string;
@@ -19,12 +20,13 @@ export interface LocalAgentRunOptions {
   apiKey?: string;
   userId?: string;
   targetMachineId?: string;
-  onChunk?: (text: string) => void;
+  onChunk?: (delta: string, reasoningDelta?: string) => void;
 }
 
 export interface LocalAgentRunResult {
   ok: boolean;
   text: string;
+  reasoning?: string;
   latencyMs: number;
   error?: string;
 }
@@ -288,19 +290,28 @@ export async function runLocalAgent(
       const latencyMs = Date.now() - start;
       if (code === 0 && stdout.trim()) {
         let extractedText = stdout.trim();
+        let extractedReasoning: string | undefined;
 
         if (agentId === 'codex' || agentId === 'ducx') {
           const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
           const messages: string[] = [];
+          const reasoningParts: string[] = [];
           for (const line of lines) {
             try {
               const parsed = JSON.parse(line);
-              if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message' && parsed.item.text) {
-                messages.push(parsed.item.text);
+              if (parsed.type === 'item.completed' && parsed.item) {
+                if (parsed.item.type === 'reasoning' && parsed.item.text) {
+                  reasoningParts.push(parsed.item.text.trim());
+                } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
+                  messages.push(parsed.item.text);
+                }
               }
             } catch {
               // 忽略非 JSON 行
             }
+          }
+          if (reasoningParts.length > 0) {
+            extractedReasoning = reasoningParts.join('\n\n');
           }
           if (messages.length > 0) {
             extractedText = messages.join('\n\n').replace(/\n\nSkipped:[\s\S]*$/, '').trim();
@@ -315,26 +326,35 @@ export async function runLocalAgent(
         } else if (agentId === 'ducc') {
           const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
           const textParts: string[] = [];
+          const reasoningParts: string[] = [];
           for (const line of lines) {
             try {
               const parsed = JSON.parse(line.trim());
-              if (parsed.type === 'result' && typeof parsed.result === 'string') {
-                extractedText = parsed.result.trim();
-                break;
-              }
               if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
                 for (const c of parsed.message.content) {
-                  if (c.type === 'text' && c.text) textParts.push(c.text);
+                  if (c.type === 'thinking' && c.thinking) {
+                    reasoningParts.push(c.thinking.trim());
+                  } else if (c.type === 'text' && c.text) {
+                    textParts.push(c.text);
+                  }
+                }
+              }
+              if (parsed.type === 'result' && typeof parsed.result === 'string') {
+                if (textParts.length === 0) {
+                  extractedText = parsed.result.trim();
                 }
               }
             } catch {}
           }
-          if (!extractedText && textParts.length > 0) {
+          if (reasoningParts.length > 0) {
+            extractedReasoning = reasoningParts.join('\n\n');
+          }
+          if (textParts.length > 0) {
             extractedText = textParts.join('\n').trim();
           }
         }
 
-        resolve({ ok: true, text: extractedText, latencyMs });
+        resolve({ ok: true, text: extractedText, reasoning: extractedReasoning, latencyMs });
       } else {
         const error = stderr.trim() || stdout.trim() || `Agent 执行退出，退出码: ${code}`;
         resolve({ ok: false, text: stdout.trim(), latencyMs, error });
@@ -405,19 +425,31 @@ export function createLocalAgentCaller(
   config: ModelProviderConfig,
   callerOptions: { userId?: string } = {}
 ): LLMCaller {
-  return async (messages: LLMMessage[], _tools: ToolDefinition[], onChunk?: (delta: string) => void) => {
+  return async (
+    messages: LLMMessage[],
+    _tools: ToolDefinition[],
+    onChunk?: (delta: string, reasoningDelta?: string) => void
+  ) => {
     const prompt = formatLLMMessagesToPrompt(messages);
     const apiKey = resolveApiKey(config.apiKey, config.id) || resolveApiKey(undefined, 'deepseek');
 
+    let accumulatedReasoning = '';
     let streamBuffer = '';
     const res = await runLocalAgent(config.id, prompt, {
       model: config.model,
       apiKey,
       userId: callerOptions.userId,
-      onChunk: (chunk) => {
-        if (!onChunk || !chunk) return;
-        // 如果是已由远程 Runner 提取的格式化文本或纯文本增量，直接透传至前端
-        if (chunk.startsWith('> 💭') || (!chunk.includes('{"type":') && !chunk.startsWith('{'))) {
+      onChunk: (chunk, reasoning) => {
+        if (!onChunk) return;
+        if (reasoning) {
+          accumulatedReasoning = (accumulatedReasoning ? `${accumulatedReasoning}\n\n` : '') + reasoning;
+          onChunk('', reasoning);
+          return;
+        }
+        if (!chunk) return;
+
+        // 如果是已由远程 Runner 提取的纯文本增量，直接透传至前端
+        if (!chunk.includes('{"type":') && !chunk.startsWith('{')) {
           onChunk(chunk);
           return;
         }
@@ -433,9 +465,10 @@ export function createLocalAgentCaller(
               const parsed = JSON.parse(trimmed);
               if (parsed.type === 'item.completed' && parsed.item) {
                 if (parsed.item.type === 'reasoning' && parsed.item.text) {
-                  const reasoning = parsed.item.text.trim();
-                  if (reasoning) {
-                    onChunk(`> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`);
+                  const r = parsed.item.text.trim();
+                  if (r) {
+                    accumulatedReasoning = (accumulatedReasoning ? `${accumulatedReasoning}\n\n` : '') + r;
+                    onChunk('', r);
                   }
                 } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
                   const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
@@ -461,7 +494,10 @@ export function createLocalAgentCaller(
                 for (const c of parsed.message.content) {
                   if (c.type === 'thinking' && c.thinking) {
                     const th = c.thinking.trim();
-                    if (th) onChunk(`> 💭 **思考推理**：\n> ${th.replace(/\n/g, '\n> ')}\n\n`);
+                    if (th) {
+                      accumulatedReasoning = (accumulatedReasoning ? `${accumulatedReasoning}\n\n` : '') + th;
+                      onChunk('', th);
+                    }
                   } else if (c.type === 'text' && c.text) {
                     onChunk(c.text);
                   }
@@ -483,8 +519,11 @@ export function createLocalAgentCaller(
       throw new Error(`[${config.name || config.id}] 执行失败: ${res.error || '未知错误'}`);
     }
 
+    const parsedResult = splitReasoningAndContent(res.text, res.reasoning || accumulatedReasoning);
+
     return {
-      content: res.text,
+      content: parsedResult.content,
+      reasoning_content: parsedResult.reasoning,
       toolCalls: []
     };
   };

@@ -657,9 +657,9 @@ class StreamQueue {
     this.isFlushing = false;
   }
 
-  push(chunk) {
-    if (!chunk) return;
-    this.queue.push(chunk);
+  push(item) {
+    if (!item) return;
+    this.queue.push(typeof item === 'string' ? { chunk: item } : item);
     this.flush();
   }
 
@@ -667,9 +667,9 @@ class StreamQueue {
     if (this.isFlushing) return;
     this.isFlushing = true;
     while (this.queue.length > 0) {
-      const chunk = this.queue.shift();
+      const item = this.queue.shift();
       try {
-        await this.client.request(`/api/runner/tasks/${this.taskId}/stream`, 'POST', { chunk });
+        await this.client.request(`/api/runner/tasks/${this.taskId}/stream`, 'POST', item);
       } catch (err) {
         // 网络短暂抖动时保持容错，不阻断主流程
       }
@@ -890,7 +890,7 @@ class MuseClawRunnerClient {
             if (parsed.item.type === 'reasoning' && parsed.item.text) {
               const reasoning = parsed.item.text.trim();
               if (reasoning) {
-                streamQueue.push(`> 💭 **思考推理**：\n> ${reasoning.replace(/\n/g, '\n> ')}\n\n`);
+                streamQueue.push({ chunk: '', reasoning });
               }
             } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
               const clean = parsed.item.text.replace(/\n\nSkipped:[\s\S]*$/, '').trim();
@@ -911,7 +911,7 @@ class MuseClawRunnerClient {
             for (const c of parsed.message.content) {
               if (c.type === 'thinking' && c.thinking) {
                 const th = c.thinking.trim();
-                if (th) streamQueue.push(`> 💭 **思考推理**：\n> ${th.replace(/\n/g, '\n> ')}\n\n`);
+                if (th) streamQueue.push({ chunk: '', reasoning: th });
               } else if (c.type === 'text' && c.text) {
                 streamQueue.push(c.text);
               }
@@ -940,17 +940,26 @@ class MuseClawRunnerClient {
       await streamQueue.drain();
       const latencyMs = Date.now() - start;
       let extractedText = stdout.trim();
+      let extractedReasoning = undefined;
 
       if (task.agentId === 'ducx' || task.agentId === 'codex') {
         const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
         const msgs = [];
+        const reasoningParts = [];
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line.trim());
-            if (parsed.type === 'item.completed' && parsed.item && parsed.item.type === 'agent_message' && parsed.item.text) {
-              msgs.push(parsed.item.text);
+            if (parsed.type === 'item.completed' && parsed.item) {
+              if (parsed.item.type === 'reasoning' && parsed.item.text) {
+                reasoningParts.push(parsed.item.text.trim());
+              } else if (parsed.item.type === 'agent_message' && parsed.item.text) {
+                msgs.push(parsed.item.text);
+              }
             }
           } catch {}
+        }
+        if (reasoningParts.length > 0) {
+          extractedReasoning = reasoningParts.join('\n\n');
         }
         if (msgs.length > 0) {
           extractedText = msgs.join('\n\n').replace(/\n\nSkipped:[\s\S]*$/, '').trim();
@@ -958,21 +967,30 @@ class MuseClawRunnerClient {
       } else if (task.agentId === 'ducc') {
         const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
         const textParts = [];
+        const reasoningParts = [];
         for (const line of lines) {
           try {
             const parsed = JSON.parse(line.trim());
-            if (parsed.type === 'result' && typeof parsed.result === 'string') {
-              extractedText = parsed.result.trim();
-              break;
-            }
             if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
               for (const c of parsed.message.content) {
-                if (c.type === 'text' && c.text) textParts.push(c.text);
+                if (c.type === 'thinking' && c.thinking) {
+                  reasoningParts.push(c.thinking.trim());
+                } else if (c.type === 'text' && c.text) {
+                  textParts.push(c.text);
+                }
+              }
+            }
+            if (parsed.type === 'result' && typeof parsed.result === 'string') {
+              if (textParts.length === 0) {
+                extractedText = parsed.result.trim();
               }
             }
           } catch {}
         }
-        if (!extractedText && textParts.length > 0) {
+        if (reasoningParts.length > 0) {
+          extractedReasoning = reasoningParts.join('\n\n');
+        }
+        if (textParts.length > 0) {
           extractedText = textParts.join('\n').trim();
         }
       }
@@ -988,6 +1006,7 @@ class MuseClawRunnerClient {
         await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
           ok,
           text: extractedText,
+          reasoning: extractedReasoning,
           latencyMs,
           error: ok ? undefined : (stderr.trim() || stdout.trim() || `进程异常退出 (code ${code})`)
         });

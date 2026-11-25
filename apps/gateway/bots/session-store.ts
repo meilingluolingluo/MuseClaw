@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Session } from '@museclaw/protocol';
+import { splitReasoningAndContent } from '../../../packages/sandbox-core/src/reasoning.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +59,17 @@ export class SessionStore {
         const list: Session[] = JSON.parse(raw);
         for (const item of list) {
           item.userId = sanitized;
+          if (Array.isArray(item.messages)) {
+            for (const m of item.messages) {
+              if (m.role === 'assistant' && m.content) {
+                const { content, reasoning } = splitReasoningAndContent(m.content, m.reasoning);
+                m.content = content;
+                if (reasoning) {
+                  m.reasoning = reasoning;
+                }
+              }
+            }
+          }
           sessionMap.set(item.id, item);
         }
       } catch (err: any) {
@@ -292,6 +304,18 @@ export class SessionStore {
       session.kind = existing?.kind || (session.id.endsWith('_main') || session.id === 'main' ? 'main' : 'side');
     }
     session.updated_at = Date.now();
+
+    if (Array.isArray(session.messages)) {
+      for (const m of session.messages) {
+        if (m.role === 'assistant' && m.content) {
+          const { content, reasoning } = splitReasoningAndContent(m.content, m.reasoning);
+          m.content = content;
+          if (reasoning) {
+            m.reasoning = reasoning;
+          }
+        }
+      }
+    }
 
     sessionMap.set(session.id, session);
     this.saveUser(effectiveUserId);

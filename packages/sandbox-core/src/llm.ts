@@ -355,6 +355,9 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
               const delta = choice.delta;
               if (delta?.reasoning_content) {
                 accumulatedReasoning += delta.reasoning_content;
+                if (onChunk) {
+                  onChunk('', delta.reasoning_content);
+                }
               }
               if (delta?.content) {
                 accumulatedContent += delta.content;

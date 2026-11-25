@@ -43,7 +43,7 @@ interface PendingTaskDispatcher {
   machineId: string;
   resolve: (res: LocalAgentRunResult) => void;
   reject: (err: Error) => void;
-  onChunk?: (chunk: string) => void;
+  onChunk?: (chunk: string, reasoning?: string) => void;
   timer: NodeJS.Timeout;
 }
 
@@ -208,11 +208,11 @@ export class RunnerMeshManager extends EventEmitter {
   /**
    * 接收远程 Runner 传回的执行流式分块
    */
-  public streamTaskChunk(taskId: string, chunk: string): boolean {
+  public streamTaskChunk(taskId: string, chunk: string, reasoning?: string): boolean {
     const pending = this.pendingTasks.get(taskId);
     if (!pending) return false;
     if (pending.onChunk) {
-      pending.onChunk(chunk);
+      pending.onChunk(chunk, reasoning);
     }
     return true;
   }
@@ -222,7 +222,7 @@ export class RunnerMeshManager extends EventEmitter {
    */
   public completeTask(
     taskId: string,
-    result: { ok: boolean; text: string; error?: string; latencyMs?: number }
+    result: { ok: boolean; text: string; reasoning?: string; error?: string; latencyMs?: number }
   ): boolean {
     const pending = this.pendingTasks.get(taskId);
     if (!pending) return false;
@@ -238,6 +238,7 @@ export class RunnerMeshManager extends EventEmitter {
     pending.resolve({
       ok: result.ok,
       text: result.text || '',
+      reasoning: result.reasoning,
       latencyMs: result.latencyMs || 0,
       error: result.error
     });
@@ -295,7 +296,7 @@ export class RunnerMeshManager extends EventEmitter {
       timeoutMs?: number;
       targetMachineId?: string;
       userId?: string;
-      onChunk?: (chunk: string) => void;
+      onChunk?: (chunk: string, reasoning?: string) => void;
     } = {}
   ): Promise<LocalAgentRunResult> {
     const target = options.targetMachineId

@@ -14,6 +14,7 @@ export * from './local-agent-prober.ts';
 export * from './local-agent-runner.ts';
 export * from './runner-mesh.ts';
 export * from './multica-bridge.ts';
+export * from './reasoning.ts';
 
 /**
  * SandboxCore
