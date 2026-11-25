@@ -3,7 +3,6 @@ import type { Message, Bot } from '../../types';
 import { BotAvatar } from '../common/BotAvatar';
 import { renderMarkdown } from '../../utils/markdown';
 import {
-  ChevronDown,
   ChevronRight,
   ShieldAlert,
   Check,
@@ -258,15 +257,16 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
     return extractToolDomainCards(tools);
   }, [isUser, live, tools]);
 
-  const reasoningLabel = useMemo(() => {
+  const reasoningTitle = live && !displayClean ? '深度思考中…' : '思考过程';
+
+  const reasoningMeta = useMemo(() => {
     if (live && !displayClean) {
-      return liveReasoningSeconds > 0 ? `深度思考中 · ${liveReasoningSeconds}s` : '深度思考中…';
+      return liveReasoningSeconds > 0 ? `${liveReasoningSeconds}s` : '';
     }
     if (message.reasoningDurationMs && message.reasoningDurationMs > 0) {
-      const sec = (message.reasoningDurationMs / 1000).toFixed(1);
-      return `思考过程（用时 ${sec}s）`;
+      return `用时 ${(message.reasoningDurationMs / 1000).toFixed(1)}s`;
     }
-    return '思考过程';
+    return '';
   }, [live, displayClean, liveReasoningSeconds, message.reasoningDurationMs]);
 
   const turnMetaLabel = useMemo(() => {
@@ -309,7 +309,11 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
 
         {/* 思考过程折叠卡片 */}
         {(effectiveReasoning || message.reasoning) && (
-          <div className={`thinking-card${live && !displayClean ? ' is-thinking-live' : ''}`}>
+          <div
+            className={`thinking-card${isReasoningOpen ? ' is-open' : ''}${
+              live && !displayClean ? ' is-thinking-live' : ''
+            }`}
+          >
             <button
               type="button"
               className="think-toggle-btn"
@@ -319,17 +323,22 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
               }}
               aria-expanded={isReasoningOpen}
             >
-              {isReasoningOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <Brain size={13} className="think-brain-icon" />
-              <span className="think-title">{reasoningLabel}</span>
+              <span className="think-icon-badge" aria-hidden="true">
+                <Brain size={12} className="think-brain-icon" />
+              </span>
+              <span className="think-title">{reasoningTitle}</span>
+              {reasoningMeta && <span className="think-meta">{reasoningMeta}</span>}
               {live && !displayClean && <span className="think-pulse-dot" />}
+              <ChevronRight size={13} className="think-chevron" />
             </button>
             {isReasoningOpen && (
-              <div
-                ref={reasoningBodyRef}
-                className="reasoning-content markdown-body"
-                dangerouslySetInnerHTML={{ __html: reasoningHtml }}
-              />
+              <div className="thinking-body">
+                <div
+                  ref={reasoningBodyRef}
+                  className="reasoning-content markdown-body"
+                  dangerouslySetInnerHTML={{ __html: reasoningHtml }}
+                />
+              </div>
             )}
           </div>
         )}

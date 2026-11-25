@@ -1664,14 +1664,11 @@ html[data-theme="dark"] .pill-purple {
 }
 
 .reasoning-content {
-  font-size: 12.5px;
-  color: var(--text-dim);
-  border-left: 2px solid var(--om-border);
-  padding-left: 10px;
-  margin-top: 8px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  max-height: 320px;
+  font-size: 13px;
+  color: var(--om-muted);
+  margin-top: 0;
+  line-height: 1.65;
+  max-height: 360px;
   overflow-y: auto;
 }
 
@@ -1762,7 +1759,8 @@ html[data-theme="dark"] .approval-result-pill.rejected {
   background: var(--om-surface);
   padding: 18px 20px;
   box-shadow: var(--om-shadow-floating);
-  max-width: 680px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .approval-card-title {
@@ -6291,7 +6289,8 @@ details[open] .thought-toggle::after {
 /* ── 工具执行过程（实时 + 历史回放） ─────────────────────────────────── */
 
 .tool-trace {
-  max-width: 680px;
+  width: 100%;
+  max-width: 100%;
   margin: 2px 0 10px;
   border: 1px solid var(--om-border);
   border-radius: 10px;
@@ -8453,7 +8452,7 @@ html[data-theme="dark"] .cat-pill.is-active { color: var(--om-ink-fg); }
   flex-direction: column;
   gap: 16px;
   padding: 32px 24px;
-  max-width: 680px;
+  max-width: 100%;
   margin: auto;
   width: 100%;
 }
