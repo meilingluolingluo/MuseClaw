@@ -20,6 +20,8 @@ import {
   Plus,
   Search,
   Download,
+  Trash2,
+  MoreHorizontal,
 } from 'lucide-react';
 import type { Message, MessageAttachment, AvatarMood, WidgetPayload } from '../../types';
 import { api } from '../../services/api';
@@ -32,6 +34,8 @@ export const ChatView: React.FC = () => {
     isMainChat,
     switchToMainChat,
     createNewSideChat,
+    clearSession,
+    sessionClearedTick,
     activeBot,
     showToast,
     setTainted,
@@ -78,6 +82,10 @@ export const ChatView: React.FC = () => {
   const [isFindOpen, setIsFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [activeMatchIdx, setActiveMatchIdx] = useState(0);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [isThreadMoreOpen, setIsThreadMoreOpen] = useState(false);
+  const threadMoreRef = useRef<HTMLDivElement>(null);
+  const clearedAbortRef = useRef<boolean>(false);
 
   // 时间轴高亮楼层
   const [activeTimelineId, setActiveTimelineId] = useState<string | null>(null);
@@ -126,6 +134,51 @@ export const ChatView: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [isStreaming]);
+
+  // 响应全局清空会话事件（主聊清空后保持同 ID 立即刷新）
+  useEffect(() => {
+    if (sessionClearedTick === 0) return;
+    if (abortRef.current) {
+      clearedAbortRef.current = true;
+      abortedByUserRef.current = true;
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    currentStreamingSessionIdRef.current = null;
+    pendingImmediateSendRef.current = null;
+    setMessages([]);
+    setQueuedMessages([]);
+    setQuoteDraft(null);
+    setIsStreaming(false);
+    setStreamingContent('');
+    setStreamingReasoning('');
+    setStreamingTools([]);
+    setStreamingWidgets([]);
+    setBotMood('idle');
+    setIsFindOpen(false);
+    setFindQuery('');
+    setConfirmClear(false);
+    setIsThreadMoreOpen(false);
+  }, [sessionClearedTick]);
+
+  // 点击外部或 Esc 关闭顶部「更多」菜单
+  useEffect(() => {
+    if (!isThreadMoreOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (threadMoreRef.current && !threadMoreRef.current.contains(e.target as Node)) {
+        setIsThreadMoreOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsThreadMoreOpen(false);
+    };
+    document.addEventListener('mousedown', onOutside);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onOutside);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isThreadMoreOpen]);
 
   // 全局 Ctrl/Cmd + F 唤起会话内搜索
   useEffect(() => {
@@ -647,6 +700,10 @@ export const ChatView: React.FC = () => {
         return;
       }
       if (err?.name === 'AbortError') {
+        if (clearedAbortRef.current) {
+          clearedAbortRef.current = false;
+          return;
+        }
         const partial = accumulatedText.trim();
         setMessages((prev) =>
           prev
@@ -859,6 +916,40 @@ export const ChatView: React.FC = () => {
     [isStreaming, activeSessionId, activeBot?.id, activeSession?.title, loadSessions, selectSession, showToast]
   );
 
+  const handleClearCurrentChat = useCallback(async () => {
+    if (messages.length === 0 && !isStreaming) {
+      showToast('当前对话已是空的', 'info');
+      setConfirmClear(false);
+      return;
+    }
+    if (isStreaming && abortRef.current) {
+      clearedAbortRef.current = true;
+      abortedByUserRef.current = true;
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setConfirmClear(false);
+    await clearSession(activeSessionId || undefined);
+  }, [activeSessionId, clearSession, isStreaming, messages.length, showToast]);
+
+  const handleClearButtonClick = () => {
+    if (confirmClear) {
+      void handleClearCurrentChat();
+    } else {
+      setConfirmClear(true);
+      setTimeout(() => setConfirmClear(false), 3000);
+    }
+  };
+
+  const handleNewChat = useCallback(async () => {
+    if (isStreaming && abortRef.current) {
+      abortedByUserRef.current = true;
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    await createNewSideChat('新对话');
+  }, [createNewSideChat, isStreaming]);
+
   const handleExportSession = () => {
     const cleanList = messages.filter((m) => !m.hidden);
     if (cleanList.length === 0) {
@@ -1005,11 +1096,11 @@ export const ChatView: React.FC = () => {
               <button
                 type="button"
                 className="btn-thread-switch"
-                onClick={() => createNewSideChat()}
-                title="开启一个独立副任务旁聊，不污染当前主聊"
+                onClick={() => void handleNewChat()}
+                title="开启一个全新独立对话（旁聊），不污染主聊上下文"
               >
                 <Plus size={11} />
-                <span>开启旁聊</span>
+                <span>新对话</span>
               </button>
             )}
 
@@ -1017,22 +1108,54 @@ export const ChatView: React.FC = () => {
               <>
                 <button
                   type="button"
-                  className="btn-thread-switch btn-thread-icon"
-                  onClick={() => setIsFindOpen((v) => !v)}
-                  title="搜索当前对话 (Ctrl/⌘ + F)"
-                  aria-label="搜索当前对话"
+                  className={`btn-thread-switch btn-thread-clear${confirmClear ? ' is-confirming' : ''}`}
+                  onClick={handleClearButtonClick}
+                  title={confirmClear ? '再次点击确认清空当前对话记录' : '清空当前对话记录（保留长期记忆）'}
                 >
-                  <Search size={11} />
+                  <Trash2 size={11} />
+                  <span>{confirmClear ? '确认清空?' : '清空'}</span>
                 </button>
-                <button
-                  type="button"
-                  className="btn-thread-switch btn-thread-icon"
-                  onClick={handleExportSession}
-                  title="导出完整对话为 Markdown"
-                  aria-label="导出完整对话"
-                >
-                  <Download size={11} />
-                </button>
+
+                <div className="chat-thread-more-wrap" ref={threadMoreRef}>
+                  <button
+                    type="button"
+                    className={`btn-thread-switch btn-thread-icon${isThreadMoreOpen ? ' is-active' : ''}`}
+                    onClick={() => setIsThreadMoreOpen((v) => !v)}
+                    title="更多会话操作"
+                    aria-label="更多会话操作"
+                    aria-expanded={isThreadMoreOpen}
+                  >
+                    <MoreHorizontal size={12} />
+                  </button>
+                  {isThreadMoreOpen && (
+                    <div className="chat-thread-more-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-thread-more-item"
+                        onClick={() => {
+                          setIsThreadMoreOpen(false);
+                          setIsFindOpen((v) => !v);
+                        }}
+                      >
+                        <Search size={13} />
+                        <span>搜索当前对话 (Ctrl+F)</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="chat-thread-more-item"
+                        onClick={() => {
+                          setIsThreadMoreOpen(false);
+                          handleExportSession();
+                        }}
+                      >
+                        <Download size={13} />
+                        <span>导出为 Markdown</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -1267,6 +1390,11 @@ export const ChatView: React.FC = () => {
           onClearQuote={() => setQuoteDraft(null)}
           waitingSeconds={waitingSeconds}
           sentHistory={sentHistory}
+          onClearChat={() => void handleClearCurrentChat()}
+          onNewChat={() => void handleNewChat()}
+          onOpenFind={() => setIsFindOpen(true)}
+          onExportChat={handleExportSession}
+          hasMessages={indexedVisibleMessages.length > 0}
         />
 
         <ImageLightbox

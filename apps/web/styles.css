@@ -1868,6 +1868,7 @@ html[data-theme="dark"] .approval-result-pill.rejected {
 }
 
 .composer-box {
+  position: relative;
   background-color: var(--om-surface);
   border: 1px solid var(--om-border);
   border-radius: 26px;

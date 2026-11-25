@@ -33,6 +33,8 @@ interface AppContextType {
   setActiveBotId: (botId: string) => void;
   selectSession: (sessionId: string) => void;
   createNewSession: (silent?: boolean) => Promise<Session | undefined>;
+  clearSession: (sessionId?: string) => Promise<boolean>;
+  sessionClearedTick: number;
   deleteSession: (sessionId: string) => Promise<void>;
   loadBots: () => Promise<void>;
   loadSessions: (botId: string, keepActiveId?: string) => Promise<void>;
@@ -210,6 +212,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [activeSessionId]);
   const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const [sessionClearedTick, setSessionClearedTick] = useState(0);
 
   // Modals & Panels
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
@@ -459,6 +462,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [activeBotId, sessions, showToast]
   );
 
+  const clearSession = useCallback(
+    async (sessionId?: string): Promise<boolean> => {
+      const targetId = sessionId || activeSessionIdRef.current;
+      if (!targetId) return false;
+      try {
+        await api.clearSession(targetId);
+      } catch (err: any) {
+        // 尚未落盘的空会话可能返回 404，前端照常归零
+        if (!String(err?.message || '').includes('404')) {
+          showToast(`清空会话失败: ${err?.message || err}`, 'error');
+          return false;
+        }
+      }
+      setSessions((prev) =>
+        prev.map((s) => (s.id === targetId ? { ...s, messageCount: 0 } : s))
+      );
+      if (targetId === activeSessionIdRef.current) {
+        setSessionClearedTick((n) => n + 1);
+      }
+      showToast('已清空当前对话记录（长期记忆不受影响）', 'info');
+      return true;
+    },
+    [showToast]
+  );
+
   const deleteSession = useCallback(
     async (sessionId: string) => {
       try {
@@ -477,10 +505,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const data = await res.json().catch(() => ({}));
 
         if (isTargetMain || data.cleared) {
-          // 主聊为常驻核心会话，保留会话骨架，清空消息计数
+          // 主聊为常驻核心会话，保留会话骨架，清空消息计数并通知视图刷新
           setSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? { ...s, messageCount: 0 } : s))
           );
+          if (sessionId === activeSessionIdRef.current) {
+            setSessionClearedTick((n) => n + 1);
+          }
           showToast('主聊为常驻核心会话，已重置清空历史记录', 'info');
         } else {
           // 旁聊正常物理移除
@@ -595,6 +626,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createNewSideChat,
         selectSession,
         createNewSession,
+        clearSession,
+        sessionClearedTick,
         deleteSession,
         loadBots,
         loadSessions,

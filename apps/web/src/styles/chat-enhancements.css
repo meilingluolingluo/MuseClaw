@@ -1462,6 +1462,62 @@ html[data-theme="dark"] .ansi-fg-cyan { color: #22d3ee; }
   padding: 4px 7px !important;
 }
 
+.btn-thread-switch.is-active {
+  background-color: var(--om-accent-soft);
+  color: var(--om-accent);
+  border-color: color-mix(in srgb, var(--om-accent) 35%, transparent);
+}
+
+.btn-thread-clear.is-confirming {
+  background-color: rgba(239, 68, 68, 0.14);
+  color: var(--accent-red);
+  border-color: rgba(239, 68, 68, 0.45);
+  font-weight: 600;
+}
+
+.chat-thread-more-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chat-thread-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  padding: 5px;
+  border-radius: 11px;
+  background-color: var(--om-surface);
+  border: 1px solid var(--om-border);
+  box-shadow: var(--om-shadow-floating);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-thread-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--om-fg);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+
+.chat-thread-more-item:hover {
+  background-color: var(--om-surface-2);
+}
+
 .chat-find-bar {
   position: absolute;
   top: 14px;

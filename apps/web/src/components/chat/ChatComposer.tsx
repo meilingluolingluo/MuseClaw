@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Paperclip,
-  Slash,
   ArrowUp,
   Square,
   X,
@@ -86,6 +85,11 @@ interface ChatComposerProps {
   onClearQuote?: () => void;
   waitingSeconds?: number;
   sentHistory?: string[];
+  onClearChat?: () => void;
+  onNewChat?: () => void;
+  onOpenFind?: () => void;
+  onExportChat?: () => void;
+  hasMessages?: boolean;
 }
 
 interface SlashMenuItem {
@@ -131,11 +135,14 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   onClearQuote,
   waitingSeconds = 0,
   sentHistory = [],
+  onClearChat,
+  onNewChat,
+  onOpenFind,
+  onExportChat,
+  hasMessages = false,
 }) => {
   const {
     showToast,
-    setTab,
-    createNewSession,
     activeBot,
     setApprovalMode,
     tab,
@@ -283,6 +290,32 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   const handleSend = () => {
     const trimmed = inputText.trim();
     if (!trimmed && attachments.length === 0) return;
+
+    // 拦截内置对话斜杠指令，避免直接回车时误发给大模型
+    if (attachments.length === 0) {
+      const cmdLower = trimmed.toLowerCase();
+      if (cmdLower === '/clear' || cmdLower === '/reset') {
+        resetComposerAfterSubmit();
+        onClearChat?.();
+        return;
+      }
+      if (cmdLower === '/new') {
+        resetComposerAfterSubmit();
+        onNewChat?.();
+        return;
+      }
+      if (cmdLower === '/find') {
+        resetComposerAfterSubmit();
+        onOpenFind?.();
+        return;
+      }
+      if (cmdLower === '/export') {
+        resetComposerAfterSubmit();
+        onExportChat?.();
+        return;
+      }
+    }
+
     const finalText = buildOutboundText(trimmed);
 
     if (isStreaming) {
@@ -300,14 +333,16 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
 
   const slashCommands = useMemo(
     () => [
-      { cmd: '/new', desc: '开一个新会话', action: () => createNewSession() },
-      { cmd: '/feed', desc: '跳转查看智能体每日动态与简报', action: () => setTab('feed') },
-      { cmd: '/goals', desc: '进入长周期自驱目标管理看板', action: () => setTab('goals') },
-      { cmd: '/routines', desc: '进入定时任务与主动巡检工作台', action: () => setTab('routines') },
-      { cmd: '/memory', desc: '查看并管理受控长期记忆库', action: () => setTab('memory') },
-      { cmd: '/skills', desc: '进入技能规程库与依赖配置工作台', action: () => setTab('skills') },
+      {
+        cmd: '/clear',
+        desc: hasMessages ? '清空当前对话上下文重新开始（保留长期记忆）' : '清空当前对话记录',
+        action: () => onClearChat?.(),
+      },
+      { cmd: '/new', desc: '开启一个全新独立对话（旁聊）', action: () => onNewChat?.() },
+      { cmd: '/find', desc: '搜索当前对话内容', action: () => onOpenFind?.() },
+      { cmd: '/export', desc: '导出当前对话为 Markdown', action: () => onExportChat?.() },
     ],
-    [createNewSession, setTab]
+    [hasMessages, onClearChat, onExportChat, onNewChat, onOpenFind]
   );
 
   const rawApprovalMode = (activeBot?.approvalMode || 'ASK').toUpperCase();
@@ -723,13 +758,75 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
       )}
 
       <div className="composer-box">
+        {isCommandsPopoverOpen && (
+          <div className="composer-popover composer-commands-popover" role="dialog" aria-label="对话指令与可用技能">
+            {slashMenuItems.flat.length === 0 ? (
+              <div className="composer-commands-empty">未匹配到可用指令或技能</div>
+            ) : (
+              <>
+                {slashMenuItems.system.length > 0 && (
+                  <>
+                    <div className="composer-popover-header">对话指令</div>
+                    <div className="composer-commands-list">
+                      {slashMenuItems.system.map((item) => {
+                        const idx = slashMenuItems.flat.findIndex((f) => f.id === item.id);
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`composer-command-item${idx === selectedSlashIdx ? ' is-selected' : ''}`}
+                            onMouseEnter={() => setSelectedSlashIdx(idx)}
+                            onClick={item.onSelect}
+                          >
+                            <div className="composer-command-main">
+                              <span className="composer-command-name">{item.cmd}</span>
+                              <span className="composer-command-desc">{item.desc}</span>
+                            </div>
+                            <span className="composer-command-badge">{item.badge}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {slashMenuItems.skills.length > 0 && (
+                  <>
+                    <div className="composer-popover-header">可用技能规程（Tab / Enter 补全）</div>
+                    <div className="composer-commands-list">
+                      {slashMenuItems.skills.map((item) => {
+                        const idx = slashMenuItems.flat.findIndex((f) => f.id === item.id);
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className={`composer-command-item composer-skill-item${idx === selectedSlashIdx ? ' is-selected' : ''}`}
+                            onMouseEnter={() => setSelectedSlashIdx(idx)}
+                            onClick={item.onSelect}
+                          >
+                            <div className="composer-command-main">
+                              <span className="composer-command-name">{item.cmd}</span>
+                              <span className="composer-command-desc">{item.desc}</span>
+                            </div>
+                            <span className="composer-command-badge">{item.badge}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           className="composer-textarea"
           placeholder={
             isStreaming
               ? 'Agent 正在回复，继续输入并按 Enter 可加入待发队列…'
-              : '向数字员工下达指令（输入 / 唤起技能与指令，↑↓ 回溯历史，Enter 发送，Shift+Enter 换行）...'
+              : '向数字员工发送消息（输入 /clear 清空、/new 开新对话，Enter 发送，Shift+Enter 换行）...'
           }
           rows={2}
           value={inputText}
@@ -768,7 +865,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                 }}
               >
                 <Paperclip size={15} />
-                <span className="composer-tool-label">附件 / 图片</span>
+                <span className="composer-tool-label">附件</span>
               </button>
 
               {isAttachPopoverOpen && (
@@ -929,89 +1026,6 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               )}
             </div>
 
-            {/* 快捷指令触发器 */}
-            <div className="composer-tool-group">
-              <button
-                type="button"
-                className={`composer-tool-btn ${isCommandsPopoverOpen ? 'active' : ''}`}
-                title="智能体常用指令"
-                aria-label="智能体常用指令"
-                aria-haspopup="dialog"
-                aria-expanded={isCommandsPopoverOpen}
-                onClick={() => {
-                  setIsCommandsPopoverOpen((prev) => !prev);
-                  setIsAttachPopoverOpen(false);
-                  setIsApprovalPopoverOpen(false);
-                  setIsModelPopoverOpen(false);
-                }}
-              >
-                <Slash size={15} />
-                <span className="composer-tool-label">快捷指令</span>
-              </button>
-
-              {isCommandsPopoverOpen && (
-                <div className="composer-popover composer-commands-popover" role="dialog" aria-label="快捷技能与指令列表">
-                  {slashMenuItems.flat.length === 0 ? (
-                    <div className="composer-commands-empty">未匹配到可用技能或系统指令</div>
-                  ) : (
-                    <>
-                      {slashMenuItems.skills.length > 0 && (
-                        <>
-                          <div className="composer-popover-header">可用技能规程（Tab / Enter 补全）</div>
-                          <div className="composer-commands-list">
-                            {slashMenuItems.skills.map((item) => {
-                              const idx = slashMenuItems.flat.findIndex((f) => f.id === item.id);
-                              return (
-                                <button
-                                  key={item.id}
-                                  type="button"
-                                  className={`composer-command-item composer-skill-item${idx === selectedSlashIdx ? ' is-selected' : ''}`}
-                                  onMouseEnter={() => setSelectedSlashIdx(idx)}
-                                  onClick={item.onSelect}
-                                >
-                                  <div className="composer-command-main">
-                                    <span className="composer-command-name">{item.cmd}</span>
-                                    <span className="composer-command-desc">{item.desc}</span>
-                                  </div>
-                                  <span className="composer-command-badge">{item.badge}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </>
-                      )}
-
-                      {slashMenuItems.system.length > 0 && (
-                        <>
-                          <div className="composer-popover-header">工作台快捷指令</div>
-                          <div className="composer-commands-list">
-                            {slashMenuItems.system.map((item) => {
-                              const idx = slashMenuItems.flat.findIndex((f) => f.id === item.id);
-                              return (
-                                <button
-                                  key={item.id}
-                                  type="button"
-                                  className={`composer-command-item${idx === selectedSlashIdx ? ' is-selected' : ''}`}
-                                  onMouseEnter={() => setSelectedSlashIdx(idx)}
-                                  onClick={item.onSelect}
-                                >
-                                  <div className="composer-command-main">
-                                    <span className="composer-command-name">{item.cmd}</span>
-                                    <span className="composer-command-desc">{item.desc}</span>
-                                  </div>
-                                  <span className="composer-command-badge">{item.badge}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
             {speechSupported && (
               <button
                 type="button"
@@ -1024,23 +1038,6 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                 {isListening ? <MicOff size={15} /> : <Mic size={15} />}
               </button>
             )}
-
-            {inputText.length > 0 && (
-              <button
-                type="button"
-                className="composer-tool-btn composer-tool-btn-icon-only"
-                title="清空当前输入"
-                onClick={() => setInputText('')}
-              >
-                <X size={14} />
-              </button>
-            )}
-
-            <div className="composer-tool-divider" />
-
-            <div className="composer-hotkey-hint">
-              <span className="hotkey-pill"><kbd>Shift</kbd> + <kbd>↵</kbd> 换行</span>
-            </div>
           </div>
 
           {/* 右侧发送 / 入队 / 停止按钮组 */}

@@ -17,6 +17,7 @@ export const SideDrawer: React.FC = () => {
     switchToMainChat,
     createNewSession,
     createNewSideChat,
+    clearSession,
     deleteSession,
     isDrawerCollapsed,
     isMobileDrawerOpen,
@@ -46,10 +47,14 @@ export const SideDrawer: React.FC = () => {
 
   if (tab !== 'chat' && tab !== 'memory') return null;
 
-  const handleDeleteClick = (e: React.MouseEvent, sessionId: string) => {
+  const handleDeleteClick = (e: React.MouseEvent, sessionId: string, isMain = false) => {
     e.stopPropagation();
     if (confirmDeleteId === sessionId) {
-      deleteSession(sessionId);
+      if (isMain) {
+        void clearSession(sessionId);
+      } else {
+        void deleteSession(sessionId);
+      }
       setConfirmDeleteId(null);
     } else {
       setConfirmDeleteId(sessionId);
@@ -191,7 +196,7 @@ export const SideDrawer: React.FC = () => {
                     className={`session-delete-btn ${confirmDeleteId === mainSession.id ? 'confirming' : ''}`}
                     title={confirmDeleteId === mainSession.id ? '点击确认重置清空主聊历史' : '清空主聊历史'}
                     aria-label={confirmDeleteId === mainSession.id ? '确认重置主聊' : '重置主聊'}
-                    onClick={(e) => handleDeleteClick(e, mainSession.id)}
+                    onClick={(e) => handleDeleteClick(e, mainSession.id, true)}
                   >
                     {confirmDeleteId === mainSession.id ? (
                       <span className="session-delete-confirm-text">清空?</span>
