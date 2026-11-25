@@ -24,6 +24,34 @@ export function formatDate(raw?: string | number | Date): string {
   return d.toLocaleDateString();
 }
 
+export function getDayKey(raw?: string | number | Date): string {
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function formatDayLabel(raw?: string | number | Date): string {
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const todayKey = getDayKey(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayKey = getDayKey(yesterday);
+  const targetKey = getDayKey(d);
+  if (targetKey === todayKey) return '今天';
+  if (targetKey === yesterdayKey) return '昨天';
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 export function formatRelativeTime(raw?: string | number | Date): string {
   if (!raw) return '';
   const d = new Date(raw);

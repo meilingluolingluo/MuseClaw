@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { copyToClipboard } from '../../utils/clipboard';
+import { ansiToHtml } from '../../utils/markdown';
 import {
   Check,
   ChevronRight,
@@ -15,6 +16,8 @@ import {
   Search,
   Brain,
   Clock,
+  Target,
+  Sparkles,
 } from 'lucide-react';
 
 export interface ToolTraceItem {
@@ -25,6 +28,7 @@ export interface ToolTraceItem {
   status?: string;
   durationMs?: number;
   ok?: boolean;
+  startedAt?: number;
 }
 
 const ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -39,6 +43,7 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   read_file: FileText,
   write_file: FileText,
   edit_file: FileText,
+  patch_file: FileText,
   list_dir: FileText,
   search: Search,
   grep: Search,
@@ -49,10 +54,50 @@ const ICONS: Record<string, React.ComponentType<{ size?: number; className?: str
   db: Database,
   cron: Clock,
   schedule: Clock,
+  create_routine: Clock,
   memory: Brain,
   memory_search: Brain,
   memory_save: Brain,
+  save_memory: Brain,
+  create_goal: Target,
+  update_goal: Target,
+  advance_goal: Target,
+  show_widget: Sparkles,
 };
+
+const TOOL_LABELS: Record<string, string> = {
+  execute_shell: '运行终端命令',
+  bash: '运行 Shell',
+  sh: '运行脚本',
+  terminal: '终端执行',
+  read_file: '读取文件',
+  write_file: '写入文件',
+  create_file: '创建文件',
+  edit_file: '编辑文件',
+  patch_file: '修改文件',
+  delete_file: '删除文件',
+  list_dir: '查看目录',
+  search: '搜索内容',
+  grep: '检索代码',
+  web_fetch: '抓取网页',
+  fetch: '请求接口',
+  browse: '浏览页面',
+  python: '运行 Python',
+  node: '运行 Node.js',
+  memory_search: '检索长期记忆',
+  memory_save: '写入长期记忆',
+  save_memory: '写入长期记忆',
+  create_goal: '创建长周期目标',
+  update_goal: '更新目标状态',
+  advance_goal: '推进目标阶段',
+  create_routine: '创建定时例程',
+  publish_feed: '发布态势动态',
+  show_widget: '渲染交互组件',
+};
+
+function getToolLabel(toolName: string): string {
+  return TOOL_LABELS[toolName] || toolName;
+}
 
 function isRunning(item: ToolTraceItem): boolean {
   return (
@@ -89,19 +134,17 @@ function formatDuration(item: ToolTraceItem): string {
   return '';
 }
 
-/** 从入参里挑一个最能说明“这次调用做了什么”的值 */
 function preview(input: any): string {
   if (!input) return '';
   if (typeof input === 'string') return input;
   const obj = typeof input === 'object' ? input : {};
-  for (const key of ['url', 'command', 'cmd', 'query', 'path', 'file_path', 'filename', 'pattern', 'city', 'location', 'prompt']) {
+  for (const key of ['url', 'command', 'cmd', 'query', 'path', 'file_path', 'filename', 'pattern', 'city', 'location', 'title', 'name', 'prompt']) {
     if (typeof obj[key] === 'string') return obj[key];
   }
   const first = Object.values(obj).find((value) => typeof value === 'string');
   return typeof first === 'string' ? first : JSON.stringify(input);
 }
 
-/** 格式化输出结果：优先提取标准输出与错误，对复杂对象结构美化呈现 */
 function outputText(value: any): string {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -124,16 +167,33 @@ function outputText(value: any): string {
   return String(value);
 }
 
+function extractEditDiff(params: any): { before: string; after: string } | null {
+  if (!params || typeof params !== 'object') return null;
+  const before = params.old_str ?? params.target ?? params.oldText ?? params.search;
+  const after = params.new_str ?? params.replacement ?? params.newText ?? params.replace;
+  if (typeof before === 'string' && typeof after === 'string' && before !== after) {
+    return { before, after };
+  }
+  return null;
+}
+
 const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
   const [open, setOpen] = useState(false);
   const [copiedSection, setCopiedSection] = useState<'params' | 'result' | null>(null);
   const running = isRunning(item);
   const failed = isFailed(item);
   const Icon = ICONS[item.tool] || Wrench;
+  const label = getToolLabel(item.tool);
   const arg = preview(item.params);
   const result = outputText(item.result ?? item.output);
   const duration = formatDuration(item);
   const isTerminal = ['execute_shell', 'bash', 'sh', 'terminal'].includes(item.tool);
+  const editDiff = useMemo(() => extractEditDiff(item.params), [item.params]);
+
+  const terminalHtml = useMemo(() => {
+    if (!isTerminal || !result) return '';
+    return ansiToHtml(result);
+  }, [isTerminal, result]);
 
   const handleCopy = async (text: string, section: 'params' | 'result', e: React.MouseEvent) => {
     e.stopPropagation();
@@ -157,7 +217,7 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
           {running ? <span className="tool-spin" /> : failed ? <X size={12} /> : <Check size={12} />}
         </span>
         <Icon size={13} className="tool-row-icon" />
-        <span className="tool-row-name">{item.tool}</span>
+        <span className="tool-row-name" title={item.tool}>{label}</span>
         {arg && (
           <span className="tool-row-arg" title={arg}>
             {arg}
@@ -167,8 +227,22 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
         <ChevronRight size={12} className="tool-row-chevron" />
       </summary>
       <div className="tool-row-body">
+        {editDiff && (
+          <div className="tool-diff-preview">
+            <div className="tool-row-label">变更预览</div>
+            <pre className="tool-code-block is-diff-preview">
+              {editDiff.before.split('\n').slice(0, 12).map((line, i) => (
+                <span key={`d-${i}`} className="diff-line diff-line-del">- {line}{'\n'}</span>
+              ))}
+              {editDiff.after.split('\n').slice(0, 12).map((line, i) => (
+                <span key={`a-${i}`} className="diff-line diff-line-add">+ {line}{'\n'}</span>
+              ))}
+            </pre>
+          </div>
+        )}
+
         <div className="tool-row-header-line">
-          <div className="tool-row-label">入参</div>
+          <div className="tool-row-label">入参（{item.tool}）</div>
           {paramsText && (
             <button
               type="button"
@@ -200,7 +274,14 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
         {running ? (
           <p className="tool-row-hint">等待执行结果…</p>
         ) : result ? (
-          <pre className={`tool-code-block ${isTerminal ? 'is-terminal-output' : ''}`}>{result}</pre>
+          isTerminal ? (
+            <pre
+              className="tool-code-block is-terminal-output"
+              dangerouslySetInnerHTML={{ __html: terminalHtml }}
+            />
+          ) : (
+            <pre className="tool-code-block">{result}</pre>
+          )
         ) : (
           <p className="tool-row-hint">无输出</p>
         )}
@@ -210,28 +291,50 @@ const ToolRow: React.FC<{ item: ToolTraceItem }> = ({ item }) => {
 };
 
 export const ToolTrace: React.FC<{ tools: ToolTraceItem[]; live?: boolean }> = ({ tools }) => {
-  // 默认折叠工具调用过程，仅展示紧凑摘要栏，用户点击按需展开完整调用明细
   const [open, setOpen] = useState(false);
-  if (!tools || tools.length === 0) return null;
+  const [runningSeconds, setRunningSeconds] = useState(0);
 
   const running = tools.filter(isRunning);
+  const isAnyRunning = running.length > 0;
+
+  useEffect(() => {
+    if (!isAnyRunning) {
+      setRunningSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setRunningSeconds(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isAnyRunning]);
+
+  if (!tools || tools.length === 0) return null;
+
   const failures = tools.filter(isFailed).length;
   const totalMs = tools.reduce((sum, item) => sum + (item.durationMs || 0), 0);
   const latestRunning = running[running.length - 1];
+  const latestArg = latestRunning ? preview(latestRunning.params) : '';
 
   return (
     <details className="tool-trace" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>
         <span
-          className={`tool-trace-state ${running.length ? 'is-running' : failures ? 'is-failed' : 'is-done'}`}
+          className={`tool-trace-state ${isAnyRunning ? 'is-running' : failures ? 'is-failed' : 'is-done'}`}
           aria-hidden="true"
         >
-          {running.length ? <span className="tool-spin" /> : failures ? <X size={13} /> : <Check size={13} />}
+          {isAnyRunning ? <span className="tool-spin" /> : failures ? <X size={13} /> : <Check size={13} />}
         </span>
-        <span className="tool-trace-title">工具执行过程</span>
+        <span className="tool-trace-title">
+          {latestRunning ? `正在执行：${getToolLabel(latestRunning.tool)}` : '工具执行过程'}
+        </span>
         <span className="tool-trace-meta">
-          {latestRunning ? `正在调用 ${latestRunning.tool}…` : `${tools.length} 次工具调用`}
-          {!running.length && totalMs > 0 ? ` · ${totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`}` : ''}
+          {latestRunning
+            ? `${latestArg ? `${latestArg.slice(0, 32)}${latestArg.length > 32 ? '…' : ''} · ` : ''}${runningSeconds}s`
+            : `${tools.length} 次工具调用`}
+          {!isAnyRunning && totalMs > 0
+            ? ` · ${totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`}`
+            : ''}
           {failures ? ` · ${failures} 个失败` : ''}
         </span>
         <ChevronRight size={13} className="tool-trace-chevron" />

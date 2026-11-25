@@ -12,14 +12,39 @@ import {
   ShieldAlert,
   ChevronDown,
   Check,
+<<<<<<< HEAD
   Loader2,
+=======
+  Mic,
+  MicOff,
+  Cpu,
+  ListPlus,
+  Send,
+  Pencil,
+  Trash2,
+  Reply,
+  Clock,
+  UploadCloud,
+>>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
 } from 'lucide-react';
 import type { MessageAttachment, Skill } from '../../types';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { CATEGORY_META } from '../skills/skillsMeta';
+import { formatFileSize } from '../../utils/format';
 
 type ApprovalModeValue = 'ASK' | 'AUTO_EDITS' | 'FULL';
+
+export interface QueuedChatMessage {
+  id: string;
+  text: string;
+  attachments: MessageAttachment[];
+}
+
+export interface QuoteDraft {
+  text: string;
+  sender: string;
+}
 
 const APPROVAL_MODE_OPTIONS: Array<{
   mode: ApprovalModeValue;
@@ -55,6 +80,15 @@ interface ChatComposerProps {
   onSendMessage: (text: string, attachments: MessageAttachment[]) => void;
   isStreaming: boolean;
   onStop: () => void;
+  queuedMessages?: QueuedChatMessage[];
+  onEnqueueMessage?: (text: string, attachments: MessageAttachment[]) => void;
+  onRemoveQueued?: (id: string) => void;
+  onEditQueued?: (id: string) => QueuedChatMessage | undefined;
+  onSendQueuedNow?: (id: string) => void;
+  quoteDraft?: QuoteDraft | null;
+  onClearQuote?: () => void;
+  waitingSeconds?: number;
+  sentHistory?: string[];
 }
 
 interface SlashMenuItem {
@@ -66,25 +100,90 @@ interface SlashMenuItem {
   onSelect: () => void;
 }
 
+interface BrowserSpeechRecognition extends EventTarget {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+}
+
+function getSpeechRecognitionCtor(): (new () => BrowserSpeechRecognition) | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => BrowserSpeechRecognition;
+    webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition;
+}
+
 export const ChatComposer: React.FC<ChatComposerProps> = ({
   onSendMessage,
   isStreaming,
   onStop,
+  queuedMessages = [],
+  onEnqueueMessage,
+  onRemoveQueued,
+  onEditQueued,
+  onSendQueuedNow,
+  quoteDraft = null,
+  onClearQuote,
+  waitingSeconds = 0,
+  sentHistory = [],
 }) => {
-  const { showToast, setTab, createNewSession, activeBot, setApprovalMode, tab } = useApp();
+  const {
+    showToast,
+    setTab,
+    createNewSession,
+    activeBot,
+    setApprovalMode,
+    tab,
+    modelsConfig,
+    loadModelsConfig,
+    setIsModelModalOpen,
+  } = useApp();
   const [inputText, setInputText] = useState('');
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isAttachPopoverOpen, setIsAttachPopoverOpen] = useState(false);
   const [isApprovalPopoverOpen, setIsApprovalPopoverOpen] = useState(false);
   const [isCommandsPopoverOpen, setIsCommandsPopoverOpen] = useState(false);
+  const [isModelPopoverOpen, setIsModelPopoverOpen] = useState(false);
   const [botSkills, setBotSkills] = useState<Skill[]>([]);
   const [selectedSlashIdx, setSelectedSlashIdx] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+
+  // 历史输入上下键回溯状态
+  const historyIdxRef = useRef<number>(-1);
+  const draftBeforeHistoryRef = useRef<string>('');
+  const dragCounterRef = useRef<number>(0);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const dictationBaseRef = useRef<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerWrapRef = useRef<HTMLDivElement>(null);
+
+  const speechSupported = useMemo(() => Boolean(getSpeechRecognitionCtor()), []);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+    };
+  }, []);
+
+  // 引用内容变化时自动聚焦输入框
+  useEffect(() => {
+    if (quoteDraft) {
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [quoteDraft]);
 
   // 加载当前数字员工已启用且就绪的技能规程，供 / 自动补全使用
   useEffect(() => {
@@ -105,15 +204,15 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     };
   }, [activeBot?.id, tab]);
 
-  // Auto-resize textarea
+  // 自动调节文本域高度
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
   }, [inputText]);
 
-  // Check for chat draft from other views (e.g. Goals)
+  // 接收跨页面草稿
   useEffect(() => {
     const draft = sessionStorage.getItem('museclaw_chat_draft');
     if (draft) {
@@ -131,20 +230,22 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     return () => window.removeEventListener('museclaw:chat_draft' as any, handleDraftEvent);
   }, []);
 
-  // Handle outside clicks and ESC key to close popovers
+  // 点击外部或 Esc 关闭弹出菜单
   useEffect(() => {
+    const closeAll = () => {
+      setIsAttachPopoverOpen(false);
+      setIsApprovalPopoverOpen(false);
+      setIsCommandsPopoverOpen(false);
+      setIsModelPopoverOpen(false);
+    };
     const handleClickOutside = (e: MouseEvent) => {
       if (composerWrapRef.current && !composerWrapRef.current.contains(e.target as Node)) {
-        setIsAttachPopoverOpen(false);
-        setIsApprovalPopoverOpen(false);
-        setIsCommandsPopoverOpen(false);
+        closeAll();
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsAttachPopoverOpen(false);
-        setIsApprovalPopoverOpen(false);
-        setIsCommandsPopoverOpen(false);
+        closeAll();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -155,19 +256,49 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     };
   }, []);
 
-  const handleSend = () => {
-    const trimmed = inputText.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming) return;
-    // 只发附件时也要给 Agent 一句话上下文
-    onSendMessage(trimmed || '请查看附件', attachments);
+  const buildOutboundText = (rawText: string): string => {
+    const trimmed = rawText.trim();
+    if (!quoteDraft) return trimmed || '请查看附件';
+    const quotedLines = quoteDraft.text
+      .split('\n')
+      .slice(0, 6)
+      .map((line) => `> ${line}`)
+      .join('\n');
+    const body = trimmed || '请针对以上引用内容进一步说明';
+    return `${quotedLines}\n\n${body}`;
+  };
+
+  const resetComposerAfterSubmit = () => {
     setInputText('');
     setAttachments([]);
+    onClearQuote?.();
+    historyIdxRef.current = -1;
+    draftBeforeHistoryRef.current = '';
     setIsAttachPopoverOpen(false);
     setIsApprovalPopoverOpen(false);
     setIsCommandsPopoverOpen(false);
+    setIsModelPopoverOpen(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
+  };
+
+  const handleSend = () => {
+    const trimmed = inputText.trim();
+    if (!trimmed && attachments.length === 0) return;
+    const finalText = buildOutboundText(trimmed);
+
+    if (isStreaming) {
+      if (onEnqueueMessage) {
+        onEnqueueMessage(finalText, attachments);
+        resetComposerAfterSubmit();
+        showToast('已加入待发队列，当前轮次完成后将自动发送', 'info');
+      }
+      return;
+    }
+
+    onSendMessage(finalText, attachments);
+    resetComposerAfterSubmit();
   };
 
   const slashCommands = useMemo(
@@ -185,6 +316,30 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   const rawApprovalMode = (activeBot?.approvalMode || 'ASK').toUpperCase();
   const currentApprovalOption =
     APPROVAL_MODE_OPTIONS.find((opt) => opt.mode === rawApprovalMode) || APPROVAL_MODE_OPTIONS[0];
+
+  const activeProvider = useMemo(() => {
+    if (!modelsConfig?.providers?.length) return null;
+    return (
+      modelsConfig.providers.find((p) => p.id === modelsConfig.activeProviderId) ||
+      modelsConfig.providers[0]
+    );
+  }, [modelsConfig]);
+
+  const currentModelDisplay = activeBot?.model || activeProvider?.model || activeProvider?.name || '未配置模型';
+
+  const handleQuickSwitchModel = async (providerId: string, modelName: string) => {
+    setIsModelPopoverOpen(false);
+    try {
+      await api.saveModelsConfig({
+        activeProviderId: providerId,
+        provider: { id: providerId, model: modelName },
+      });
+      await loadModelsConfig();
+      showToast(`已切换模型为 ${modelName}`, 'success');
+    } catch (err: any) {
+      showToast(`切换模型失败: ${err?.message || err}`, 'error');
+    }
+  };
 
   const slashFilterQuery = useMemo(() => {
     const m = inputText.match(/^\/([^\s]*)$/);
@@ -236,7 +391,6 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   }, [slashFilterQuery, isCommandsPopoverOpen]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // 中文/日文输入法用 Enter 确认候选词，不能当成发送
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 
     if (isCommandsPopoverOpen && slashMenuItems.flat.length > 0) {
@@ -258,14 +412,44 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
       }
     }
 
+    // 历史输入上下键回溯
+    const el = textareaRef.current;
+    if (!isCommandsPopoverOpen && sentHistory.length > 0 && el) {
+      const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+      const atEnd = el.selectionStart === inputText.length && el.selectionEnd === inputText.length;
+      if (e.key === 'ArrowUp' && (inputText === '' || (atStart && historyIdxRef.current >= 0))) {
+        e.preventDefault();
+        if (historyIdxRef.current === -1) {
+          draftBeforeHistoryRef.current = inputText;
+          historyIdxRef.current = sentHistory.length - 1;
+        } else if (historyIdxRef.current > 0) {
+          historyIdxRef.current -= 1;
+        }
+        setInputText(sentHistory[historyIdxRef.current] || '');
+        return;
+      }
+      if (e.key === 'ArrowDown' && historyIdxRef.current >= 0 && atEnd) {
+        e.preventDefault();
+        if (historyIdxRef.current < sentHistory.length - 1) {
+          historyIdxRef.current += 1;
+          setInputText(sentHistory[historyIdxRef.current] || '');
+        } else {
+          historyIdxRef.current = -1;
+          setInputText(draftBeforeHistoryRef.current);
+        }
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const handleFileUpload = async (files: FileList | null) => {
+  const handleFileUpload = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
+<<<<<<< HEAD
     setIsUploading(true);
     try {
       for (let i = 0; i < files.length; i++) {
@@ -285,6 +469,24 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
           console.warn('File upload failed:', err?.message || err);
           showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
         }
+=======
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const uploadRes = await api.uploadFile(file);
+        setAttachments((prev) => [
+          ...prev,
+          {
+            name: file.name,
+            size: file.size,
+            type: file.type.startsWith('image/') ? 'image' : 'file',
+            url: uploadRes.url,
+          },
+        ]);
+      } catch (err: any) {
+        console.warn('File upload failed:', err?.message || err);
+        showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
+>>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
       }
     } finally {
       setIsUploading(false);
@@ -292,24 +494,105 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     }
   };
 
-  // Clipboard paste support for images
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const filesToUpload: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.type.startsWith('image/')) {
         const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          handleFileUpload([file] as any);
-        }
+        if (file) filesToUpload.push(file);
       }
+    }
+    if (filesToUpload.length > 0) {
+      e.preventDefault();
+      void handleFileUpload(filesToUpload);
     }
   };
 
+  const toggleSpeech = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      setIsListening(false);
+      return;
+    }
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+
+    const rec = new Ctor();
+    rec.lang = document.documentElement.lang || navigator.language || 'zh-CN';
+    rec.interimResults = true;
+    rec.continuous = true;
+    dictationBaseRef.current = inputText ? `${inputText.trimEnd()} ` : '';
+
+    rec.onresult = (event) => {
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i]?.[0]?.transcript || '';
+      }
+      if (transcript.trim()) {
+        setInputText(dictationBaseRef.current + transcript.trim());
+      }
+    };
+    rec.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      showToast('语音识别不可用或未授予麦克风权限', 'warning');
+    };
+    rec.onend = () => {
+      if (recognitionRef.current === rec) {
+        setIsListening(false);
+        recognitionRef.current = null;
+      }
+    };
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+      setIsListening(true);
+    } catch {
+      setIsListening(false);
+    }
+  };
+
+  const hasDraft = Boolean(inputText.trim() || attachments.length > 0);
+
   return (
-    <div className="chat-composer-wrap" ref={composerWrapRef}>
+    <div
+      className={`chat-composer-wrap${isDragging ? ' drag-active' : ''}`}
+      ref={composerWrapRef}
+      onDragEnter={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return;
+        e.preventDefault();
+        dragCounterRef.current += 1;
+        setIsDragging(true);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return;
+        e.preventDefault();
+      }}
+      onDragLeave={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return;
+        e.preventDefault();
+        dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+        if (dragCounterRef.current === 0) setIsDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer?.files?.length) return;
+        e.preventDefault();
+        dragCounterRef.current = 0;
+        setIsDragging(false);
+        void handleFileUpload(e.dataTransfer.files);
+      }}
+    >
+      {isDragging && (
+        <div className="composer-drag-overlay" aria-hidden="true">
+          <UploadCloud size={20} />
+          <span>松开即可上传图片或上下文附件</span>
+        </div>
+      )}
+
       <input
         type="file"
         ref={fileInputRef}
@@ -326,12 +609,112 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
         onChange={(e) => handleFileUpload(e.target.files)}
       />
 
+<<<<<<< HEAD
       {/* Attachments Preview Bar */}
       {(attachments.length > 0 || isUploading) && (
+=======
+      {/* 首字等待安抚提示 */}
+      {isStreaming && waitingSeconds >= 8 && (
+        <div className="composer-wait-line" role="status">
+          <Clock size={13} />
+          <span>模型正在思考或排队响应中，已等待 {waitingSeconds}s</span>
+          <button type="button" className="composer-wait-cancel" onClick={onStop}>
+            取消本轮
+          </button>
+        </div>
+      )}
+
+      {/* 流式执行期待发队列 */}
+      {queuedMessages.length > 0 && (
+        <div className="composer-queue-bar" aria-label="待发送消息队列">
+          <div className="composer-queue-header">
+            <ListPlus size={13} />
+            <span>待发送队列（{queuedMessages.length} 条，本轮完成后自动按序发出）</span>
+          </div>
+          <div className="composer-queue-list">
+            {queuedMessages.map((item) => (
+              <div key={item.id} className="composer-queue-item">
+                <span className="composer-queue-text" title={item.text}>
+                  {item.text}
+                  {item.attachments.length > 0 ? ` [${item.attachments.length} 附件]` : ''}
+                </span>
+                <div className="composer-queue-actions">
+                  {onSendQueuedNow && (
+                    <button
+                      type="button"
+                      className="composer-queue-btn"
+                      onClick={() => onSendQueuedNow(item.id)}
+                      title="中断当前轮次并立即发送此条"
+                    >
+                      <Send size={11} />
+                      <span>立即发送</span>
+                    </button>
+                  )}
+                  {onEditQueued && (
+                    <button
+                      type="button"
+                      className="composer-queue-btn"
+                      onClick={() => {
+                        const popped = onEditQueued(item.id);
+                        if (popped) {
+                          setInputText(popped.text);
+                          if (popped.attachments.length > 0) {
+                            setAttachments((prev) => [...prev, ...popped.attachments]);
+                          }
+                          requestAnimationFrame(() => textareaRef.current?.focus());
+                        }
+                      }}
+                      title="回填到输入框继续编辑"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  )}
+                  {onRemoveQueued && (
+                    <button
+                      type="button"
+                      className="composer-queue-btn is-danger"
+                      onClick={() => onRemoveQueued(item.id)}
+                      title="移出队列"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 引用回复预览条 */}
+      {quoteDraft && (
+        <div className="composer-quote-bar">
+          <Reply size={13} className="composer-quote-icon" />
+          <div className="composer-quote-body">
+            <span className="composer-quote-sender">引用 {quoteDraft.sender}：</span>
+            <span className="composer-quote-text">{quoteDraft.text}</span>
+          </div>
+          {onClearQuote && (
+            <button
+              type="button"
+              className="composer-quote-close"
+              onClick={onClearQuote}
+              aria-label="取消引用"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 附件预览条 */}
+      {attachments.length > 0 && (
+>>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
         <div className="composer-attachments-bar">
           {attachments.map((att, idx) => (
             <div
               key={idx}
+<<<<<<< HEAD
               className={`composer-attachment-tag ${att.type === 'image' ? 'composer-attachment-image' : ''}`}
             >
               {att.type === 'image' && att.url ? (
@@ -348,6 +731,17 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                 </span>
               )}
               <span className="attachment-tag-name" title={att.name}>{att.name}</span>
+=======
+              className={`composer-attachment-tag${att.type === 'image' ? ' composer-attachment-image' : ''}`}
+            >
+              {att.type === 'image' && att.url ? (
+                <img src={att.url} alt={att.name} className="attachment-thumbnail" />
+              ) : (
+                <FileText size={13} className="attachment-tag-icon" />
+              )}
+              <span className="attachment-tag-name">{att.name}</span>
+              {att.size ? <span className="attachment-tag-size">{formatFileSize(att.size)}</span> : null}
+>>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
               <button
                 type="button"
                 className="attachment-tag-remove"
@@ -371,7 +765,11 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
         <textarea
           ref={textareaRef}
           className="composer-textarea"
-          placeholder="向数字员工下达指令（输入 / 快速唤起技能与指令，Enter 发送，Shift+Enter 换行）..."
+          placeholder={
+            isStreaming
+              ? 'Agent 正在回复，继续输入并按 Enter 可加入待发队列…'
+              : '向数字员工下达指令（输入 / 唤起技能与指令，↑↓ 回溯历史，Enter 发送，Shift+Enter 换行）...'
+          }
           rows={2}
           value={inputText}
           onChange={(e) => {
@@ -381,6 +779,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               setIsCommandsPopoverOpen(true);
               setIsAttachPopoverOpen(false);
               setIsApprovalPopoverOpen(false);
+              setIsModelPopoverOpen(false);
             } else {
               setIsCommandsPopoverOpen(false);
             }
@@ -391,12 +790,12 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
 
         <div className="composer-actions">
           <div className="composer-tools">
-            {/* Attachment Popover Trigger */}
+            {/* 附件按钮 */}
             <div className="composer-tool-group">
               <button
                 type="button"
                 className={`composer-tool-btn ${isAttachPopoverOpen ? 'active' : ''}`}
-                title="添加图片或上下文附件"
+                title="添加图片或上下文附件（也支持拖拽文件到此区域）"
                 aria-label="添加附件"
                 aria-haspopup="dialog"
                 aria-expanded={isAttachPopoverOpen}
@@ -404,6 +803,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                   setIsAttachPopoverOpen((prev) => !prev);
                   setIsApprovalPopoverOpen(false);
                   setIsCommandsPopoverOpen(false);
+                  setIsModelPopoverOpen(false);
                 }}
               >
                 <Paperclip size={15} />
@@ -421,7 +821,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                     <span className="composer-popover-icon"><ImageIcon size={16} /></span>
                     <div className="composer-popover-text">
                       <span className="composer-popover-title">上传图片 / 截屏</span>
-                      <span className="composer-popover-desc">支持 PNG、JPG、WebP</span>
+                      <span className="composer-popover-desc">支持 PNG、JPG、WebP 或直接 Ctrl+V 粘贴</span>
                     </div>
                   </button>
                   <button
@@ -439,7 +839,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               )}
             </div>
 
-            {/* Gatekeeper Approval Mode Selector */}
+            {/* 门禁审核模式选择器 */}
             <div className="composer-tool-group">
               <button
                 type="button"
@@ -452,6 +852,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                   setIsApprovalPopoverOpen((prev) => !prev);
                   setIsAttachPopoverOpen(false);
                   setIsCommandsPopoverOpen(false);
+                  setIsModelPopoverOpen(false);
                 }}
               >
                 {currentApprovalOption.renderIcon(14)}
@@ -499,7 +900,75 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               )}
             </div>
 
-            {/* Quick Slash Commands Trigger */}
+            {/* 快捷模型切换器 */}
+            <div className="composer-tool-group">
+              <button
+                type="button"
+                className={`composer-tool-btn composer-model-btn${isModelPopoverOpen ? ' active' : ''}`}
+                title={`当前模型：${currentModelDisplay}`}
+                aria-label="快捷切换大模型"
+                aria-haspopup="dialog"
+                aria-expanded={isModelPopoverOpen}
+                onClick={() => {
+                  setIsModelPopoverOpen((prev) => !prev);
+                  setIsAttachPopoverOpen(false);
+                  setIsApprovalPopoverOpen(false);
+                  setIsCommandsPopoverOpen(false);
+                }}
+              >
+                <Cpu size={14} />
+                <span className="composer-tool-label composer-model-name">{currentModelDisplay}</span>
+                <ChevronDown size={13} />
+              </button>
+
+              {isModelPopoverOpen && (
+                <div className="composer-popover composer-model-popover" role="dialog" aria-label="快捷切换模型">
+                  <div className="composer-popover-header">切换当前对话模型</div>
+                  <div className="composer-model-list">
+                    {(modelsConfig?.providers || [])
+                      .filter((p) => p.hasKey || p.isLocalAgent || p.id === modelsConfig?.activeProviderId)
+                      .slice(0, 6)
+                      .map((provider) => {
+                        const candidates = Array.from(
+                          new Set([provider.model, ...(provider.candidateModels || [])].filter(Boolean))
+                        ).slice(0, 5) as string[];
+                        const isActiveProvider = provider.id === modelsConfig?.activeProviderId;
+                        return (
+                          <div key={provider.id} className="composer-model-group">
+                            <div className="composer-model-provider-title">{provider.name}</div>
+                            {candidates.map((m) => {
+                              const selected = isActiveProvider && (provider.model === m);
+                              return (
+                                <button
+                                  key={`${provider.id}:${m}`}
+                                  type="button"
+                                  className={`composer-model-item${selected ? ' is-selected' : ''}`}
+                                  onClick={() => handleQuickSwitchModel(provider.id, m)}
+                                >
+                                  <span className="composer-model-item-name">{m}</span>
+                                  {selected && <Check size={13} />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                  </div>
+                  <button
+                    type="button"
+                    className="composer-model-settings-link"
+                    onClick={() => {
+                      setIsModelPopoverOpen(false);
+                      setIsModelModalOpen(true);
+                    }}
+                  >
+                    打开完整模型配置中心…
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 快捷指令触发器 */}
             <div className="composer-tool-group">
               <button
                 type="button"
@@ -512,6 +981,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                   setIsCommandsPopoverOpen((prev) => !prev);
                   setIsAttachPopoverOpen(false);
                   setIsApprovalPopoverOpen(false);
+                  setIsModelPopoverOpen(false);
                 }}
               >
                 <Slash size={15} />
@@ -581,6 +1051,19 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               )}
             </div>
 
+            {speechSupported && (
+              <button
+                type="button"
+                className={`composer-tool-btn composer-tool-btn-icon-only${isListening ? ' is-listening' : ''}`}
+                title={isListening ? '停止语音输入' : '语音输入'}
+                aria-label={isListening ? '停止语音输入' : '语音输入'}
+                aria-pressed={isListening}
+                onClick={toggleSpeech}
+              >
+                {isListening ? <MicOff size={15} /> : <Mic size={15} />}
+              </button>
+            )}
+
             {inputText.length > 0 && (
               <button
                 type="button"
@@ -599,28 +1082,42 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
             </div>
           </div>
 
-          {/* 执行中显示停止，空闲时显示发送 */}
-          {isStreaming ? (
-            <button
-              className="btn-send is-stop"
-              type="button"
-              title="停止本轮执行"
-              aria-label="停止本轮执行"
-              onClick={onStop}
-            >
-              <Square size={14} fill="currentColor" />
-            </button>
-          ) : (
-            <button
-              className="btn-send"
-              type="button"
-              title="发送指令 (Enter)"
-              disabled={!inputText.trim() && attachments.length === 0}
-              onClick={handleSend}
-            >
-              <ArrowUp size={16} />
-            </button>
-          )}
+          {/* 右侧发送 / 入队 / 停止按钮组 */}
+          <div className="composer-submit-group">
+            {isStreaming && hasDraft && onEnqueueMessage && (
+              <button
+                className="btn-enqueue"
+                type="button"
+                title="加入待发队列 (Enter)"
+                aria-label="加入待发队列"
+                onClick={handleSend}
+              >
+                <ListPlus size={15} />
+              </button>
+            )}
+
+            {isStreaming ? (
+              <button
+                className="btn-send is-stop"
+                type="button"
+                title="停止本轮执行"
+                aria-label="停止本轮执行"
+                onClick={onStop}
+              >
+                <Square size={14} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                className="btn-send"
+                type="button"
+                title="发送指令 (Enter)"
+                disabled={!hasDraft}
+                onClick={handleSend}
+              >
+                <ArrowUp size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

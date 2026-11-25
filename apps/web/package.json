@@ -10,12 +10,15 @@
   },
   "dependencies": {
     "highlight.js": "^11.12.0",
+    "katex": "^0.19.1",
     "lucide-react": "^1.76.0",
     "marked": "^18.2.1",
+    "mermaid": "^12.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@types/katex": "^0.16.8",
     "@types/marked": "^6.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

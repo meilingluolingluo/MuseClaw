@@ -134,6 +134,19 @@ export const api = {
     request<{ success: boolean; cleared?: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/clear`, {
       method: 'POST',
     }),
+  truncateSession: (sessionId: string, keepCount: number) =>
+    request<{ success: boolean; id: string; keepCount: number }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/truncate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ keepCount }),
+      }
+    ),
+  forkSession: (sessionId: string, upToIndex: number, title?: string) =>
+    request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, {
+      method: 'POST',
+      body: JSON.stringify({ upToIndex, title }),
+    }),
   getMessages: async (sessionId: string, _userId?: string) => {
     const res = await request<any>(`/api/sessions/${encodeURIComponent(sessionId)}`);
     return (Array.isArray(res) ? res : res.messages) || [];

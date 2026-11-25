@@ -199,6 +199,12 @@ export interface Session {
     widgets?: WidgetPayload[];
     /** 是否为前端隐藏的静默交互轮次 */
     hidden?: boolean;
+    /** 消息唯一标识与耗时元数据 */
+    id?: string;
+    timestamp?: number;
+    durationMs?: number;
+    reasoningDurationMs?: number;
+    model?: string;
   }>;
 }
 

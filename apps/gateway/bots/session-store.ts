@@ -379,6 +379,54 @@ export class SessionStore {
     return true;
   }
 
+  /**
+   * 截断会话消息至前 keepCount 条，用于从指定消息重新生成或编辑重发
+   */
+  public truncate(id: string, keepCount: number, userId = 'system_proactive'): boolean {
+    if (!Number.isInteger(keepCount) || keepCount < 0) return false;
+    const effectiveUserId = userId || 'system_proactive';
+    const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
+    const sessionMap = this.loadUser(sanitized);
+    const existing = sessionMap.get(id);
+    if (!existing) return false;
+    existing.messages = (existing.messages || []).slice(0, keepCount);
+    existing.updated_at = Date.now();
+    this.saveUser(sanitized);
+    return true;
+  }
+
+  /**
+   * 从源会话指定消息索引处分叉出一个独立旁聊并深拷贝上下文
+   */
+  public fork(
+    sourceId: string,
+    upToIndex: number,
+    title?: string,
+    userId = 'system_proactive'
+  ): Session | null {
+    const effectiveUserId = userId || 'system_proactive';
+    const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');
+    const sessionMap = this.loadUser(sanitized);
+    const source = sessionMap.get(sourceId);
+    if (!source) return null;
+
+    const sourceMsgs = source.messages || [];
+    const safeEnd = Math.max(0, Math.min(upToIndex + 1, sourceMsgs.length));
+    const clonedMessages = JSON.parse(JSON.stringify(sourceMsgs.slice(0, safeEnd)));
+
+    const rawTitle = (title || '').trim();
+    const safeTitle = rawTitle && rawTitle !== '主要聊天'
+      ? rawTitle
+      : `${source.title && source.title !== '主要聊天' ? source.title : '主聊'} · 分支`;
+
+    const botId = source.bot_id || source.botId || 'muse';
+    const newId = `sess_${botId}_fork_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const forked = this.create(newId, botId, safeTitle, sanitized, 'side');
+    forked.messages = clonedMessages;
+    this.save(forked, sanitized);
+    return forked;
+  }
+
   public delete(id: string, userId = 'system_proactive'): boolean {
     const effectiveUserId = userId || 'system_proactive';
     const sanitized = effectiveUserId.replace(/[^\w-]/g, '_');

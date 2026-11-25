@@ -77,6 +77,9 @@ export interface Message {
   widgets?: WidgetPayload[];
   hidden?: boolean;
   timestamp?: number;
+  durationMs?: number;
+  reasoningDurationMs?: number;
+  model?: string;
   avatarEvent?: AvatarSession;
   approvalRequest?: {
     actionId: string;

@@ -1,11 +1,29 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MessageBubble } from './MessageBubble';
-import { ChatComposer } from './ChatComposer';
+import { ChatComposer, type QueuedChatMessage, type QuoteDraft } from './ChatComposer';
 import { AgentCapsule } from './AgentCapsule';
-import { ArrowDown, Clock, Target, Brain, Calendar, ShieldCheck, AlertCircle, RotateCcw, Home, MessageSquare, Plus } from 'lucide-react';
+import { TimelineRail, type TimelineEntry } from './TimelineRail';
+import { ChatFindBar } from './ChatFindBar';
+import { ImageLightbox, type LightboxPayload } from './ImageLightbox';
+import {
+  ArrowDown,
+  Clock,
+  Target,
+  Brain,
+  Calendar,
+  ShieldCheck,
+  AlertCircle,
+  RotateCcw,
+  Home,
+  MessageSquare,
+  Plus,
+  Search,
+  Download,
+} from 'lucide-react';
 import type { Message, MessageAttachment, AvatarMood, WidgetPayload } from '../../types';
 import { api } from '../../services/api';
+import { formatDayLabel, getDayKey } from '../../utils/format';
 
 export const ChatView: React.FC = () => {
   const {
@@ -20,6 +38,8 @@ export const ChatView: React.FC = () => {
     createNewSession,
     loadSessions,
     setIsBotModalOpen,
+    selectSession,
+    tab,
   } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
@@ -27,12 +47,40 @@ export const ChatView: React.FC = () => {
   const abortRef = useRef<AbortController | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSessionId);
   const currentStreamingSessionIdRef = useRef<string | null>(null);
+  const abortedByUserRef = useRef<boolean>(false);
+
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
   const [streamingTools, setStreamingTools] = useState<any[]>([]);
   const [streamingWidgets, setStreamingWidgets] = useState<WidgetPayload[]>([]);
   const [botMood, setBotMood] = useState<AvatarMood>('idle');
+
+  // 计时、引用、待发队列、灯箱、搜索与时间轴状态
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
+  const [liveReasoningSeconds, setLiveReasoningSeconds] = useState(0);
+  const turnStartRef = useRef<number>(0);
+  const firstTokenReceivedRef = useRef<boolean>(false);
+  const reasoningStartRef = useRef<number | null>(null);
+  const reasoningEndRef = useRef<number | null>(null);
+
+  const [queuedMessages, setQueuedMessages] = useState<QueuedChatMessage[]>([]);
+  const queuedMessagesRef = useRef<QueuedChatMessage[]>([]);
+  useEffect(() => {
+    queuedMessagesRef.current = queuedMessages;
+  }, [queuedMessages]);
+  const pendingImmediateSendRef = useRef<QueuedChatMessage | null>(null);
+
+  const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
+  const [lightboxPayload, setLightboxPayload] = useState<LightboxPayload | null>(null);
+
+  // 会话内搜索
+  const [isFindOpen, setIsFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [activeMatchIdx, setActiveMatchIdx] = useState(0);
+
+  // 时间轴高亮楼层
+  const [activeTimelineId, setActiveTimelineId] = useState<string | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -41,7 +89,6 @@ export const ChatView: React.FC = () => {
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
   const [hasNewUnseen, setHasNewUnseen] = useState(false);
 
-  // 历史消息渐进式分页：初始展示最近 35 条，避免长会话一次性全量挂载引发卡顿
   const PAGE_SIZE = 35;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const pendingScrollAdjustRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
@@ -59,6 +106,58 @@ export const ChatView: React.FC = () => {
     }
   };
 
+  // 流式等待计时与思考秒表
+  useEffect(() => {
+    if (!isStreaming) {
+      setWaitingSeconds(0);
+      setLiveReasoningSeconds(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (!firstTokenReceivedRef.current && turnStartRef.current > 0) {
+        setWaitingSeconds(Math.max(0, Math.floor((now - turnStartRef.current) / 1000)));
+      } else {
+        setWaitingSeconds(0);
+      }
+      if (reasoningStartRef.current !== null && reasoningEndRef.current === null) {
+        setLiveReasoningSeconds(Math.max(0, Math.floor((now - reasoningStartRef.current) / 1000)));
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isStreaming]);
+
+  // 全局 Ctrl/Cmd + F 唤起会话内搜索
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (tab !== 'chat') return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setIsFindOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [tab]);
+
+  const updateActiveTimelineFromScroll = useCallback(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const rows = container.querySelectorAll<HTMLElement>('[data-message-role="user"][data-message-id]');
+    if (rows.length === 0) return;
+    const containerTop = container.getBoundingClientRect().top;
+    let currentId: string | null = rows[0].dataset.messageId || null;
+    for (const row of rows) {
+      const top = row.getBoundingClientRect().top - containerTop;
+      if (top <= 140) {
+        currentId = row.dataset.messageId || currentId;
+      } else {
+        break;
+      }
+    }
+    setActiveTimelineId(currentId);
+  }, []);
+
   const handleScroll = () => {
     const container = chatContainerRef.current;
     if (!container) return;
@@ -71,6 +170,7 @@ export const ChatView: React.FC = () => {
     } else {
       setShowScrollBottomBtn(true);
     }
+    updateActiveTimelineFromScroll();
   };
 
   const handleLoadMoreHistory = () => {
@@ -84,7 +184,6 @@ export const ChatView: React.FC = () => {
     setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, messages.length));
   };
 
-  // 展开更早历史消息时校准滚动高度，确保视觉位置不产生抖动或跳跃
   useEffect(() => {
     if (pendingScrollAdjustRef.current && chatContainerRef.current) {
       const { prevScrollHeight, prevScrollTop } = pendingScrollAdjustRef.current;
@@ -98,9 +197,10 @@ export const ChatView: React.FC = () => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
-  // 切换会话：终止上一个会话可能未完成的流并重置流状态，拉取目标会话的消息记录
+  // 切换会话时重置队列、搜索与流状态
   useEffect(() => {
     if (currentStreamingSessionIdRef.current && currentStreamingSessionIdRef.current !== activeSessionId) {
+      abortedByUserRef.current = true;
       abortRef.current?.abort();
       abortRef.current = null;
       currentStreamingSessionIdRef.current = null;
@@ -111,6 +211,12 @@ export const ChatView: React.FC = () => {
       setStreamingWidgets([]);
     }
 
+    setQueuedMessages([]);
+    pendingImmediateSendRef.current = null;
+    setQuoteDraft(null);
+    setIsFindOpen(false);
+    setFindQuery('');
+
     if (!activeSessionId) {
       setMessages([]);
       setVisibleCount(PAGE_SIZE);
@@ -119,7 +225,6 @@ export const ChatView: React.FC = () => {
       return;
     }
 
-    // 默认空会话/未落盘草稿优化：无需发起远端查询，直接归零展示，杜绝无意义的网络请求与加载等待
     if (activeSessionId.endsWith('_init') || activeSessionId.endsWith('_default')) {
       setMessages([]);
       setVisibleCount(PAGE_SIZE);
@@ -141,12 +246,15 @@ export const ChatView: React.FC = () => {
       .getMessages(activeSessionId)
       .then((res) => {
         if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
-        const msgList = Array.isArray(res) ? res : [];
+        const rawList = Array.isArray(res) ? res : [];
+        const msgList = rawList.map((m: Message, idx: number) => ({
+          ...m,
+          id: m.id || `hist_${idx}_${m.timestamp || 0}`,
+        }));
         setMessages(msgList);
         setSessionLoadError(null);
         setVisibleCount(PAGE_SIZE);
 
-        // 切换会话核心优化：采用 instant / auto 定位到底部最新内容，消除从顶部第1条一路 smooth 滚到底部的视觉眩晕
         requestAnimationFrame(() => {
           if (cancelled || activeSessionIdRef.current !== activeSessionId) return;
           scrollToBottom('auto');
@@ -156,6 +264,7 @@ export const ChatView: React.FC = () => {
               isInitialSwitchRef.current = false;
               isAtBottomRef.current = true;
               setShowScrollBottomBtn(false);
+              updateActiveTimelineFromScroll();
             }
           }, 50);
         });
@@ -175,7 +284,7 @@ export const ChatView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeSessionId, showToast]);
+  }, [activeSessionId, showToast, updateActiveTimelineFromScroll]);
 
   const retryLoadSession = () => {
     if (!activeSessionId) return;
@@ -184,7 +293,8 @@ export const ChatView: React.FC = () => {
     api
       .getMessages(activeSessionId)
       .then((res) => {
-        setMessages(Array.isArray(res) ? res : []);
+        const rawList = Array.isArray(res) ? res : [];
+        setMessages(rawList.map((m: Message, idx: number) => ({ ...m, id: m.id || `hist_${idx}` })));
         setSessionLoadError(null);
         scrollToBottom('auto');
       })
@@ -215,13 +325,11 @@ export const ChatView: React.FC = () => {
     );
   }, []);
 
-  // 智能吸底：仅当用户处于底部附近时才跟随自动吸底，若用户正在上方阅读历史则不打扰用户
   useEffect(() => {
     if (isInitialSwitchRef.current) return;
 
     if (isAtBottomRef.current) {
       if (isStreaming) {
-        // 流式高频输出时使用 auto 定位，避免高频 smooth 动画导致卡顿与抖动
         scrollToBottom('auto');
       } else {
         scrollToBottom('smooth');
@@ -247,7 +355,6 @@ export const ChatView: React.FC = () => {
     options?: { hidden?: boolean }
   ) => {
     const isHiddenTurn = Boolean(options?.hidden);
-    // 第一条消息不该先让用户「去新建会话」：没有会话就静默开一个
     let sessionId = activeSessionId;
     if (!sessionId) {
       const created = await createNewSession(true);
@@ -261,14 +368,21 @@ export const ChatView: React.FC = () => {
 
     const targetSessionId = sessionId;
     currentStreamingSessionIdRef.current = targetSessionId;
+    abortedByUserRef.current = false;
+
+    const nowStart = Date.now();
+    turnStartRef.current = nowStart;
+    firstTokenReceivedRef.current = false;
+    reasoningStartRef.current = null;
+    reasoningEndRef.current = null;
 
     if (!isHiddenTurn) {
       const userMessage: Message = {
-        id: `usr_${Date.now()}`,
+        id: `usr_${nowStart}`,
         role: 'user',
         content: text,
         attachments,
-        timestamp: Date.now(),
+        timestamp: nowStart,
       };
       setMessages((prev) => [...prev, userMessage]);
     }
@@ -278,6 +392,8 @@ export const ChatView: React.FC = () => {
     setStreamingReasoning('');
     setStreamingTools([]);
     setStreamingWidgets([]);
+    setWaitingSeconds(0);
+    setLiveReasoningSeconds(0);
     isAtBottomRef.current = true;
     setShowScrollBottomBtn(false);
     setHasNewUnseen(false);
@@ -286,6 +402,13 @@ export const ChatView: React.FC = () => {
     const controller = new AbortController();
     abortRef.current = controller;
     let accumulatedText = '';
+    let turnModel = '';
+    let serverTurnMeta: {
+      assistantMsgId?: string;
+      durationMs?: number;
+      reasoningDurationMs?: number;
+      model?: string;
+    } | null = null;
 
     try {
       const response = await fetch('/api/tasks', {
@@ -359,13 +482,31 @@ export const ChatView: React.FC = () => {
           try {
             const event = JSON.parse(jsonStr);
 
-            if (event.type === 'stream:text-delta') {
+            if (event.type === 'session:init') {
+              if (event.model) turnModel = String(event.model);
+            } else if (event.type === 'turn:meta') {
+              serverTurnMeta = {
+                assistantMsgId: event.assistantMsgId,
+                durationMs: event.durationMs,
+                reasoningDurationMs: event.reasoningDurationMs,
+                model: event.model,
+              };
+            } else if (event.type === 'stream:text-delta') {
+              firstTokenReceivedRef.current = true;
+              if (reasoningStartRef.current !== null && reasoningEndRef.current === null) {
+                reasoningEndRef.current = Date.now();
+              }
               accumulatedText += event.text;
               scheduleStreamingUpdate();
             } else if (event.type === 'stream:reasoning-delta') {
+              firstTokenReceivedRef.current = true;
+              if (reasoningStartRef.current === null) {
+                reasoningStartRef.current = Date.now();
+              }
               accumulatedReasoning += event.text;
               scheduleStreamingUpdate();
             } else if (event.type === 'agent:error') {
+              firstTokenReceivedRef.current = true;
               setBotMood('error');
               const errSnippet = event.text || `\n[执行出错: ${event.error || '未知异常'}]`;
               accumulatedText += errSnippet;
@@ -374,16 +515,17 @@ export const ChatView: React.FC = () => {
                 showToast(`执行出错: ${event.error || '未知异常'}`, 'error');
               }
             } else if (event.type === 'tool:call_start') {
+              firstTokenReceivedRef.current = true;
               toolsAccumulator.push({
                 tool: event.toolName,
                 params: event.input,
                 status: 'running',
+                startedAt: Date.now(),
               });
               if (activeSessionIdRef.current === targetSessionId) {
                 setStreamingTools([...toolsAccumulator]);
               }
             } else if (event.type === 'tool:call_end') {
-              // 同名工具可能连续调用，更新最后一条仍在运行的记录
               const running = [...toolsAccumulator]
                 .reverse()
                 .find((t) => t.tool === event.toolName && t.status === 'running');
@@ -405,6 +547,7 @@ export const ChatView: React.FC = () => {
                 setStreamingTools([...toolsAccumulator]);
               }
             } else if (event.type === 'ui:widget' && event.widget) {
+              firstTokenReceivedRef.current = true;
               const existingIdx = widgetsAccumulator.findIndex((w) => w.id === event.widget.id);
               if (existingIdx >= 0) {
                 widgetsAccumulator[existingIdx] = event.widget;
@@ -417,6 +560,7 @@ export const ChatView: React.FC = () => {
             } else if (event.type === 'sentinel:taint_updated') {
               setTainted(event.isTainted, event.reason);
             } else if (event.type === 'sentinel:approval_needed') {
+              firstTokenReceivedRef.current = true;
               hasApprovalNeeded = true;
               setBotMood('waiting');
               if (activeSessionIdRef.current === targetSessionId) {
@@ -436,6 +580,7 @@ export const ChatView: React.FC = () => {
                 ]);
               }
             } else if (event.type === 'avatar') {
+              firstTokenReceivedRef.current = true;
               if (activeSessionIdRef.current === targetSessionId) {
                 setMessages((prev) => [
                   ...prev,
@@ -464,15 +609,25 @@ export const ChatView: React.FC = () => {
         return;
       }
 
-      if (accumulatedText.trim() || accumulatedReasoning.trim() || widgetsAccumulator.length > 0) {
+      const endTs = Date.now();
+      const localDurationMs = Math.max(0, endTs - turnStartRef.current);
+      const localReasoningMs =
+        reasoningStartRef.current !== null
+          ? Math.max(0, (reasoningEndRef.current ?? endTs) - reasoningStartRef.current)
+          : undefined;
+
+      if (accumulatedText.trim() || accumulatedReasoning.trim() || widgetsAccumulator.length > 0 || toolsAccumulator.length > 0) {
         const assistantMsg: Message = {
-          id: `asst_${Date.now()}`,
+          id: serverTurnMeta?.assistantMsgId || `asst_${endTs}`,
           role: 'assistant',
           content: accumulatedText.trim() || (widgetsAccumulator.length > 0 ? '' : '（Agent 执行完成）'),
           reasoning: accumulatedReasoning || undefined,
           toolCalls: toolsAccumulator.length > 0 ? toolsAccumulator : undefined,
           widgets: widgetsAccumulator.length > 0 ? widgetsAccumulator : undefined,
-          timestamp: Date.now(),
+          timestamp: endTs,
+          durationMs: serverTurnMeta?.durationMs ?? localDurationMs,
+          reasoningDurationMs: serverTurnMeta?.reasoningDurationMs ?? localReasoningMs,
+          model: serverTurnMeta?.model || turnModel || undefined,
         };
         setMessages((prev) => [...prev, assistantMsg]);
         setBotMood('happy');
@@ -480,10 +635,10 @@ export const ChatView: React.FC = () => {
       } else if (!hasApprovalNeeded) {
         setBotMood('idle');
         const fallbackMsg: Message = {
-          id: `asst_${Date.now()}`,
+          id: `asst_${endTs}`,
           role: 'assistant',
           content: '⚠️ Agent 未返回任何输出，请检查所选大模型或计算节点连通状态。',
-          timestamp: Date.now(),
+          timestamp: endTs,
         };
         setMessages((prev) => [...prev, fallbackMsg]);
       }
@@ -540,12 +695,34 @@ export const ChatView: React.FC = () => {
       if (abortRef.current === controller) {
         abortRef.current = null;
       }
-      // 首轮之后标题/条数由服务端生成，刷新侧栏
       if (activeBot?.id) loadSessions(activeBot.id, targetSessionId);
     }
   };
 
+  // 流式结束后优先发送中断插入消息，否则自动消费待发队列
+  useEffect(() => {
+    if (isStreaming) return;
+    const immediate = pendingImmediateSendRef.current;
+    if (immediate) {
+      pendingImmediateSendRef.current = null;
+      const timer = setTimeout(() => {
+        void handleSendMessage(immediate.text, immediate.attachments);
+      }, 40);
+      return () => clearTimeout(timer);
+    }
+    if (!abortedByUserRef.current && queuedMessagesRef.current.length > 0) {
+      const [next, ...rest] = queuedMessagesRef.current;
+      setQueuedMessages(rest);
+      const timer = setTimeout(() => {
+        void handleSendMessage(next.text, next.attachments);
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming]);
+
   const handleStop = () => {
+    abortedByUserRef.current = true;
     abortRef.current?.abort();
     setMessages((prev) =>
       prev.map((m) => {
@@ -565,6 +742,34 @@ export const ChatView: React.FC = () => {
     );
   };
 
+  const handleEnqueueMessage = useCallback((text: string, attachments: MessageAttachment[]) => {
+    setQueuedMessages((prev) => [
+      ...prev,
+      { id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, text, attachments },
+    ]);
+  }, []);
+
+  const handleRemoveQueued = useCallback((id: string) => {
+    setQueuedMessages((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const handleEditQueued = useCallback((id: string) => {
+    const found = queuedMessagesRef.current.find((item) => item.id === id);
+    if (found) {
+      setQueuedMessages((prev) => prev.filter((item) => item.id !== id));
+    }
+    return found;
+  }, []);
+
+  const handleSendQueuedNow = useCallback((id: string) => {
+    const found = queuedMessagesRef.current.find((item) => item.id === id);
+    if (!found) return;
+    setQueuedMessages((prev) => prev.filter((item) => item.id !== id));
+    pendingImmediateSendRef.current = found;
+    abortedByUserRef.current = true;
+    abortRef.current?.abort();
+  }, []);
+
   const handleWidgetPrompt = useCallback(
     (prompt: string, opts?: { hidden?: boolean }) => {
       if (isStreaming) {
@@ -577,16 +782,190 @@ export const ChatView: React.FC = () => {
     [isStreaming, activeSessionId, activeBot?.id]
   );
 
-  const visibleMessages = messages.filter((msg) => !msg.hidden);
-  const displayedMessages =
-    visibleMessages.length > visibleCount
-      ? visibleMessages.slice(visibleMessages.length - visibleCount)
-      : visibleMessages;
+  const handleQuote = useCallback(
+    (msg: Message, selectedText?: string) => {
+      const raw = (selectedText || msg.content || '').trim();
+      if (!raw) return;
+      const clipped = raw.length > 240 ? `${raw.slice(0, 240).trimEnd()}…` : raw;
+      setQuoteDraft({
+        text: clipped,
+        sender: msg.role === 'user' ? '我' : activeBot?.name || '数字员工',
+      });
+    },
+    [activeBot?.name]
+  );
+
+  const handleRegenerate = useCallback(
+    async (msgIdx: number) => {
+      if (isStreaming || !activeSessionId) return;
+      let userIdx = -1;
+      for (let i = msgIdx - 1; i >= 0; i--) {
+        if (messages[i]?.role === 'user' && !messages[i]?.hidden) {
+          userIdx = i;
+          break;
+        }
+      }
+      if (userIdx < 0) {
+        showToast('未找到可重新生成的上一条提问', 'warning');
+        return;
+      }
+      const targetUserMsg = messages[userIdx];
+      try {
+        await api.truncateSession(activeSessionId, userIdx);
+      } catch (err: any) {
+        showToast(`截断会话历史失败: ${err?.message || err}`, 'error');
+        return;
+      }
+      setMessages((prev) => prev.slice(0, userIdx));
+      void handleSendMessage(targetUserMsg.content || '', targetUserMsg.attachments || []);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isStreaming, activeSessionId, messages, showToast]
+  );
+
+  const handleEditResend = useCallback(
+    async (msgIdx: number, newText: string) => {
+      if (isStreaming || !activeSessionId) return;
+      const targetMsg = messages[msgIdx];
+      if (!targetMsg || targetMsg.role !== 'user') return;
+      try {
+        await api.truncateSession(activeSessionId, msgIdx);
+      } catch (err: any) {
+        showToast(`截断会话历史失败: ${err?.message || err}`, 'error');
+        return;
+      }
+      setMessages((prev) => prev.slice(0, msgIdx));
+      void handleSendMessage(newText, targetMsg.attachments || []);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isStreaming, activeSessionId, messages, showToast]
+  );
+
+  const handleForkSideChat = useCallback(
+    async (msgIdx: number) => {
+      if (isStreaming || !activeSessionId || !activeBot?.id) return;
+      const baseTitle = activeSession?.title && activeSession.title !== '主要聊天'
+        ? activeSession.title
+        : '主聊';
+      try {
+        const forked = await api.forkSession(activeSessionId, msgIdx, `${baseTitle} · 分支`);
+        await loadSessions(activeBot.id, forked.id);
+        selectSession(forked.id);
+        showToast('已从此处开启独立旁聊分支', 'success');
+      } catch (err: any) {
+        showToast(`开启旁聊分支失败: ${err?.message || err}`, 'error');
+      }
+    },
+    [isStreaming, activeSessionId, activeBot?.id, activeSession?.title, loadSessions, selectSession, showToast]
+  );
+
+  const handleExportSession = () => {
+    const cleanList = messages.filter((m) => !m.hidden);
+    if (cleanList.length === 0) {
+      showToast('当前会话暂无可导出的消息', 'info');
+      return;
+    }
+    const title = activeSession?.title || '对话记录';
+    const lines = [`# ${title}`, `> 智能体：${activeBot?.name || '数字员工'}`, ''];
+    for (const msg of cleanList) {
+      const who = msg.role === 'user' ? '我' : activeBot?.name || '数字员工';
+      lines.push(`## ${who}`);
+      if (msg.content) lines.push(msg.content);
+      lines.push('');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.replace(/[\\/:*?"<>|]/g, '_')}-${Date.now()}.md`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('已导出对话 Markdown 文件', 'success');
+  };
+
+  // 构建可见消息及其在完整 messages 数组中的真实索引
+  const indexedVisibleMessages = useMemo(() => {
+    const list: Array<{ msg: Message; realIndex: number }> = [];
+    messages.forEach((msg, realIndex) => {
+      if (!msg.hidden) {
+        list.push({ msg, realIndex });
+      }
+    });
+    return list;
+  }, [messages]);
+
+  const displayedMessages = useMemo(() => {
+    if (indexedVisibleMessages.length > visibleCount) {
+      return indexedVisibleMessages.slice(indexedVisibleMessages.length - visibleCount);
+    }
+    return indexedVisibleMessages;
+  }, [indexedVisibleMessages, visibleCount]);
+
+  // 用户历史输入（供输入框 ↑↓ 回溯）
+  const sentHistory = useMemo(
+    () =>
+      indexedVisibleMessages
+        .filter(({ msg }) => msg.role === 'user' && msg.content.trim())
+        .map(({ msg }) => msg.content),
+    [indexedVisibleMessages]
+  );
+
+  // 时间轴节点（仅展示当前视图中的用户提问）
+  const timelineEntries: TimelineEntry[] = useMemo(
+    () =>
+      displayedMessages
+        .filter(({ msg }) => msg.role === 'user' && msg.id)
+        .map(({ msg }) => ({
+          id: msg.id,
+          preview: (msg.content || '附件消息').replace(/\s+/g, ' ').slice(0, 48),
+          timestamp: msg.timestamp,
+        })),
+    [displayedMessages]
+  );
+
+  const jumpToMessageId = useCallback((id: string) => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id;
+    const el = container.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('is-jump-highlight');
+    setTimeout(() => el.classList.remove('is-jump-highlight'), 1400);
+  }, []);
+
+  // 会话内搜索匹配逻辑
+  const matchedMessageIds = useMemo(() => {
+    const q = findQuery.trim().toLowerCase();
+    if (!q) return [];
+    return indexedVisibleMessages
+      .filter(({ msg }) => (msg.content || '').toLowerCase().includes(q))
+      .map(({ msg }) => msg.id);
+  }, [findQuery, indexedVisibleMessages]);
+
+  const matchedIdSet = useMemo(() => new Set(matchedMessageIds), [matchedMessageIds]);
+  const activeMatchId = matchedMessageIds[activeMatchIdx] || null;
+
+  useEffect(() => {
+    setActiveMatchIdx(0);
+  }, [findQuery]);
+
+  useEffect(() => {
+    if (!isFindOpen || !activeMatchId) return;
+    // 若匹配消息位于未展开的早期分页中，自动扩充可见范围
+    const idxInVisible = indexedVisibleMessages.findIndex(({ msg }) => msg.id === activeMatchId);
+    if (idxInVisible >= 0 && indexedVisibleMessages.length - idxInVisible > visibleCount) {
+      setVisibleCount(indexedVisibleMessages.length - idxInVisible + 5);
+      setTimeout(() => jumpToMessageId(activeMatchId), 60);
+    } else {
+      jumpToMessageId(activeMatchId);
+    }
+  }, [activeMatchId, indexedVisibleMessages, isFindOpen, jumpToMessageId, visibleCount]);
 
   return (
     <div className="chat-stage-wrapper">
       <section className="chat-container">
-        {/* 顶部悬浮居中智能体头像与渐变遮罩 (Scrim) */}
+        {/* 顶部悬浮居中智能体头像与渐变遮罩 */}
         <div className="chat-floating-header">
           <AgentCapsule
             bot={activeBot}
@@ -598,7 +977,6 @@ export const ChatView: React.FC = () => {
             onClick={() => setIsBotModalOpen(true)}
           />
 
-          {/* 主聊 / 旁聊模式指示器与分支切换入口 */}
           <div className="chat-thread-bar">
             {isMainChat ? (
               <div className="chat-thread-pill is-main" title="当前位于常驻核心主聊，持续沉淀会话记忆">
@@ -634,8 +1012,55 @@ export const ChatView: React.FC = () => {
                 <span>开启旁聊</span>
               </button>
             )}
+
+            {indexedVisibleMessages.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="btn-thread-switch btn-thread-icon"
+                  onClick={() => setIsFindOpen((v) => !v)}
+                  title="搜索当前对话 (Ctrl/⌘ + F)"
+                  aria-label="搜索当前对话"
+                >
+                  <Search size={11} />
+                </button>
+                <button
+                  type="button"
+                  className="btn-thread-switch btn-thread-icon"
+                  onClick={handleExportSession}
+                  title="导出完整对话为 Markdown"
+                  aria-label="导出完整对话"
+                >
+                  <Download size={11} />
+                </button>
+              </>
+            )}
           </div>
         </div>
+
+        <ChatFindBar
+          isOpen={isFindOpen}
+          query={findQuery}
+          onQueryChange={setFindQuery}
+          matchCount={matchedMessageIds.length}
+          activeMatchIdx={activeMatchIdx}
+          onPrev={() =>
+            setActiveMatchIdx((prev) =>
+              matchedMessageIds.length === 0
+                ? 0
+                : (prev - 1 + matchedMessageIds.length) % matchedMessageIds.length
+            )
+          }
+          onNext={() =>
+            setActiveMatchIdx((prev) =>
+              matchedMessageIds.length === 0 ? 0 : (prev + 1) % matchedMessageIds.length
+            )
+          }
+          onClose={() => {
+            setIsFindOpen(false);
+            setFindQuery('');
+          }}
+        />
 
         <div className="chat-history" ref={chatContainerRef} onScroll={handleScroll}>
           {loadingSession ? (
@@ -660,7 +1085,7 @@ export const ChatView: React.FC = () => {
                 <RotateCcw size={13} /> 重新加载
               </button>
             </div>
-          ) : visibleMessages.length === 0 && !isStreaming ? (
+          ) : indexedVisibleMessages.length === 0 && !isStreaming ? (
             <div className="chat-empty-state">
               <div className="chat-empty-hero-wrap">
                 <AgentCapsule
@@ -736,28 +1161,50 @@ export const ChatView: React.FC = () => {
             </div>
           ) : (
             <>
-              {visibleMessages.length > visibleCount && (
+              {indexedVisibleMessages.length > visibleCount && (
                 <div className="chat-history-load-more">
                   <button type="button" onClick={handleLoadMoreHistory}>
                     <Clock size={12} />
-                    查看更早的历史记录（还有 {visibleMessages.length - visibleCount} 条）
+                    查看更早的历史记录（还有 {indexedVisibleMessages.length - visibleCount} 条）
                   </button>
                 </div>
               )}
-              {displayedMessages.map((msg, idx) => (
-                <MessageBubble
-                  key={msg.id || `${msg.role}-${idx}`}
-                  message={msg}
-                  bot={activeBot}
-                  sessionId={activeSessionId || undefined}
-                  onApprovalResolved={handleApprovalResolved}
-                  onWidgetPrompt={handleWidgetPrompt}
-                />
-              ))}
+              {displayedMessages.map(({ msg, realIndex }, idx) => {
+                const prevMsg = idx > 0 ? displayedMessages[idx - 1].msg : null;
+                const dayKey = getDayKey(msg.timestamp);
+                const prevDayKey = getDayKey(prevMsg?.timestamp);
+                const showDaySeparator = Boolean(dayKey && dayKey !== prevDayKey);
+
+                return (
+                  <React.Fragment key={msg.id || `${msg.role}-${realIndex}`}>
+                    {showDaySeparator && (
+                      <div className="chat-day-separator">
+                        <span>{formatDayLabel(msg.timestamp)}</span>
+                      </div>
+                    )}
+                    <MessageBubble
+                      message={msg}
+                      messageIndex={realIndex}
+                      bot={activeBot}
+                      sessionId={activeSessionId || undefined}
+                      isBusy={isStreaming}
+                      isSearchMatch={matchedIdSet.has(msg.id)}
+                      isSearchActive={activeMatchId === msg.id}
+                      onApprovalResolved={handleApprovalResolved}
+                      onWidgetPrompt={handleWidgetPrompt}
+                      onQuote={handleQuote}
+                      onRegenerate={handleRegenerate}
+                      onEditResend={handleEditResend}
+                      onForkSideChat={handleForkSideChat}
+                      onOpenLightbox={setLightboxPayload}
+                    />
+                  </React.Fragment>
+                );
+              })}
             </>
           )}
 
-          {/* Real-time Streaming Placeholder */}
+          {/* 实时流式输出占位 */}
           {isStreaming && (
             <MessageBubble
               message={{
@@ -775,13 +1222,22 @@ export const ChatView: React.FC = () => {
                 widgets: streamingWidgets.length > 0 ? streamingWidgets : undefined,
               }}
               bot={activeBot}
+              isBusy
+              liveReasoningSeconds={liveReasoningSeconds}
               onWidgetPrompt={handleWidgetPrompt}
+              onOpenLightbox={setLightboxPayload}
               live
             />
           )}
 
           <div ref={chatBottomRef} />
         </div>
+
+        <TimelineRail
+          entries={timelineEntries}
+          activeId={activeTimelineId}
+          onJump={jumpToMessageId}
+        />
 
         {showScrollBottomBtn && (
           <button
@@ -800,6 +1256,20 @@ export const ChatView: React.FC = () => {
           onSendMessage={handleSendMessage}
           isStreaming={isStreaming}
           onStop={handleStop}
+          queuedMessages={queuedMessages}
+          onEnqueueMessage={handleEnqueueMessage}
+          onRemoveQueued={handleRemoveQueued}
+          onEditQueued={handleEditQueued}
+          onSendQueuedNow={handleSendQueuedNow}
+          quoteDraft={quoteDraft}
+          onClearQuote={() => setQuoteDraft(null)}
+          waitingSeconds={waitingSeconds}
+          sentHistory={sentHistory}
+        />
+
+        <ImageLightbox
+          payload={lightboxPayload}
+          onClose={() => setLightboxPayload(null)}
         />
       </section>
     </div>

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { AppProvider } from './context/AppContext';
 import '../styles.css';
+import './styles/chat-enhancements.css';
 
 const rootEl = document.getElementById('root');
 if (rootEl) {

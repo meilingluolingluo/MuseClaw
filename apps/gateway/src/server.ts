@@ -2453,11 +2453,67 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // 会话内容清空接口 (针对常驻主聊清空或普通会话重置)
     if (req.method === 'POST' && url.pathname.match(/^\/api\/sessions\/[^/]+\/clear$/)) {
-      const id = url.pathname.replace('/api/sessions/', '').replace('/clear', '');
+      const id = decodeURIComponent(url.pathname.replace('/api/sessions/', '').replace('/clear', ''));
       const targetUserId = currentUser ? currentUser.username : 'user_web';
       const success = sessionStore.clear(id, targetUserId);
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success, id, cleared: true }));
+    }
+
+    // 会话消息截断接口 (用于重新生成或编辑重发)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/sessions\/[^/]+\/truncate$/)) {
+      const id = decodeURIComponent(url.pathname.replace('/api/sessions/', '').replace('/truncate', ''));
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
+      let parsed: any = {};
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        parsed = JSON.parse(body || '{}');
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      }
+      const keepCount = Number(parsed.keepCount);
+      if (!Number.isInteger(keepCount) || keepCount < 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'keepCount must be a non-negative integer' }));
+      }
+      const success = sessionStore.truncate(id, keepCount, targetUserId);
+      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success, id, keepCount }));
+    }
+
+    // 会话分叉为独立旁聊接口
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/sessions\/[^/]+\/fork$/)) {
+      const id = decodeURIComponent(url.pathname.replace('/api/sessions/', '').replace('/fork', ''));
+      const targetUserId = currentUser ? currentUser.username : 'user_web';
+      let parsed: any = {};
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        parsed = JSON.parse(body || '{}');
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      }
+      const upToIndex = Number.isInteger(Number(parsed.upToIndex)) ? Number(parsed.upToIndex) : 0;
+      const forked = sessionStore.fork(id, upToIndex, typeof parsed.title === 'string' ? parsed.title : undefined, targetUserId);
+      if (!forked) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Source session not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        id: forked.id,
+        title: forked.title,
+        kind: 'side',
+        botId: forked.bot_id || forked.botId,
+        bot_id: forked.bot_id || forked.botId,
+        userId: forked.userId,
+        createdAt: forked.created_at,
+        updatedAt: forked.updated_at,
+        messageCount: forked.messages ? forked.messages.length : 0
+      }));
     }
 
     if (req.method === 'GET' && url.pathname.startsWith('/api/sessions/')) {
@@ -3504,6 +3560,9 @@ fi
         session.title = text.slice(0, 16) || '新任务';
       }
 
+      const activeProvider = globalModelStore.getActiveProvider();
+      const currentModelName = bot.model || activeProvider?.model || 'deepseek-flash';
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -3512,7 +3571,7 @@ fi
       });
       (res as any).flushHeaders?.();
 
-      // 发送 session 初始化事件，包含 bot_id 与 session_id
+      // 发送 session 初始化事件，包含 bot_id、session_id 与当前模型名
       res.write(`data: ${JSON.stringify({
         type: 'session:init',
         sessionId: session.id,
@@ -3521,7 +3580,8 @@ fi
         bot_id: bot.id,
         botName: bot.name,
         title: session.title,
-        mentionName: mention_name
+        mentionName: mention_name,
+        model: currentModelName
       })}\n\n`);
 
       // 形象工坊对话拦截：若存在处于 choose 状态的会话，且用户输入属于选项/重新生成/取消
@@ -3638,8 +3698,6 @@ fi
         }
       }
 
-      const activeProvider = globalModelStore.getActiveProvider();
-      const currentModelName = bot.model || activeProvider?.model || 'deepseek-flash';
       const isVisionModel = modelTakesImages(currentModelName) === true;
 
       const imagePaths = attachmentObjects
@@ -3675,6 +3733,11 @@ fi
 
       let fullAssistantText = '';
       let reasoningText = '';
+      const turnStartedAt = Date.now();
+      let reasoningStartedAt: number | null = null;
+      let reasoningEndedAt: number | null = null;
+      const userMsgId = `usr_${turnStartedAt}_${Math.random().toString(36).slice(2, 6)}`;
+      const assistantMsgId = `asst_${turnStartedAt}_${Math.random().toString(36).slice(2, 6)}`;
       const toolCalls: Array<Record<string, unknown>> = [];
       const widgets: WidgetPayload[] = [];
       let clientGone = false;
@@ -3705,9 +3768,15 @@ fi
         for await (const event of loop) {
           if (clientGone) break;
           if (event.type === 'stream:text-delta') {
+            if (reasoningStartedAt !== null && reasoningEndedAt === null) {
+              reasoningEndedAt = Date.now();
+            }
             fullAssistantText += event.text;
           }
           if (event.type === 'stream:reasoning-delta') {
+            if (reasoningStartedAt === null) {
+              reasoningStartedAt = Date.now();
+            }
             reasoningText += event.text;
           }
           if (event.type === 'ui:widget' && event.widget) {
@@ -3773,7 +3842,15 @@ fi
           (res as any).flush?.();
         }
 
+        const turnFinishedAt = Date.now();
+        const turnDurationMs = Math.max(0, turnFinishedAt - turnStartedAt);
+        const reasoningDurationMs = reasoningStartedAt !== null
+          ? Math.max(0, (reasoningEndedAt ?? turnFinishedAt) - reasoningStartedAt)
+          : undefined;
+
         session.messages.push({
+          id: userMsgId,
+          timestamp: turnStartedAt,
           role: 'user',
           content: text || (attachments.length ? '（已上传附件）' : ''),
           ...(attachments.length ? { attachments } : {}),
@@ -3794,6 +3871,11 @@ fi
             }
           }
           session.messages.push({
+            id: assistantMsgId,
+            timestamp: turnFinishedAt,
+            durationMs: turnDurationMs,
+            ...(reasoningDurationMs !== undefined ? { reasoningDurationMs } : {}),
+            model: currentModelName,
             role: 'assistant',
             content,
             ...(extractedReasoning ? { reasoning: extractedReasoning } : {}),
@@ -3803,6 +3885,17 @@ fi
         }
         sessionStore.save(session, userId);
         if (!clientGone) {
+          try {
+            res.write(`data: ${JSON.stringify({
+              type: 'turn:meta',
+              userMsgId,
+              assistantMsgId,
+              durationMs: turnDurationMs,
+              ...(reasoningDurationMs !== undefined ? { reasoningDurationMs } : {}),
+              model: currentModelName
+            })}\n\n`);
+            (res as any).flush?.();
+          } catch {}
           feedStore.recordActivity(userId, {
             kind: 'chat',
             title: session.title || '任务会话',
