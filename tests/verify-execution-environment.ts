@@ -238,7 +238,7 @@ async function runExecutionEnvironmentTests() {
   assert.strictEqual(writeIllegalRes.success, false);
   assert.ok(writeIllegalRes.error.includes('SecurityException'));
 
-  // 6.4 execute_code 离线代码执行测试
+  // 6.4 execute_code 离线代码执行测试（含单行、多行 Python / Node.js / Bash 与特殊字符）
   const executeCodeTool = toolMap.get('execute_code')!;
   const pyCodeRes: any = await executeCodeTool.execute({
     code: 'print(sum([x * 2 for x in range(5)]))',
@@ -248,9 +248,133 @@ async function runExecutionEnvironmentTests() {
   assert.strictEqual(pyCodeRes.exitCode, 0);
   assert.strictEqual(pyCodeRes.stdout.trim(), '20');
   assert.strictEqual(pyCodeRes.sandbox.networkBlocked, true);
-  console.log('  -> [PASS] 工具层 read_file, write_file, execute_code 深度集成 BaseEnvironment 无误');
 
-  // 清理临时测试工作区
+  const multilinePyCode = [
+    'import sys',
+    'items = ["甲", "乙"]',
+    'for idx, item in enumerate(items):',
+    '    print(f"line={idx}:{item}:$HOME\\n")'
+  ].join('\n');
+  const multiPyRes: any = await executeCodeTool.execute({
+    code: multilinePyCode,
+    language: 'python'
+  });
+  assert.strictEqual(multiPyRes.exitCode, 0, `多行 Python 执行失败: ${multiPyRes.stderr}`);
+  assert.ok(multiPyRes.stdout.includes('line=0:甲:$HOME'));
+  assert.ok(multiPyRes.stdout.includes('line=1:乙:$HOME'));
+  assert.strictEqual(multiPyRes.sandbox.networkBlocked, true);
+
+  const multilineNodeCode = [
+    'const rows = ["上海", "北京"];',
+    'for (let i = 0; i < rows.length; i++) {',
+    '  console.log(`row=${i + 1}:${rows[i]}:sum=${1 + 2}`);',
+    '}'
+  ].join('\n');
+  const multiNodeRes: any = await executeCodeTool.execute({
+    code: multilineNodeCode,
+    language: 'node'
+  });
+  assert.strictEqual(multiNodeRes.exitCode, 0, `多行 Node.js 执行失败: ${multiNodeRes.stderr}`);
+  assert.ok(multiNodeRes.stdout.includes('row=1:上海:sum=3'));
+  assert.ok(multiNodeRes.stdout.includes('row=2:北京:sum=3'));
+  assert.strictEqual(multiNodeRes.sandbox.networkBlocked, true);
+
+  const multilineBashCode = [
+    'COUNT=2',
+    'for i in 1 2; do',
+    '  echo "bash-$i-$COUNT"',
+    'done'
+  ].join('\n');
+  const multiBashRes: any = await executeCodeTool.execute({
+    code: multilineBashCode,
+    language: 'bash'
+  });
+  assert.strictEqual(multiBashRes.exitCode, 0, `多行 Bash 执行失败: ${multiBashRes.stderr}`);
+  assert.ok(multiBashRes.stdout.includes('bash-1-2'));
+  assert.ok(multiBashRes.stdout.includes('bash-2-2'));
+
+  // 6.5 验证 LocalEnvironment 回退模式下的多行 execute_code
+  const localTools = createDefaultTools({
+    workspaceDir: testWorkspace,
+    environment: localEnv
+  });
+  const localExecuteCodeTool = localTools.find((t) => t.name === 'execute_code')!;
+  const localMultiPyRes: any = await localExecuteCodeTool.execute({
+    code: multilinePyCode,
+    language: 'python'
+  });
+  assert.strictEqual(localMultiPyRes.exitCode, 0, `LocalEnvironment 多行 Python 执行失败: ${localMultiPyRes.stderr}`);
+  assert.ok(localMultiPyRes.stdout.includes('line=0:甲:$HOME'));
+  assert.ok(localMultiPyRes.stdout.includes('line=1:乙:$HOME'));
+  console.log('  -> [PASS] 工具层 read_file, write_file, 多行 execute_code 深度集成 BaseEnvironment 无误');
+
+  // =========================================================================
+  // 7. 会话级 /tmp 跨调用持久化与隔离验证 (Session-Scoped /tmp Lifecycle)
+  // =========================================================================
+  console.log('\n[Test 7] 验证同会话 /tmp 跨工具调用持久化与跨会话隔离');
+  if (bwrapEnv.getStatus().engine === 'bwrap') {
+    const executeShellTool = toolMap.get('execute_shell')!;
+    const sessionA = 'sess_tmp_persist_a';
+    const sessionB = 'sess_tmp_persist_b';
+
+    const writeTmpRes: any = await executeShellTool.execute(
+      { command: 'printf \'{"city":"Shanghai","maxtempC":"20"}\' > /tmp/sh.json' },
+      { sessionId: sessionA }
+    );
+    assert.strictEqual(writeTmpRes.exitCode, 0);
+
+    const readTmpShellRes: any = await executeShellTool.execute(
+      { command: 'cat /tmp/sh.json' },
+      { sessionId: sessionA }
+    );
+    assert.strictEqual(readTmpShellRes.exitCode, 0);
+    assert.ok(readTmpShellRes.stdout.includes('"city":"Shanghai"'));
+
+    const parseTmpPyRes: any = await executeCodeTool.execute(
+      {
+        code: [
+          'import json',
+          'with open("/tmp/sh.json", "r", encoding="utf-8") as f:',
+          '    d = json.load(f)',
+          'print(f"{d[\'city\']}:{d[\'maxtempC\']}")'
+        ].join('\n'),
+        language: 'python'
+      },
+      { sessionId: sessionA }
+    );
+    assert.strictEqual(parseTmpPyRes.exitCode, 0, `跨调用读取 /tmp/sh.json 失败: ${parseTmpPyRes.stderr}`);
+    assert.strictEqual(parseTmpPyRes.stdout.trim(), 'Shanghai:20');
+
+    const readTmpToolRes: any = await readFileTool.execute(
+      { path: '/tmp/sh.json' },
+      { sessionId: sessionA }
+    );
+    assert.ok(readTmpToolRes.content && readTmpToolRes.content.includes('"maxtempC":"20"'), `read_file 读取 /tmp 失败: ${JSON.stringify(readTmpToolRes)}`);
+
+    const otherSessionRes: any = await executeShellTool.execute(
+      { command: 'test ! -e /tmp/sh.json && echo "ISOLATED_OK"' },
+      { sessionId: sessionB }
+    );
+    assert.strictEqual(otherSessionRes.exitCode, 0);
+    assert.strictEqual(otherSessionRes.stdout.trim(), 'ISOLATED_OK');
+
+    bwrapEnv.clearSessionTmp(sessionA);
+    const clearedRes: any = await executeShellTool.execute(
+      { command: 'test ! -e /tmp/sh.json && echo "CLEARED_OK"' },
+      { sessionId: sessionA }
+    );
+    assert.strictEqual(clearedRes.exitCode, 0);
+    assert.strictEqual(clearedRes.stdout.trim(), 'CLEARED_OK');
+
+    bwrapEnv.clearSessionTmp(sessionA);
+    bwrapEnv.clearSessionTmp(sessionB);
+    console.log('  -> [PASS] 同会话 execute_shell / execute_code / read_file 共享 /tmp，跨会话严格隔离且可清理');
+  } else {
+    console.log('  -> [SKIP] 非 bwrap 模式跳过会话级 /tmp 隔离测试');
+  }
+
+  // 清理临时测试工作区与默认实例 /tmp
+  bwrapEnv.clearSessionTmp();
   try {
     fs.rmSync(testWorkspace, { recursive: true, force: true });
   } catch {}

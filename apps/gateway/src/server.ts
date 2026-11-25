@@ -166,9 +166,11 @@ function findWorkspaceRoot(startDir: string = process.cwd()): string {
   return path.resolve(startDir);
 }
 const workspaceRoot = findWorkspaceRoot(__dirname);
+const gatewaySandbox = new MicroSandbox({ workspaceDir: workspaceRoot });
 
 const baseTools = createDefaultTools({
   workspaceDir: workspaceRoot,
+  environment: gatewaySandbox,
   skillsProvider: globalSkillStore,
   memoryProvider: {
     getMemory: (botId, userId) => botMemory.getMemory(botId, userId || 'user_web'),
@@ -2456,6 +2458,9 @@ export function startGatewayServer(defaultPort = 8799) {
       const id = decodeURIComponent(url.pathname.replace('/api/sessions/', '').replace('/clear', ''));
       const targetUserId = currentUser ? currentUser.username : 'user_web';
       const success = sessionStore.clear(id, targetUserId);
+      if (success) {
+        gatewaySandbox.clearSessionTmp(id);
+      }
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success, id, cleared: true }));
     }
@@ -2565,6 +2570,9 @@ export function startGatewayServer(defaultPort = 8799) {
       const existing = sessionStore.get(id, targetUserId);
       const isMain = Boolean(existing && (existing.kind === 'main' || existing.id.endsWith('_main') || existing.id === 'main'));
       const success = sessionStore.delete(id, targetUserId);
+      if (success) {
+        gatewaySandbox.clearSessionTmp(id);
+      }
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
         success,
@@ -2577,10 +2585,9 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // C2. 沙箱与技能阶梯状态接口 (Sandbox & Channel Ladder Status)
     if (req.method === 'GET' && url.pathname === '/api/sandbox/status') {
-      const msb = new MicroSandbox();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
-        microSandbox: msb.getStatus(),
+        microSandbox: gatewaySandbox.getStatus(),
         channelLadder: {
           channels: CHANNEL_RANK,
           details: CHANNEL_DETAILS

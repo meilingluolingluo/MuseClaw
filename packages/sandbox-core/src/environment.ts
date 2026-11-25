@@ -1,10 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { exec, spawn, execSync, execFileSync } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execAsync = promisify(exec);
 
 /**
  * 具有网络外出特性的核心命令集合
@@ -222,6 +220,8 @@ export interface ExecutionOptions {
   allowNetwork?: boolean;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
+  stdin?: string;
+  sessionId?: string;
 }
 
 export interface ExecutionResult {
@@ -275,18 +275,31 @@ export abstract class BaseEnvironment {
   /**
    * 安全读取文件内容
    */
-  public async readFile(targetPath: string): Promise<string> {
+  public async readFile(targetPath: string, options?: { sessionId?: string }): Promise<string> {
     if (!this.isSafeRead(targetPath)) {
       throw new Error(`[SecurityException] Path access rejected: "${targetPath}" is blocked by safe read policy`);
     }
 
-    const resolved = this.resolveWorkspacePath(targetPath);
+    const tmpResolved = this.resolveTmpPath(targetPath, options?.sessionId);
+    const resolved = tmpResolved ?? this.resolveWorkspacePath(targetPath);
     if (!fs.existsSync(resolved)) {
       throw new Error(`File not found: ${targetPath}`);
     }
 
     return fs.readFileSync(resolved, 'utf-8');
   }
+
+  /**
+   * 解析当前环境对应的 /tmp 映射路径（若不支持则返回 null）
+   */
+  public resolveTmpPath(_targetPath: string, _sessionId?: string): string | null {
+    return null;
+  }
+
+  /**
+   * 清理指定会话的独立 /tmp 目录
+   */
+  public clearSessionTmp(_sessionId?: string): void {}
 
   /**
    * 安全写入文件内容（应用层安全根路径拦截）
@@ -355,36 +368,54 @@ export class LocalEnvironment extends BaseEnvironment {
     const timeoutMs = options.timeoutMs || 30000;
     const sanitizedEnv = scrubEnvironmentVariables(options.env);
 
-    try {
-      const { stdout, stderr } = await execAsync(command, {
-        cwd: ws,
-        timeout: timeoutMs,
-        env: sanitizedEnv
-      });
-      return {
-        stdout,
-        stderr,
-        exitCode: 0,
-        isSandboxed: false,
-        engine: 'env_scrubbed',
-        networkBlocked: false,
-        durationMs: Date.now() - startTime,
+    return new Promise<ExecutionResult>((resolve) => {
+      const child = exec(
         command,
-        reason: this.reason
-      };
-    } catch (err: any) {
-      return {
-        stdout: err.stdout || '',
-        stderr: err.stderr || err.message,
-        exitCode: err.code || 1,
-        isSandboxed: false,
-        engine: 'env_scrubbed',
-        networkBlocked: false,
-        durationMs: Date.now() - startTime,
-        command,
-        reason: this.reason
-      };
-    }
+        {
+          cwd: ws,
+          timeout: timeoutMs,
+          env: sanitizedEnv
+        },
+        (err, stdout, stderr) => {
+          const durationMs = Date.now() - startTime;
+          if (!err) {
+            return resolve({
+              stdout: stdout || '',
+              stderr: stderr || '',
+              exitCode: 0,
+              isSandboxed: false,
+              engine: 'env_scrubbed',
+              networkBlocked: false,
+              durationMs,
+              command,
+              reason: this.reason
+            });
+          }
+
+          const code = typeof (err as any).code === 'number' ? (err as any).code : ((err as any).code || 1);
+          resolve({
+            stdout: stdout || '',
+            stderr: stderr || err.message,
+            exitCode: code,
+            isSandboxed: false,
+            engine: 'env_scrubbed',
+            networkBlocked: false,
+            durationMs,
+            command,
+            reason: this.reason
+          });
+        }
+      );
+
+      if (child.stdin) {
+        child.stdin.on('error', () => {});
+        if (options.stdin !== undefined) {
+          child.stdin.end(options.stdin);
+        } else {
+          child.stdin.end();
+        }
+      }
+    });
   }
 
   public getStatus(): EnvironmentStatus {
@@ -413,6 +444,9 @@ export class BwrapEnvironment extends BaseEnvironment {
   private blocksNetwork = true;
   private reason = '';
   private dnsConfigFile: string | null = null;
+  private instanceTmpId = crypto.randomBytes(6).toString('hex');
+  private tmpRootDir = path.join(os.tmpdir(), 'museclaw-sandbox-tmp');
+  private lastPruneAt = 0;
 
   constructor(config: EnvironmentConfig = {}) {
     super(config.workspaceDir, config.defaultAllowNetwork ?? true);
@@ -423,6 +457,90 @@ export class BwrapEnvironment extends BaseEnvironment {
     if (config.probeOnStart !== false) {
       this.probe();
     }
+  }
+
+  /**
+   * 构造会话或实例级 /tmp 宿主持久化目录名（防止路径穿越与名称冲突）
+   */
+  private getSessionTmpDirName(sessionId?: string): string {
+    if (sessionId && sessionId.trim()) {
+      const normalized = sessionId.trim();
+      const safePrefix = normalized.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32) || 'session';
+      const hash = crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12);
+      return `sess_${safePrefix}_${hash}`;
+    }
+    return `inst_${this.instanceTmpId}`;
+  }
+
+  /**
+   * 清理超过 24 小时未活跃的过期会话 /tmp 目录
+   */
+  private pruneStaleTmpDirs(excludeDir: string): void {
+    const now = Date.now();
+    this.lastPruneAt = now;
+    const maxAgeMs = 24 * 60 * 60 * 1000;
+    try {
+      if (!fs.existsSync(this.tmpRootDir)) return;
+      const entries = fs.readdirSync(this.tmpRootDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const fullPath = path.join(this.tmpRootDir, entry.name);
+        if (fullPath === excludeDir) continue;
+        try {
+          const stat = fs.statSync(fullPath);
+          if (now - stat.mtimeMs > maxAgeMs) {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  /**
+   * 获取或创建会话级 /tmp 宿主绑定目录（支持同会话跨工具调用持久化）
+   */
+  public getSessionTmpDir(sessionId?: string): string {
+    const targetDir = path.join(this.tmpRootDir, this.getSessionTmpDirName(sessionId));
+    fs.mkdirSync(this.tmpRootDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
+    const nowDate = new Date();
+    try {
+      fs.utimesSync(targetDir, nowDate, nowDate);
+    } catch {}
+
+    if (Date.now() - this.lastPruneAt > 10 * 60 * 1000) {
+      this.pruneStaleTmpDirs(targetDir);
+    }
+    return targetDir;
+  }
+
+  /**
+   * 清理指定会话（或默认实例）对应的持久化 /tmp 目录
+   */
+  public override clearSessionTmp(sessionId?: string): void {
+    const targetDir = path.join(this.tmpRootDir, this.getSessionTmpDirName(sessionId));
+    try {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+    } catch {}
+  }
+
+  /**
+   * 将沙箱内 /tmp/... 路径安全映射为当前会话的宿主绑定目录路径
+   */
+  public override resolveTmpPath(targetPath: string, sessionId?: string): string | null {
+    if (!this.active) return null;
+    const trimmed = targetPath.trim();
+    if (trimmed !== '/tmp' && !trimmed.startsWith('/tmp/')) {
+      return null;
+    }
+    const tmpDir = this.getSessionTmpDir(sessionId);
+    const sub = trimmed === '/tmp' ? '' : trimmed.slice('/tmp/'.length);
+    const resolved = path.resolve(tmpDir, sub);
+    const rel = path.relative(tmpDir, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return null;
+    }
+    return resolved;
   }
 
   /**
@@ -446,7 +564,7 @@ export class BwrapEnvironment extends BaseEnvironment {
   /**
    * 系统分级挂载矩阵构造
    */
-  protected appendMountMatrix(args: string[], allowNetwork: boolean): void {
+  protected appendMountMatrix(args: string[], allowNetwork: boolean, tmpDir?: string): void {
     // 1. 系统核心目录严格只读挂载
     const roDirs = ['/usr', '/opt', '/etc', '/var', '/snap', '/nix', '/run', '/mnt/wsl'];
     for (const dir of roDirs) {
@@ -473,8 +591,12 @@ export class BwrapEnvironment extends BaseEnvironment {
     // 3. 基础设备树与进程树挂载
     args.push('--proc', '/proc', '--dev', '/dev');
 
-    // 4. 内存临时目录（可读写 tmpfs）
-    args.push('--tmpfs', '/tmp');
+    // 4. 临时目录（会话级持久化目录绑定或降级为 tmpfs）
+    if (tmpDir && fs.existsSync(tmpDir)) {
+      args.push('--bind', tmpDir, '/tmp');
+    } else {
+      args.push('--tmpfs', '/tmp');
+    }
 
     // 5. 工作区读写绑定：双向映射宿主真实路径与统一的 /workspace 路径
     args.push('--bind-try', this.workspaceDir, '/workspace');
@@ -609,10 +731,13 @@ export class BwrapEnvironment extends BaseEnvironment {
       extraRoDirs?: string[];
       extraRwDirs?: string[];
       customEnv?: NodeJS.ProcessEnv;
+      sessionId?: string;
+      tmpDir?: string;
     } = {}
   ): string[] {
     const ws = options.workspaceDir ? path.resolve(options.workspaceDir) : this.workspaceDir;
     const allowNet = options.allowNetwork ?? (this.defaultAllowNetwork || commandNeedsNetwork(command));
+    const effectiveTmpDir = options.tmpDir ?? this.getSessionTmpDir(options.sessionId);
 
     const args: string[] = [
       '--die-with-parent',
@@ -630,7 +755,7 @@ export class BwrapEnvironment extends BaseEnvironment {
     }
 
     // 分级文件系统挂载
-    this.appendMountMatrix(args, allowNet);
+    this.appendMountMatrix(args, allowNet, effectiveTmpDir);
 
     // 工作目录与家目录重设
     args.push('--chdir', '/workspace');
@@ -667,7 +792,8 @@ export class BwrapEnvironment extends BaseEnvironment {
         allowNetwork: requiresNetwork,
         extraRoDirs: this.extraRoDirs,
         extraRwDirs: this.extraRwDirs,
-        customEnv: options.env
+        customEnv: options.env,
+        sessionId: options.sessionId
       });
 
       return new Promise<ExecutionResult>((resolve) => {
@@ -678,6 +804,15 @@ export class BwrapEnvironment extends BaseEnvironment {
         const child = spawn(this.bwrapPath!, bwrapArgs, {
           cwd: ws
         });
+
+        if (child.stdin) {
+          child.stdin.on('error', () => {});
+          if (options.stdin !== undefined) {
+            child.stdin.end(options.stdin);
+          } else {
+            child.stdin.end();
+          }
+        }
 
         const timer = setTimeout(() => {
           killed = true;

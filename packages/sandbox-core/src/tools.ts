@@ -599,7 +599,7 @@ export function createDefaultTools(options?: {
     // 阶梯 2 (CLI): 微沙箱隔离 Shell 执行
     {
       name: 'execute_shell',
-      description: '在受保护的微沙箱中执行 Linux Shell 与脚本命令（具备真实网络与 DNS 联通能力，支持 curl、python、node、git 等研发与数据抓取工具，保护系统目录与用户私密文件）',
+      description: '在受保护的微沙箱中执行 Linux Shell 与脚本命令（具备真实网络与 DNS 联通能力，支持 curl、python、node、git 等研发与数据抓取工具，同一会话内 /tmp 目录持久化并与 execute_code / read_file 共享，同时保护系统目录与用户私密文件）',
       parameters: {
         type: 'object',
         properties: {
@@ -614,7 +614,8 @@ export function createDefaultTools(options?: {
         console.log(`[Tool:execute_shell] ${cmd}`);
         const allowNetwork = typeof args.allow_network === 'boolean' ? args.allow_network : true;
         const timeoutMs = typeof args.timeout_ms === 'number' ? args.timeout_ms : 60000;
-        const result = await sandbox.execute(cmd, { cwd: workspaceDir, allowNetwork, timeoutMs });
+        const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : undefined;
+        const result = await sandbox.execute(cmd, { cwd: workspaceDir, allowNetwork, timeoutMs, sessionId });
         return {
           stdout: result.stdout,
           stderr: result.stderr,
@@ -632,32 +633,40 @@ export function createDefaultTools(options?: {
     // 阶梯 2 (CLI): 离线代码执行 (强制 allow_network=false 阻断外网出逃)
     {
       name: 'execute_code',
-      description: '在严格离线微沙箱环境中执行 Python、Node.js 或 Bash 脚本代码（按能力分级隔离网络，保障代码执行安全）',
+      description: '在严格离线微沙箱环境中执行多行或单行 Python、Node.js 或 Bash 脚本代码（通过标准输入原生传递多行脚本，同一会话内可读写 execute_shell 在 /tmp 中生成的临时文件；默认禁止外网访问，如需联网抓取请先用 execute_shell 或 web_fetch）',
       parameters: {
         type: 'object',
         properties: {
-          code: { type: 'string', description: '待执行的代码文本' },
+          code: { type: 'string', description: '待执行的代码文本（支持原生多行代码）' },
           language: { type: 'string', enum: ['python', 'node', 'bash', 'sh'], description: '代码运行环境，默认为 python' },
           timeout_ms: { type: 'number', description: '执行超时时间（毫秒），默认为 30000ms' }
         },
         required: ['code']
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         const code = String(args.code || '');
         const lang = String(args.language || 'python').toLowerCase();
         const timeoutMs = typeof args.timeout_ms === 'number' ? args.timeout_ms : 30000;
+        const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : undefined;
         console.log(`[Tool:execute_code] 离线沙箱执行 ${lang} 代码 (${code.length} 字符)`);
 
-        let cmd = '';
+        let cmd = 'bash -s';
         if (lang === 'python' || lang === 'py') {
-          cmd = `python3 -c ${JSON.stringify(code)}`;
+          cmd = 'python3 -';
         } else if (lang === 'node' || lang === 'javascript' || lang === 'js') {
-          cmd = `node -e ${JSON.stringify(code)}`;
-        } else {
-          cmd = code;
+          cmd = 'node -';
+        } else if (lang === 'sh') {
+          cmd = 'sh -s';
         }
 
-        const result = await sandbox.execute(cmd, { cwd: workspaceDir, allowNetwork: false, timeoutMs });
+        const stdinPayload = code.length > 0 && !code.endsWith('\n') ? `${code}\n` : code;
+        const result = await sandbox.execute(cmd, {
+          cwd: workspaceDir,
+          allowNetwork: false,
+          timeoutMs,
+          stdin: stdinPayload,
+          sessionId
+        });
         return {
           stdout: result.stdout,
           stderr: result.stderr,
@@ -1037,10 +1046,12 @@ export function createDefaultTools(options?: {
         },
         required: ['path']
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         const rawPath = String(args.path || '');
         console.log(`[Tool:read_file] 读取文件: ${rawPath}`);
-        const resolvedPath = resolveUploadOrWorkspacePath(rawPath);
+        const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : undefined;
+        const mappedTmpPath = environment.resolveTmpPath(rawPath, sessionId);
+        const resolvedPath = mappedTmpPath ?? resolveUploadOrWorkspacePath(rawPath);
         const ext = path.extname(resolvedPath).toLowerCase();
         const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff']);
 
@@ -1059,7 +1070,7 @@ export function createDefaultTools(options?: {
         }
 
         try {
-          const content = await environment.readFile(resolvedPath);
+          const content = await environment.readFile(mappedTmpPath ? rawPath : resolvedPath, { sessionId });
           return { content, sizeBytes: Buffer.byteLength(content, 'utf-8') };
         } catch (error: any) {
           return { error: error.message };
