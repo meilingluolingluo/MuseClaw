@@ -5,17 +5,14 @@ import {
   Play,
   Square,
   Trash2,
-  Power,
   Search,
-  CheckCircle,
+  CheckCircle2,
   XCircle,
   AlertTriangle,
   RefreshCw,
-  Calendar,
   ChevronDown,
   ChevronRight,
   Edit3,
-  Bot as BotIcon,
   Loader2,
   Copy,
   Check,
@@ -60,7 +57,7 @@ const QUICK_TEMPLATES: Array<{
 }> = [
   {
     id: 'sys_health',
-    label: '💼 工作日系统巡检',
+    label: '系统巡检',
     name: '工作站资源与服务健康巡检',
     cron: '0 9 * * 1-5',
     kind: 'cron',
@@ -69,7 +66,7 @@ const QUICK_TEMPLATES: Array<{
   },
   {
     id: 'freq_monitor',
-    label: '⚡ 30 分钟高频监控',
+    label: '服务监控',
     name: '关键端口与服务可用性监控',
     cron: '*/30 * * * *',
     kind: 'every',
@@ -78,7 +75,7 @@ const QUICK_TEMPLATES: Array<{
   },
   {
     id: 'weekly_report',
-    label: '📋 周五下班周报汇总',
+    label: '周五周报',
     name: '本周工作与变更汇总周报',
     cron: '0 18 * * 5',
     kind: 'cron',
@@ -112,14 +109,40 @@ function isAbnormalRoutine(r: Routine): boolean {
   );
 }
 
+function getCustomPolicyNotes(r: Routine): string[] {
+  const notes: string[] = [];
+  if (r.deliverTo && r.deliverTo !== 'feed') {
+    notes.push(`交付: ${DELIVER_LABELS[r.deliverTo] || r.deliverTo}`);
+  }
+  if (r.overlap === 'queue') {
+    notes.push('并发: 排队等待');
+  }
+  if ((r.maxRetries ?? 0) > 0) {
+    notes.push(`重试: ${r.maxRetries} 次`);
+  }
+  if (r.misfirePolicy === 'run_once') {
+    notes.push('过期补跑');
+  }
+  if ((r.timeoutSeconds || 300) !== 300) {
+    notes.push(`超时: ${r.timeoutSeconds}s`);
+  }
+  if (r.timezone && r.timezone !== 'Asia/Shanghai') {
+    notes.push(`时区: ${r.timezone}`);
+  }
+  if (r.modelOverride) {
+    notes.push(`模型: ${r.modelOverride}`);
+  }
+  return notes;
+}
+
 export const RoutinesView: React.FC = () => {
   const { bots, showToast, selectSession, setTab, modelsConfig } = useApp();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [activeRoutineId, setActiveRoutineId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterTab, setFilterTab] = useState<'all' | 'active' | 'abnormal' | 'paused'>('all');
-  const [runFilter, setRunFilter] = useState<'all' | 'abnormal' | 'quiet'>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'active' | 'paused'>('all');
+  const [runFilter, setRunFilter] = useState<'all' | 'abnormal'>('all');
   const [isTriggering, setIsTriggering] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isRefreshingRuns, setIsRefreshingRuns] = useState(false);
@@ -165,7 +188,7 @@ export const RoutinesView: React.FC = () => {
       });
     } catch (err: any) {
       console.error('Failed to load routines:', err);
-      showToast(`例行任务加载失败：${err.message}`, 'error');
+      showToast(`定时任务加载失败：${err.message}`, 'error');
     } finally {
       setLoadingList(false);
     }
@@ -183,7 +206,7 @@ export const RoutinesView: React.FC = () => {
         }
       } catch (err: any) {
         console.error('Failed to load runs:', err);
-        showToast(`执行流水加载失败：${err.message}`, 'error');
+        showToast(`执行记录加载失败：${err.message}`, 'error');
       } finally {
         setIsRefreshingRuns(false);
       }
@@ -214,7 +237,6 @@ export const RoutinesView: React.FC = () => {
 
   const hasRunningRun = useMemo(() => runs.some((r) => r.status === 'running'), [runs]);
 
-  // 存在运行中任务时：2s 轮询状态 + 1s 更新实时计时器
   useEffect(() => {
     if (!hasRunningRun && !isTriggering) return;
 
@@ -261,40 +283,9 @@ export const RoutinesView: React.FC = () => {
     return Array.from(names).filter(Boolean);
   }, [modelsConfig]);
 
-  // 统计指标
-  const statsSummary = useMemo(() => {
-    const total = routines.length;
-    const activeCount = routines.filter((r) => r.enabled).length;
-    const abnormalCount = routines.filter((r) => isAbnormalRoutine(r)).length;
-    let totalExecutions = 0;
-    let successfulExecutions = 0;
-    let failedTotal = 0;
-
-    for (const r of routines) {
-      if (r.stats) {
-        totalExecutions += r.stats.totalRuns || 0;
-        successfulExecutions += r.stats.successRuns || 0;
-        failedTotal += r.stats.failedRuns || 0;
-      }
-    }
-    const successRate =
-      totalExecutions > 0 ? Math.round((successfulExecutions / totalExecutions) * 100) : 0;
-
-    return {
-      total,
-      activeCount,
-      abnormalCount,
-      totalExecutions,
-      successRate,
-      failedTotal,
-    };
-  }, [routines]);
-
-  // 左侧列表筛选
   const filteredRoutines = useMemo(() => {
     return routines.filter((r) => {
       if (filterTab === 'active' && !r.enabled) return false;
-      if (filterTab === 'abnormal' && !isAbnormalRoutine(r)) return false;
       if (filterTab === 'paused' && r.enabled) return false;
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
@@ -306,17 +297,14 @@ export const RoutinesView: React.FC = () => {
     });
   }, [routines, filterTab, searchQuery]);
 
-  // 右侧流水筛选
   const filteredRuns = useMemo(() => {
-    return runs.filter((run) => {
-      if (runFilter === 'abnormal') {
-        return run.status === 'failed' || run.status === 'timeout' || run.status === 'interrupted';
-      }
-      if (runFilter === 'quiet') {
-        return Boolean(run.quiet);
-      }
-      return true;
-    });
+    if (runFilter === 'abnormal') {
+      return runs.filter(
+        (run) =>
+          run.status === 'failed' || run.status === 'timeout' || run.status === 'interrupted'
+      );
+    }
+    return runs;
   }, [runs, runFilter]);
 
   const handleCopyText = async (key: string, text: string, label: string) => {
@@ -330,7 +318,6 @@ export const RoutinesView: React.FC = () => {
     }
   };
 
-  // 打开创建弹窗
   const handleOpenCreate = () => {
     setEditingRoutineId(null);
     setFormName('');
@@ -353,7 +340,6 @@ export const RoutinesView: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  // 打开编辑弹窗
   const handleOpenEdit = (r: Routine) => {
     setEditingRoutineId(r.id);
     setFormName(r.name);
@@ -382,21 +368,20 @@ export const RoutinesView: React.FC = () => {
     setFormCron(tpl.cron);
     setFormScheduleKind(tpl.kind);
     setFormPrompt(tpl.instructions);
-    showToast(`已填充模板「${tpl.label}」`, 'info');
+    showToast(`已填充「${tpl.label}」模板`, 'info');
   };
 
-  // 提交保存（新建或编辑）
   const handleSaveRoutine = async () => {
     if (!formName.trim()) {
-      showToast('任务名称不能为空', 'warning');
+      showToast('请输入任务名称', 'warning');
       return;
     }
     if (!formPrompt.trim()) {
-      showToast('执行指令提示词不能为空', 'warning');
+      showToast('请输入执行指令', 'warning');
       return;
     }
     if (!formCron.trim()) {
-      showToast('调度周期表达式不能为空', 'warning');
+      showToast('请配置执行周期', 'warning');
       return;
     }
 
@@ -424,12 +409,12 @@ export const RoutinesView: React.FC = () => {
       if (editingRoutineId) {
         const updated = await api.updateRoutine(editingRoutineId, payload);
         setRoutines((prev) => prev.map((item) => (item.id === editingRoutineId ? updated : item)));
-        showToast('例行任务配置已更新', 'success');
+        showToast('任务配置已更新', 'success');
       } else {
         const created = await api.createRoutine({ ...payload, enabled: true });
         setRoutines((prev) => [created, ...prev]);
         setActiveRoutineId(created.id);
-        showToast('新建例行任务成功', 'success');
+        showToast('定时任务已创建', 'success');
       }
       setIsModalOpen(false);
     } catch (err: any) {
@@ -437,14 +422,13 @@ export const RoutinesView: React.FC = () => {
     }
   };
 
-  // 启停 / 熔断恢复切换
   const handleToggleEnable = async (r: Routine, forceEnable?: boolean) => {
     try {
       const nextEnabled = forceEnable !== undefined ? forceEnable : !r.enabled;
       const updated = await api.updateRoutine(r.id, { enabled: nextEnabled });
       setRoutines((prev) => prev.map((item) => (item.id === r.id ? updated : item)));
       showToast(
-        forceEnable ? '已重置熔断计数并恢复自动调度' : `任务已${nextEnabled ? '恢复自动调度' : '暂停'}`,
+        forceEnable ? '已重置熔断并恢复调度' : `任务已${nextEnabled ? '开启调度' : '暂停'}`,
         'info'
       );
     } catch (err: any) {
@@ -452,7 +436,6 @@ export const RoutinesView: React.FC = () => {
     }
   };
 
-  // 删除任务
   const handleDelete = async (id: string) => {
     if (confirmDeleteId !== id) {
       setConfirmDeleteId(id);
@@ -470,19 +453,18 @@ export const RoutinesView: React.FC = () => {
       if (activeRoutineId === id) {
         setActiveRoutineId(remaining.length > 0 ? remaining[0].id : null);
       }
-      showToast('例行任务已删除', 'success');
+      showToast('定时任务已删除', 'success');
     } catch (err: any) {
       showToast(`删除失败: ${err.message}`, 'error');
     }
   };
 
-  // 手动立即触发
   const handleRunNow = async () => {
     if (!activeRoutine) return;
     setIsTriggering(true);
     try {
       await api.runRoutine(activeRoutine.id);
-      showToast('任务已触发启动，正在沙箱中执行...', 'success');
+      showToast('已开始执行', 'success');
       await loadRuns(activeRoutine.id);
       await loadRoutines();
     } catch (err: any) {
@@ -491,7 +473,6 @@ export const RoutinesView: React.FC = () => {
     }
   };
 
-  // 停止执行中的任务
   const handleCancelRun = async (runId?: string) => {
     if (!activeRoutine) return;
     const targetRunId = runId || activeRunningRun?.id;
@@ -499,7 +480,7 @@ export const RoutinesView: React.FC = () => {
     setIsCancelling(true);
     try {
       await api.cancelRoutineRun(targetRunId);
-      showToast('已发送停止指令，正在中止任务...', 'info');
+      showToast('已下发停止指令', 'info');
       await loadRuns(activeRoutine.id);
       await loadRoutines();
     } catch (err: any) {
@@ -530,55 +511,33 @@ export const RoutinesView: React.FC = () => {
     return `curl -X POST "${origin}/api/routines/${activeRoutine.id}/trigger" -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '{}'`;
   }, [activeRoutine]);
 
+  const activePolicyNotes = useMemo(
+    () => (activeRoutine ? getCustomPolicyNotes(activeRoutine) : []),
+    [activeRoutine]
+  );
+
   return (
-    <section className="view-stage routines-view" aria-label="例行任务与自动化巡检">
-      {/* 顶部统计与新建入口 */}
-      <div className="routines-top-bar">
-        <div className="routines-stat-group">
-          <div className="rt-stat">
-            <span className="rt-stat-label">例行任务</span>
-            <span className="rt-stat-value">
-              {statsSummary.total}
-              <span className="rt-stat-sub">· {statsSummary.activeCount} 活跃</span>
-            </span>
-          </div>
-          <div className="rt-stat">
-            <span className="rt-stat-label">累计执行</span>
-            <span className="rt-stat-value">{statsSummary.totalExecutions}</span>
-          </div>
-          <div className="rt-stat">
-            <span className="rt-stat-label">成功率</span>
-            <span
-              className={`rt-stat-value ${statsSummary.totalExecutions > 0 ? 'is-success' : 'is-muted'}`}
-            >
-              {statsSummary.totalExecutions > 0 ? `${statsSummary.successRate}%` : '—'}
-            </span>
-          </div>
-          <div className="rt-stat">
-            <span className="rt-stat-label">异常 / 失败</span>
-            <span
-              className={`rt-stat-value ${statsSummary.failedTotal > 0 ? 'is-warning' : ''}`}
-            >
-              {statsSummary.failedTotal}
-            </span>
-          </div>
-        </div>
-
-        <button type="button" className="om-btn-primary" onClick={handleOpenCreate}>
-          <Plus size={15} /> 新建例行任务
-        </button>
-      </div>
-
-      {/* 主工作区 */}
+    <section className="view-stage routines-view" aria-label="定时任务管理">
       <div className="routines-workspace">
-        {/* 左侧任务列表面板 */}
+        {/* 左侧精简任务列表 */}
         <aside className="routines-sidebar">
-          <div className="routines-filter-box">
+          <div className="rt-sidebar-head">
+            <div className="rt-sidebar-title-group">
+              <h2 className="rt-sidebar-title">定时任务</h2>
+              <span className="rt-sidebar-count">{routines.length}</span>
+            </div>
+            <button type="button" className="om-btn-primary rt-create-btn" onClick={handleOpenCreate}>
+              <Plus size={14} />
+              <span>新建</span>
+            </button>
+          </div>
+
+          <div className="rt-sidebar-controls">
             <div className="routines-search-container">
               <Search size={14} className="routines-search-icon" aria-hidden="true" />
               <input
                 type="text"
-                placeholder="搜索任务、Cron 或指令..."
+                placeholder="搜索任务..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="routines-search-input"
@@ -596,28 +555,21 @@ export const RoutinesView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setFilterTab('active')}
-                className={`routines-tab-btn ${filterTab === 'active' ? 'active active-green' : ''}`}
+                className={`routines-tab-btn ${filterTab === 'active' ? 'active' : ''}`}
               >
-                活跃 ({routines.filter((r) => r.enabled).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterTab('abnormal')}
-                className={`routines-tab-btn ${filterTab === 'abnormal' ? 'active active-red' : ''}`}
-              >
-                异常 ({statsSummary.abnormalCount})
+                启用 ({routines.filter((r) => r.enabled).length})
               </button>
               <button
                 type="button"
                 onClick={() => setFilterTab('paused')}
-                className={`routines-tab-btn ${filterTab === 'paused' ? 'active active-amber' : ''}`}
+                className={`routines-tab-btn ${filterTab === 'paused' ? 'active' : ''}`}
               >
                 暂停 ({routines.filter((r) => !r.enabled).length})
               </button>
             </div>
           </div>
 
-          <div className="routines-list-scroll">
+          <div className="routines-list-scroll rt-list-scroll">
             {loadingList && routines.length === 0 ? (
               <div className="routine-skeleton-list" aria-label="加载中">
                 {[0, 1, 2].map((i) => (
@@ -625,7 +577,7 @@ export const RoutinesView: React.FC = () => {
                 ))}
               </div>
             ) : filteredRoutines.length === 0 ? (
-              <div className="routine-nav-empty">没有匹配的例行任务</div>
+              <div className="routine-nav-empty">暂无匹配的定时任务</div>
             ) : (
               filteredRoutines.map((r) => {
                 const isActive = r.id === activeRoutineId;
@@ -633,302 +585,220 @@ export const RoutinesView: React.FC = () => {
                   bots.find((b) => b.id === r.agentId) || (bots.length > 0 ? bots[0] : null);
                 const humanZh = r.scheduleHumanZh || formatCronZh(r.cronExpr);
                 const isRunningItem = r.status === 'running';
-                const isBroken = Boolean(r.circuitBrokenAt);
-                const outcomes = r.recentOutcomes || [];
-                const sparkSlots = Array.from({ length: 10 }, (_, idx) => {
-                  const outcomeIdx = outcomes.length - 10 + idx;
-                  return outcomeIdx >= 0 ? outcomes[outcomeIdx] : null;
-                });
+                const isError = isAbnormalRoutine(r);
+
+                const dotClass = isRunningItem
+                  ? 'is-running'
+                  : isError
+                  ? 'is-error'
+                  : r.enabled
+                  ? 'is-active'
+                  : 'is-paused';
 
                 return (
-                  <div
+                  <button
                     key={r.id}
+                    type="button"
                     onClick={() => setActiveRoutineId(r.id)}
-                    className={`routine-nav-item ${isActive ? 'is-active' : ''} ${isBroken ? 'is-broken' : ''}`}
+                    className={`rt-list-item ${isActive ? 'is-active' : ''}`}
                   >
-                    <div className="routine-nav-top-row">
-                      <span className="routine-nav-name">{r.name}</span>
-                      {isRunningItem ? (
-                        <span className="routine-nav-status-badge is-executing">
-                          <span className="routine-pulse-dot" /> 执行中
-                        </span>
-                      ) : isBroken ? (
-                        <span className="routine-nav-status-badge is-broken">熔断暂停</span>
-                      ) : (
-                        <span
-                          className={`routine-nav-status-badge ${r.enabled ? 'is-running' : 'is-paused'}`}
-                        >
-                          {r.enabled ? '运行中' : '已暂停'}
-                        </span>
-                      )}
+                    <div className="rt-list-item-row">
+                      <span className={`rt-status-dot ${dotClass}`} aria-hidden="true" />
+                      <span className="rt-list-item-name">{r.name}</span>
                     </div>
-
-                    <div className="routine-nav-schedule-line">
-                      <Calendar size={12} className="flex-shrink-0" />
-                      <span>{humanZh}</span>
+                    <div className="rt-list-item-meta">
+                      {humanZh} · {botObj?.name || r.agentId || '数字员工'}
                     </div>
-
-                    <div className="routine-nav-meta-line">
-                      <span className="routine-nav-bot-tag">
-                        <BotIcon size={12} /> {botObj?.name || r.agentId || '数字员工'}
-                      </span>
-                      <div className="routine-sparkline" title="最近 10 次执行健康轨迹">
-                        {sparkSlots.map((st, idx) => (
-                          <span
-                            key={idx}
-                            className={`routine-spark-bar ${
-                              st === 'success'
-                                ? 'is-success'
-                                : st === 'failed' || st === 'timeout' || st === 'interrupted'
-                                ? 'is-failed'
-                                : st === 'cancelled'
-                                ? 'is-cancelled'
-                                : 'is-empty'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  </button>
                 );
               })
             )}
           </div>
         </aside>
 
-        {/* 右侧核心详情面板 */}
+        {/* 右侧平坦、清晰的工作区 */}
         <main className="routines-main-content">
           {!activeRoutine ? (
             <div className="routines-empty-state">
-              <div className="routine-empty-icon">⏰</div>
-              <div className="routine-empty-title">选择或创建自动化例行任务</div>
+              <Clock size={28} className="rt-empty-icon" />
+              <div className="routine-empty-title">暂无选中的定时任务</div>
               <div className="routine-empty-desc">
-                数字员工将按照设定的周期在受控沙箱内自主巡检、收集日志、排查风险并在需要时通报结论。
+                创建一个周期性任务，让数字员工按计划在沙箱内自动巡检并汇报结果。
               </div>
               <button type="button" className="btn-primary" onClick={handleOpenCreate}>
-                <Plus size={15} /> 立即创建第一个任务
+                <Plus size={15} /> 新建定时任务
               </button>
             </div>
           ) : (
-            <div className="routine-detail-wrapper">
-              {/* 熔断告警条 */}
+            <div className="rt-detail">
+              {/* 熔断提示 */}
               {activeRoutine.circuitBrokenAt && (
-                <div className="routine-breaker-banner" role="alert">
-                  <div className="routine-breaker-info">
-                    <AlertTriangle size={16} />
+                <div className="rt-breaker-banner" role="alert">
+                  <div className="rt-breaker-info">
+                    <AlertTriangle size={15} />
                     <span>
-                      该任务因连续失败 {activeRoutine.consecutiveFailures || 0} 次已自动熔断暂停，避免无效消耗算力。
+                      连续失败 {activeRoutine.consecutiveFailures || 0} 次，任务已自动暂停。
                     </span>
                   </div>
                   <button
                     type="button"
-                    className="btn-secondary routine-breaker-reset-btn"
+                    className="btn-secondary rt-breaker-btn"
                     onClick={() => handleToggleEnable(activeRoutine, true)}
                   >
-                    重置并恢复调度
+                    恢复调度
                   </button>
                 </div>
               )}
 
-              {/* 顶部标题与快捷操作栏 */}
-              <div className="routine-detail-header-card">
-                <div className="routine-detail-top-row">
-                  <div className="routine-detail-heading-group">
-                    <div className="routine-detail-title-line">
-                      <h2 className="routine-detail-name">{activeRoutine.name}</h2>
-                      {activeRoutine.status === 'running' || activeRunningRun ? (
-                        <span className="routine-detail-status-pill is-executing">
-                          <span className="routine-pulse-dot" /> 沙箱执行中
-                        </span>
-                      ) : activeRoutine.circuitBrokenAt ? (
-                        <span className="routine-detail-status-pill is-broken">⚠ 已熔断暂停</span>
-                      ) : (
-                        <span
-                          className={`routine-detail-status-pill ${activeRoutine.enabled ? 'is-running' : 'is-paused'}`}
-                        >
-                          {activeRoutine.enabled ? '● 调度运行中' : '⏸ 调度已暂停'}
-                        </span>
-                      )}
-                      {activeRoutine.hasQueuedRun && (
-                        <span className="routine-queued-pill">已排队等待下轮</span>
-                      )}
-                    </div>
-
-                    <div className="routine-detail-meta-list">
-                      <span className="routine-detail-meta-item">
-                        <BotIcon size={14} /> 责任员工:{' '}
-                        <strong>{assignedBot?.name || activeRoutine.agentId}</strong>
-                      </span>
-                      <span className="routine-detail-meta-item">
-                        <Calendar size={14} /> 调度周期:{' '}
-                        <strong>
-                          {activeRoutine.scheduleHumanZh || formatCronZh(activeRoutine.cronExpr)}
-                        </strong>
-                      </span>
-                      <span className="routine-detail-meta-item">
-                        <Clock size={14} /> 下次触发:{' '}
-                        <strong>
-                          {!activeRoutine.enabled
-                            ? '已暂停调度'
-                            : activeRoutine.nextRunAt
-                            ? formatTime(activeRoutine.nextRunAt)
-                            : '按设定周期'}
-                        </strong>
-                      </span>
-                      {activeRoutine.lastRunAt && (
-                        <span className="routine-detail-meta-item">
-                          上次运行: {formatTime(activeRoutine.lastRunAt)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 动作按钮组 */}
-                  <div className="routine-detail-actions">
-                    {activeRunningRun || activeRoutine.status === 'running' ? (
-                      <button
-                        type="button"
-                        className="btn-secondary routine-action-btn is-danger"
-                        onClick={() => handleCancelRun(activeRunningRun?.id)}
-                        disabled={isCancelling || !activeRunningRun}
-                      >
-                        <Square size={13} fill="currentColor" />
-                        <span>{isCancelling ? '停止中...' : '停止执行'}</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn-primary routine-action-btn"
-                        onClick={handleRunNow}
-                        disabled={isTriggering}
-                      >
-                        {isTriggering ? (
-                          <Loader2 size={14} className="spin" />
-                        ) : (
-                          <Play size={14} />
-                        )}
-                        <span>{isTriggering ? '触发中...' : '立即运行'}</span>
-                      </button>
-                    )}
+              {/* 头部：标题 + 启停开关 + 主操作 */}
+              <header className="rt-detail-head">
+                <div className="rt-detail-title-col">
+                  <div className="rt-detail-title-row">
+                    <h2 className="rt-detail-name">{activeRoutine.name}</h2>
                     <button
                       type="button"
-                      className="btn-secondary routine-action-btn"
+                      role="switch"
+                      aria-checked={activeRoutine.enabled}
+                      aria-label={activeRoutine.enabled ? '暂停调度' : '开启调度'}
+                      title={activeRoutine.enabled ? '已开启自动调度，点击暂停' : '已暂停，点击开启'}
+                      className={`rt-switch ${activeRoutine.enabled ? 'is-on' : ''}`}
                       onClick={() => handleToggleEnable(activeRoutine)}
                     >
-                      <Power size={14} />{' '}
-                      <span>{activeRoutine.enabled ? '暂停调度' : '恢复调度'}</span>
+                      <span className="rt-switch-thumb" />
                     </button>
-                    <button
-                      type="button"
-                      className="btn-secondary routine-action-btn"
-                      onClick={() => handleOpenEdit(activeRoutine)}
-                    >
-                      <Edit3 size={14} /> <span>编辑</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn-secondary routine-action-btn is-danger ${confirmDeleteId === activeRoutine.id ? 'is-confirming' : ''}`}
-                      onClick={() => handleDelete(activeRoutine.id)}
-                      title={confirmDeleteId === activeRoutine.id ? '再次点击确认删除' : '删除任务'}
-                    >
-                      <Trash2 size={14} />
-                      {confirmDeleteId === activeRoutine.id && <span>确认删除？</span>}
-                    </button>
+                    {(activeRoutine.status === 'running' || activeRunningRun) && (
+                      <span className="rt-inline-state is-running">执行中</span>
+                    )}
+                    {activeRoutine.hasQueuedRun && (
+                      <span className="rt-inline-state is-queued">已排队</span>
+                    )}
                   </div>
-                </div>
-              </div>
 
-              {/* 任务指令与策略速览卡 */}
-              <div className="routine-overview-card">
-                <div className="routine-overview-top">
-                  <div className="routine-overview-label">执行指令与调度策略</div>
-                  <div className="routine-overview-actions">
-                    <button
-                      type="button"
-                      className="routine-overview-copy-btn"
-                      onClick={() =>
-                        handleCopyText('webhook', webhookCurlCommand, 'Webhook 触发命令')
-                      }
-                      title="复制带 Bearer 鉴权的 Webhook curl 触发命令"
-                    >
-                      {copiedKey === 'webhook' ? <Check size={12} /> : <Link2 size={12} />}
-                      <span>{copiedKey === 'webhook' ? '已复制 Webhook' : '复制 Webhook'}</span>
-                    </button>
+                  <div className="rt-detail-meta">
+                    <span>{assignedBot?.name || activeRoutine.agentId}</span>
+                    <span className="rt-meta-sep">·</span>
+                    <span>{activeRoutine.scheduleHumanZh || formatCronZh(activeRoutine.cronExpr)}</span>
+                    <span className="rt-meta-sep">·</span>
+                    <span>
+                      {!activeRoutine.enabled
+                        ? '已暂停'
+                        : activeRoutine.nextRunAt
+                        ? `下次 ${formatTime(activeRoutine.nextRunAt)}`
+                        : '按周期调度'}
+                    </span>
                   </div>
                 </div>
 
-                <div
-                  className={`routine-overview-prompt ${isPromptExpanded ? 'is-expanded' : ''}`}
-                >
+                <div className="rt-detail-actions">
+                  {activeRunningRun || activeRoutine.status === 'running' ? (
+                    <button
+                      type="button"
+                      className="btn-secondary rt-btn-danger"
+                      onClick={() => handleCancelRun(activeRunningRun?.id)}
+                      disabled={isCancelling || !activeRunningRun}
+                    >
+                      <Square size={12} fill="currentColor" />
+                      <span>{isCancelling ? '停止中...' : '停止执行'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-primary rt-btn-primary"
+                      onClick={handleRunNow}
+                      disabled={isTriggering}
+                    >
+                      {isTriggering ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <Play size={14} />
+                      )}
+                      <span>{isTriggering ? '启动中...' : '立即运行'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="btn-secondary rt-btn-secondary"
+                    onClick={() => handleOpenEdit(activeRoutine)}
+                  >
+                    <Edit3 size={14} />
+                    <span>编辑</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`btn-secondary rt-btn-icon ${confirmDeleteId === activeRoutine.id ? 'is-confirming' : ''}`}
+                    onClick={() => handleDelete(activeRoutine.id)}
+                    title={confirmDeleteId === activeRoutine.id ? '再次点击确认删除' : '删除任务'}
+                    aria-label="删除任务"
+                  >
+                    <Trash2 size={14} />
+                    {confirmDeleteId === activeRoutine.id && <span>确认删除</span>}
+                  </button>
+                </div>
+              </header>
+
+              {/* 执行指令区 */}
+              <section className="rt-section">
+                <div className="rt-section-head">
+                  <h3 className="rt-section-title">执行指令</h3>
+                  <button
+                    type="button"
+                    className="rt-text-btn"
+                    onClick={() =>
+                      handleCopyText('webhook', webhookCurlCommand, 'Webhook 触发命令')
+                    }
+                    title="复制带鉴权的 Webhook curl 命令"
+                  >
+                    {copiedKey === 'webhook' ? <Check size={12} /> : <Link2 size={12} />}
+                    <span>{copiedKey === 'webhook' ? '已复制 Webhook' : '复制 Webhook'}</span>
+                  </button>
+                </div>
+
+                <div className={`rt-prompt-block ${isPromptExpanded ? 'is-expanded' : ''}`}>
                   {activeRoutine.instructions}
                 </div>
+
                 {(activeRoutine.instructions || '').length > 140 && (
                   <button
                     type="button"
-                    className="routine-overview-expand-btn"
+                    className="rt-text-btn rt-expand-link"
                     onClick={() => setIsPromptExpanded((prev) => !prev)}
                   >
-                    {isPromptExpanded ? '收起指令' : '展开完整指令'}
+                    {isPromptExpanded ? '收起' : '展开全文'}
                   </button>
                 )}
 
-                <div className="routine-policy-chips">
-                  <span className="routine-policy-chip">
-                    交付: {DELIVER_LABELS[activeRoutine.deliverTo || 'feed'] || '动态流 Feed'}
-                  </span>
-                  <span className="routine-policy-chip">
-                    并发: {activeRoutine.overlap === 'queue' ? '排队等待' : '跳过重叠'}
-                  </span>
-                  <span className="routine-policy-chip">
-                    超时: {activeRoutine.timeoutSeconds || 300}s
-                  </span>
-                  <span className="routine-policy-chip">
-                    重试: {activeRoutine.maxRetries ?? 0} 次
-                  </span>
-                  <span className="routine-policy-chip">
-                    时区: {activeRoutine.timezone || 'Asia/Shanghai'}
-                  </span>
-                  <span className="routine-policy-chip">
-                    过期窗口: {activeRoutine.misfirePolicy === 'run_once' ? '补跑一次' : '跳过过期'}
-                  </span>
-                  {activeRoutine.modelOverride && (
-                    <span className="routine-policy-chip is-accent">
-                      模型: {activeRoutine.modelOverride}
-                    </span>
-                  )}
-                </div>
-              </div>
+                {activePolicyNotes.length > 0 && (
+                  <div className="rt-custom-policies">
+                    {activePolicyNotes.join(' · ')}
+                  </div>
+                )}
+              </section>
 
-              {/* 历史执行流水与工具调用链 */}
-              <div className="routine-runs-section">
-                <div className="routine-runs-header">
-                  <div className="routine-runs-title-group">
-                    <h3 className="routine-runs-heading">执行流水与输出报告</h3>
-                    <span className="routine-runs-count-badge">({filteredRuns.length} 条)</span>
+              {/* 执行记录区 */}
+              <section className="rt-section">
+                <div className="rt-section-head">
+                  <div className="rt-section-title-group">
+                    <h3 className="rt-section-title">执行记录</h3>
+                    <span className="rt-section-count">{filteredRuns.length}</span>
                   </div>
 
-                  <div className="routine-runs-toolbar">
-                    <div className="routine-runs-filter-pills">
+                  <div className="rt-runs-controls">
+                    <div className="rt-segmented">
                       <button
                         type="button"
-                        className={`routine-run-filter-pill ${runFilter === 'all' ? 'is-active' : ''}`}
+                        className={`rt-seg-btn ${runFilter === 'all' ? 'is-active' : ''}`}
                         onClick={() => setRunFilter('all')}
                       >
                         全部
                       </button>
                       <button
                         type="button"
-                        className={`routine-run-filter-pill ${runFilter === 'abnormal' ? 'is-active' : ''}`}
+                        className={`rt-seg-btn ${runFilter === 'abnormal' ? 'is-active' : ''}`}
                         onClick={() => setRunFilter('abnormal')}
                       >
                         仅异常
-                      </button>
-                      <button
-                        type="button"
-                        className={`routine-run-filter-pill ${runFilter === 'quiet' ? 'is-active' : ''}`}
-                        onClick={() => setRunFilter('quiet')}
-                      >
-                        静默
                       </button>
                     </div>
 
@@ -936,24 +806,26 @@ export const RoutinesView: React.FC = () => {
                       type="button"
                       onClick={() => loadRuns(activeRoutine.id)}
                       disabled={isRefreshingRuns}
-                      className="routine-runs-refresh-btn"
+                      className="rt-icon-refresh"
+                      title="刷新执行记录"
+                      aria-label="刷新执行记录"
                     >
-                      <RefreshCw size={12} className={isRefreshingRuns ? 'spin' : ''} /> 刷新
+                      <RefreshCw size={13} className={isRefreshingRuns ? 'spin' : ''} />
                     </button>
                   </div>
                 </div>
 
                 {filteredRuns.length === 0 ? (
-                  <div className="routine-runs-empty">
+                  <div className="rt-runs-empty">
                     {runs.length === 0
-                      ? '暂无执行流水记录，可点击上方「立即运行」或等待定时调度触发。'
-                      : '当前筛选条件下没有匹配的执行记录。'}
+                      ? '暂无执行记录，点击右上角「立即运行」或等待周期触发。'
+                      : '当前筛选下无异常记录。'}
                   </div>
                 ) : (
-                  <div className="routine-runs-list">
+                  <div className="rt-runs-table">
                     {filteredRuns.map((run) => {
                       const isExpanded = expandedRunIds.has(run.id);
-                      const hasToolCalls = run.toolCalls && run.toolCalls.length > 0;
+                      const hasToolCalls = Boolean(run.toolCalls && run.toolCalls.length > 0);
                       const isRunning = run.status === 'running';
                       const isErrorState =
                         run.status === 'failed' ||
@@ -963,142 +835,130 @@ export const RoutinesView: React.FC = () => {
                         ? Math.max(0, Math.round((nowTick - run.startedAt) / 1000))
                         : null;
                       const reportContent = run.output || run.error || '';
+                      const triggerLabel =
+                        run.triggerSource === 'schedule'
+                          ? '定时触发'
+                          : run.triggerSource === 'webhook'
+                          ? 'Webhook'
+                          : '手动触发';
 
                       return (
-                        <div key={run.id} className="routine-run-card">
+                        <div key={run.id} className="rt-run-row">
                           <div
-                            className={`routine-run-summary-row ${isExpanded ? 'is-expanded' : ''}`}
+                            className="rt-run-row-head"
+                            onClick={() => toggleRunExpand(run.id)}
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={isExpanded}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleRunExpand(run.id);
+                              }
+                            }}
                           >
-                            <div className="routine-run-main-info">
+                            <div className="rt-run-row-left">
                               {run.status === 'success' ? (
-                                <CheckCircle size={17} className="routine-run-status-icon is-success" />
+                                <CheckCircle2 size={16} className="rt-run-icon is-success" />
                               ) : isRunning ? (
-                                <Loader2 size={17} className="spin routine-run-status-icon is-running" />
+                                <Loader2 size={16} className="spin rt-run-icon is-running" />
                               ) : run.status === 'cancelled' ? (
-                                <Square size={15} className="routine-run-status-icon is-cancelled" />
+                                <Square size={14} className="rt-run-icon is-cancelled" />
+                              ) : run.status === 'timeout' ? (
+                                <Clock size={16} className="rt-run-icon is-failed" />
                               ) : (
-                                <XCircle size={17} className="routine-run-status-icon is-failed" />
+                                <XCircle size={16} className="rt-run-icon is-failed" />
                               )}
 
-                              <div className="routine-run-text-col">
-                                <div className="routine-run-summary-line">
-                                  <span
-                                    title={run.summary || run.error || ''}
-                                    className="routine-run-title"
-                                  >
-                                    {isRunning
-                                      ? '正在沙箱中执行巡检...'
-                                      : run.summary ||
-                                        (run.status === 'success'
-                                          ? '巡检完成'
-                                          : run.error || STATUS_LABELS[run.status])}
+                              <div className="rt-run-summary-wrap">
+                                <div className="rt-run-summary-text">
+                                  {isRunning
+                                    ? '正在执行...'
+                                    : run.summary ||
+                                      (run.status === 'success'
+                                        ? '执行完成'
+                                        : run.error || STATUS_LABELS[run.status])}
+                                </div>
+
+                                <div className="rt-run-meta-line">
+                                  <span>{formatTime(run.startedAt)}</span>
+                                  <span>·</span>
+                                  <span>
+                                    {isRunning && elapsedSeconds !== null
+                                      ? `已运行 ${elapsedSeconds}s`
+                                      : run.durationMs !== undefined
+                                      ? `${(run.durationMs / 1000).toFixed(1)}s`
+                                      : '-'}
                                   </span>
-                                  <span className={`routine-run-state-badge is-${run.status}`}>
-                                    {STATUS_LABELS[run.status] || run.status}
-                                  </span>
-                                  {run.quiet && (
-                                    <span className="routine-run-quiet-badge">静默无异常</span>
-                                  )}
-                                  {(run.attempt || 1) > 1 && (
-                                    <span className="routine-run-source-badge">
-                                      第 {run.attempt}/{run.maxAttempts || run.attempt} 次尝试
+                                  <span>·</span>
+                                  <span>{triggerLabel}</span>
+                                  {run.quiet && <span className="rt-run-tag">静默</span>}
+                                  {isErrorState && (
+                                    <span className="rt-run-tag is-error">
+                                      {STATUS_LABELS[run.status]}
                                     </span>
                                   )}
-                                  <span className="routine-run-source-badge">
-                                    {run.triggerSource === 'schedule'
-                                      ? '⏰ 定时'
-                                      : run.triggerSource === 'webhook'
-                                      ? '⚡ Webhook'
-                                      : '👤 手动'}
-                                  </span>
-                                </div>
-                                <div className="routine-run-meta-line">
-                                  <span>{formatTime(run.startedAt)}</span>
-                                  {isRunning && elapsedSeconds !== null && (
-                                    <span> · 已运行 {elapsedSeconds}s</span>
+                                  {run.status === 'cancelled' && (
+                                    <span className="rt-run-tag is-warn">已中止</span>
                                   )}
-                                  {!isRunning && run.durationMs !== undefined && (
-                                    <span> · 耗时 {(run.durationMs / 1000).toFixed(1)}s</span>
-                                  )}
-                                  {hasToolCalls && (
-                                    <span> · 调用了 {run.toolCalls?.length} 个工具</span>
+                                  {(run.attempt || 1) > 1 && (
+                                    <span className="rt-run-tag">
+                                      第 {run.attempt}/{run.maxAttempts || run.attempt} 次尝试
+                                    </span>
                                   )}
                                 </div>
                               </div>
                             </div>
 
-                            <div className="routine-run-actions">
+                            <div
+                              className="rt-run-row-right"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {isRunning && (
                                 <button
                                   type="button"
                                   onClick={() => handleCancelRun(run.id)}
                                   disabled={isCancelling}
-                                  className="btn-secondary routine-run-stop-btn"
-                                  title="中止本次执行"
+                                  className="rt-run-stop-btn"
                                 >
-                                  <Square size={11} fill="currentColor" />
-                                  <span>停止</span>
-                                </button>
-                              )}
-                              {run.sessionId && !isRunning && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    selectSession(run.sessionId!);
-                                    setTab('chat');
-                                  }}
-                                  className="routine-run-expand-btn"
-                                  title="在对话工作台打开本次执行完整会话"
-                                >
-                                  <MessageSquare size={11} />
-                                  <span>查看会话</span>
-                                </button>
-                              )}
-                              {isErrorState && (
-                                <button
-                                  type="button"
-                                  onClick={handleRunNow}
-                                  disabled={isTriggering}
-                                  className="btn-secondary routine-run-retry-btn"
-                                  title="重新触发一次此例行任务"
-                                >
-                                  <RefreshCw size={11} className={isTriggering ? 'spin' : ''} />
-                                  <span>重试</span>
+                                  停止
                                 </button>
                               )}
                               <button
                                 type="button"
+                                className="rt-run-chevron-btn"
                                 onClick={() => toggleRunExpand(run.id)}
-                                className="routine-run-expand-btn"
+                                aria-label={isExpanded ? '收起详情' : '展开详情'}
                               >
-                                {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                                <span>{isExpanded ? '收起' : '详情'}</span>
+                                {isExpanded ? (
+                                  <ChevronDown size={15} />
+                                ) : (
+                                  <ChevronRight size={15} />
+                                )}
                               </button>
                             </div>
                           </div>
 
-                          {/* 展开的详情输出与工具调用链 */}
                           {isExpanded && (
-                            <div className="routine-run-details">
-                              {hasToolCalls && (
-                                <div className="routine-run-trace-wrap">
-                                  <ToolTrace
-                                    tools={(run.toolCalls || []).map((tc: any) => ({
-                                      tool: tc.tool,
-                                      params: tc.args,
-                                      result: tc.output,
-                                      status: 'done',
-                                    }))}
-                                  />
-                                </div>
-                              )}
-
-                              <div className="routine-run-output-header">
-                                <span className="routine-run-output-title">产出报告与执行结论</span>
+                            <div className="rt-run-row-body">
+                              <div className="rt-run-body-actions">
+                                {run.sessionId && !isRunning && (
+                                  <button
+                                    type="button"
+                                    className="rt-text-btn"
+                                    onClick={() => {
+                                      selectSession(run.sessionId!);
+                                      setTab('chat');
+                                    }}
+                                  >
+                                    <MessageSquare size={12} />
+                                    <span>查看完整会话</span>
+                                  </button>
+                                )}
                                 {reportContent && !isRunning && (
                                   <button
                                     type="button"
-                                    className="routine-instructions-copy-btn"
+                                    className="rt-text-btn"
                                     onClick={() =>
                                       handleCopyText(`run_${run.id}`, reportContent, '执行报告')
                                     }
@@ -1113,24 +973,46 @@ export const RoutinesView: React.FC = () => {
                                     </span>
                                   </button>
                                 )}
+                                {(isErrorState || run.status === 'cancelled') && (
+                                  <button
+                                    type="button"
+                                    className="rt-text-btn"
+                                    onClick={handleRunNow}
+                                    disabled={isTriggering}
+                                  >
+                                    <RefreshCw size={12} className={isTriggering ? 'spin' : ''} />
+                                    <span>重新运行</span>
+                                  </button>
+                                )}
                               </div>
 
+                              {hasToolCalls && (
+                                <div className="rt-run-trace-wrap">
+                                  <ToolTrace
+                                    tools={(run.toolCalls || []).map((tc: any) => ({
+                                      tool: tc.tool,
+                                      params: tc.args,
+                                      result: tc.output,
+                                      status: 'done',
+                                    }))}
+                                  />
+                                </div>
+                              )}
+
                               {isRunning ? (
-                                <div className="routine-run-output-pre">
-                                  <div className="routine-run-running-msg">
-                                    <Loader2 size={14} className="spin" />
-                                    <span>
-                                      数字员工正在受控沙箱中执行任务（已运行 {elapsedSeconds}s）...
-                                    </span>
-                                  </div>
+                                <div className="rt-run-running-note">
+                                  <Loader2 size={14} className="spin" />
+                                  <span>
+                                    正在沙箱中执行任务（已运行 {elapsedSeconds}s）...
+                                  </span>
                                 </div>
                               ) : run.output ? (
                                 <div
-                                  className="markdown-body routine-run-markdown"
+                                  className="markdown-body rt-run-markdown"
                                   dangerouslySetInnerHTML={{ __html: renderMarkdown(run.output) }}
                                 />
                               ) : (
-                                <pre className="routine-run-output-pre">
+                                <pre className="rt-run-error-pre">
                                   {run.error || '无输出信息'}
                                 </pre>
                               )}
@@ -1141,7 +1023,7 @@ export const RoutinesView: React.FC = () => {
                     })}
                   </div>
                 )}
-              </div>
+              </section>
             </div>
           )}
         </main>
@@ -1151,7 +1033,7 @@ export const RoutinesView: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingRoutineId ? '编辑例行自动化任务' : '新建例行自动化任务'}
+        title={editingRoutineId ? '编辑定时任务' : '新建定时任务'}
         icon={<Clock size={18} />}
         footer={
           <div className="modal-actions-bar">
@@ -1159,247 +1041,244 @@ export const RoutinesView: React.FC = () => {
               取消
             </button>
             <button type="button" className="btn-primary" onClick={handleSaveRoutine}>
-              {editingRoutineId ? '保存修改' : '保存并启动调度'}
+              {editingRoutineId ? '保存修改' : '创建并启用'}
             </button>
           </div>
         }
       >
-        <div className="routine-modal-container">
-          {!editingRoutineId && (
-            <div className="routine-template-strip">
-              <span className="routine-ai-chips-label">常用模板:</span>
-              {QUICK_TEMPLATES.map((tpl) => (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  className="routine-ai-chip-btn"
-                  onClick={() => applyTemplate(tpl)}
-                >
-                  {tpl.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="routine-modal-form-group">
-            <div className="routine-form-row-2col">
-              <div className="form-group">
-                <label className="form-label">任务名称 *</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="例如：工作站资源与磁盘空间健康巡检"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">指派执行数字员工 *</label>
-                <select
-                  className="form-control"
-                  value={formAgentId}
-                  onChange={(e) => setFormAgentId(e.target.value)}
-                >
-                  {bots.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.role || '数字员工'})
-                    </option>
-                  ))}
-                </select>
-              </div>
+        <div className="rt-modal-form">
+          <div className="routine-form-row-2col">
+            <div className="form-group">
+              <label className="form-label">任务名称</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="例如：每日磁盘与服务巡检"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+              />
             </div>
 
             <div className="form-group">
-              <label className="form-label">任务执行指引 (Prompt 指令) *</label>
-              <textarea
+              <label className="form-label">执行员工</label>
+              <select
                 className="form-control"
-                rows={3}
-                placeholder="请描述数字员工在沙箱内需要执行的检查步骤、判断依据以及输出格式；若无异常可提示在结尾标注【无异常】实现静默..."
-                value={formPrompt}
-                onChange={(e) => setFormPrompt(e.target.value)}
-              />
-            </div>
-
-            <div className="routine-schedule-section">
-              <div className="routine-schedule-section-head">
-                <label className="form-label">调度周期与时区</label>
-                <select
-                  className="form-control routine-tz-select"
-                  value={formTimezone}
-                  onChange={(e) => setFormTimezone(e.target.value)}
-                  aria-label="调度时区"
-                >
-                  {TIMEZONE_OPTIONS.map((tz) => (
-                    <option key={tz.value} value={tz.value}>
-                      {tz.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <SchedulePicker
-                value={formCron}
-                timezone={formTimezone}
-                onChange={(nextCron, kind) => {
-                  setFormCron(nextCron);
-                  if (kind) setFormScheduleKind(kind);
-                }}
-              />
-            </div>
-
-            {/* 折叠高级策略区 */}
-            <div className="routine-advanced-wrap">
-              <button
-                type="button"
-                className="schedule-ai-advanced-toggle"
-                onClick={() => setShowAdvancedPolicies((prev) => !prev)}
-                aria-expanded={showAdvancedPolicies}
+                value={formAgentId}
+                onChange={(e) => setFormAgentId(e.target.value)}
               >
-                <span className="routine-advanced-toggle-title">
-                  <SlidersHorizontal size={13} />
-                  高级策略（交付渠道、并发队列、超时、重试、熔断、Misfire）
-                </span>
-                {showAdvancedPolicies ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </button>
+                {bots.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.role || '数字员工'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-              {showAdvancedPolicies && (
-                <div className="routine-advanced-panel">
-                  <div className="routine-form-row-2col">
-                    <div className="form-group">
-                      <label className="form-label">结果交付渠道</label>
-                      <select
-                        className="form-control"
-                        value={formDeliverTo}
-                        onChange={(e) => setFormDeliverTo(e.target.value as DeliverTarget)}
-                      >
-                        <option value="feed">团队动态流 (Feed)</option>
-                        <option value="silent">完全静默 (仅写日志)</option>
-                        <option value="im_webhook">外部 IM / Webhook</option>
-                        <option value="all">全渠道推送</option>
-                      </select>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">并发防重叠策略</label>
-                      <select
-                        className="form-control"
-                        value={formOverlap}
-                        onChange={(e) => setFormOverlap(e.target.value as OverlapPolicy)}
-                      >
-                        <option value="skip">跳过本次 (Skip)</option>
-                        <option value="queue">排队等待 (Queue)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {(formDeliverTo === 'im_webhook' || formDeliverTo === 'all') && (
-                    <div className="form-group">
-                      <label className="form-label">外部回调 Webhook URL（可选）</label>
-                      <input
-                        type="url"
-                        className="form-control"
-                        placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
-                        value={formWebhookUrl}
-                        onChange={(e) => setFormWebhookUrl(e.target.value)}
-                      />
-                    </div>
-                  )}
-
-                  <div className="routine-form-row-2col">
-                    <div className="form-group">
-                      <label className="form-label">错过窗口策略 (Misfire)</label>
-                      <select
-                        className="form-control"
-                        value={formMisfirePolicy}
-                        onChange={(e) => setFormMisfirePolicy(e.target.value as MisfirePolicy)}
-                      >
-                        <option value="skip">跳过过期触发 (推荐)</option>
-                        <option value="run_once">服务恢复后补跑一次</option>
-                      </select>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">专属模型覆盖（可选）</label>
-                      <input
-                        type="text"
-                        list="routine-model-choices"
-                        className="form-control"
-                        placeholder="留空则跟随员工默认模型"
-                        value={formModelOverride}
-                        onChange={(e) => setFormModelOverride(e.target.value)}
-                      />
-                      <datalist id="routine-model-choices">
-                        {modelChoices.map((m) => (
-                          <option key={m} value={m} />
-                        ))}
-                      </datalist>
-                    </div>
-                  </div>
-
-                  <div className="routine-form-row-4col">
-                    <div className="form-group">
-                      <label className="form-label">超时限制 (秒)</label>
-                      <input
-                        type="number"
-                        min={10}
-                        max={3600}
-                        className="form-control"
-                        value={formTimeoutSeconds}
-                        onChange={(e) => setFormTimeoutSeconds(Number(e.target.value))}
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">失败重试 (0-3)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={3}
-                        className="form-control"
-                        value={formMaxRetries}
-                        onChange={(e) => setFormMaxRetries(Number(e.target.value))}
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">熔断阈值 (次)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        className="form-control"
-                        value={formBreakerThreshold}
-                        onChange={(e) => setFormBreakerThreshold(Number(e.target.value))}
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">错峰抖动 (秒)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={60}
-                        className="form-control"
-                        value={formJitterSeconds}
-                        onChange={(e) => setFormJitterSeconds(Number(e.target.value))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-group-checkbox">
-                    <input
-                      type="checkbox"
-                      id="deleteAfterRun"
-                      checked={formDeleteAfterRun}
-                      onChange={(e) => setFormDeleteAfterRun(e.target.checked)}
-                    />
-                    <label htmlFor="deleteAfterRun" className="checkbox-label">
-                      单次定时完成后自动归档暂停 (适用于 @at 单次任务)
-                    </label>
-                  </div>
+          <div className="form-group">
+            <div className="rt-field-label-row">
+              <label className="form-label">执行指令</label>
+              {!editingRoutineId && (
+                <div className="rt-template-links">
+                  {QUICK_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      type="button"
+                      className="rt-template-link"
+                      onClick={() => applyTemplate(tpl)}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
+            <textarea
+              className="form-control"
+              rows={3}
+              placeholder="描述需要执行的操作、排查要点与汇报方式；若正常无需通知可要求在结尾注明【无异常】"
+              value={formPrompt}
+              onChange={(e) => setFormPrompt(e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <div className="rt-field-label-row">
+              <label className="form-label">执行时间</label>
+              <select
+                className="form-control routine-tz-select"
+                value={formTimezone}
+                onChange={(e) => setFormTimezone(e.target.value)}
+                aria-label="调度时区"
+              >
+                {TIMEZONE_OPTIONS.map((tz) => (
+                  <option key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <SchedulePicker
+              value={formCron}
+              timezone={formTimezone}
+              onChange={(nextCron, kind) => {
+                setFormCron(nextCron);
+                if (kind) setFormScheduleKind(kind);
+              }}
+            />
+          </div>
+
+          <div className="routine-advanced-wrap">
+            <button
+              type="button"
+              className="schedule-ai-advanced-toggle"
+              onClick={() => setShowAdvancedPolicies((prev) => !prev)}
+              aria-expanded={showAdvancedPolicies}
+            >
+              <span className="routine-advanced-toggle-title">
+                <SlidersHorizontal size={13} />
+                更多设置
+              </span>
+              {showAdvancedPolicies ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </button>
+
+            {showAdvancedPolicies && (
+              <div className="routine-advanced-panel">
+                <div className="routine-form-row-2col">
+                  <div className="form-group">
+                    <label className="form-label">结果交付渠道</label>
+                    <select
+                      className="form-control"
+                      value={formDeliverTo}
+                      onChange={(e) => setFormDeliverTo(e.target.value as DeliverTarget)}
+                    >
+                      <option value="feed">团队动态流 (Feed)</option>
+                      <option value="silent">完全静默 (仅写日志)</option>
+                      <option value="im_webhook">外部 IM / Webhook</option>
+                      <option value="all">全渠道推送</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">并发重叠处理</label>
+                    <select
+                      className="form-control"
+                      value={formOverlap}
+                      onChange={(e) => setFormOverlap(e.target.value as OverlapPolicy)}
+                    >
+                      <option value="skip">跳过本次</option>
+                      <option value="queue">排队等待</option>
+                    </select>
+                  </div>
+                </div>
+
+                {(formDeliverTo === 'im_webhook' || formDeliverTo === 'all') && (
+                  <div className="form-group">
+                    <label className="form-label">外部回调 Webhook URL（可选）</label>
+                    <input
+                      type="url"
+                      className="form-control"
+                      placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                      value={formWebhookUrl}
+                      onChange={(e) => setFormWebhookUrl(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div className="routine-form-row-2col">
+                  <div className="form-group">
+                    <label className="form-label">错过窗口策略</label>
+                    <select
+                      className="form-control"
+                      value={formMisfirePolicy}
+                      onChange={(e) => setFormMisfirePolicy(e.target.value as MisfirePolicy)}
+                    >
+                      <option value="skip">跳过过期触发</option>
+                      <option value="run_once">服务恢复后补跑一次</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">专属模型覆盖（可选）</label>
+                    <input
+                      type="text"
+                      list="routine-model-choices"
+                      className="form-control"
+                      placeholder="留空则跟随员工默认模型"
+                      value={formModelOverride}
+                      onChange={(e) => setFormModelOverride(e.target.value)}
+                    />
+                    <datalist id="routine-model-choices">
+                      {modelChoices.map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+
+                <div className="routine-form-row-4col">
+                  <div className="form-group">
+                    <label className="form-label">超时 (秒)</label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={3600}
+                      className="form-control"
+                      value={formTimeoutSeconds}
+                      onChange={(e) => setFormTimeoutSeconds(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">重试次数</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={3}
+                      className="form-control"
+                      value={formMaxRetries}
+                      onChange={(e) => setFormMaxRetries(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">熔断阈值</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      className="form-control"
+                      value={formBreakerThreshold}
+                      onChange={(e) => setFormBreakerThreshold(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">抖动 (秒)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={60}
+                      className="form-control"
+                      value={formJitterSeconds}
+                      onChange={(e) => setFormJitterSeconds(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group-checkbox">
+                  <input
+                    type="checkbox"
+                    id="deleteAfterRun"
+                    checked={formDeleteAfterRun}
+                    onChange={(e) => setFormDeleteAfterRun(e.target.checked)}
+                  />
+                  <label htmlFor="deleteAfterRun" className="checkbox-label">
+                    单次定时完成后自动暂停归档
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </Modal>
