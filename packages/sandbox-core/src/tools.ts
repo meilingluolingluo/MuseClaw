@@ -52,7 +52,10 @@ export interface GoalProvider {
   create?: (data: {
     title: string;
     description?: string;
-    steps?: string[];
+    mode?: 'delivery' | 'watch' | 'portfolio';
+    successCriteria?: string;
+    metric?: { label: string; current: string; target: string; unit?: string };
+    steps?: Array<string | { title: string; owner?: 'agent' | 'human'; assigneeBotId?: string }>;
     category?: string;
     due?: string;
     cadence?: string;
@@ -60,11 +63,25 @@ export interface GoalProvider {
     userId?: string;
     notes?: string;
   }) => any;
-  list?: (filter?: { botId?: string; status?: any; category?: string; userId?: string }) => any[];
+  list?: (filter?: { botId?: string; status?: any; category?: string; mode?: string; userId?: string }) => any[];
   get?: (id: string) => any;
   update?: (id: string, updates: any) => any;
   updateStep?: (id: string, stepIdOrIndex: string | number, status?: any, options?: any) => any;
-  addStep?: (id: string, title: string, description?: string) => any;
+  addStep?: (
+    id: string,
+    title: string,
+    description?: string,
+    verificationCommand?: string,
+    options?: { owner?: 'agent' | 'human'; assigneeBotId?: string }
+  ) => any;
+  addArtifact?: (
+    id: string,
+    artifact: { title: string; kind?: 'file' | 'doc' | 'link' | 'note' | 'report'; ref?: string; summary?: string; stepId?: string }
+  ) => any;
+  removeArtifact?: (id: string, artifactId: string) => any;
+  linkRoutine?: (id: string, routineId: string) => any;
+  unlinkRoutine?: (id: string, routineId: string) => any;
+  bindSession?: (id: string, sessionId: string) => any;
   propose?: (id: string, reason: string, steps: string[]) => any;
   setStatus?: (id: string, status: any) => any;
   appendNote?: (id: string, note: string) => any;
@@ -435,30 +452,52 @@ export function createDefaultTools(options?: {
         }
       }
     },
-    // 长周期跨会话目标与计划推进管理
+    // 跨会话目标与结果交付管理
     {
       name: 'goals',
-      description: '管理用户的长周期跨会话目标与分步推进计划。操作: `create` (title, description, steps[], category, due, cadence), `list` (status, category), `get` (goal_id), `update` (goal_id, title, description, category, due, cadence), `update_step` (goal_id, step_index, status, note), `add_step` (goal_id, title), `propose` (goal_id, reason, steps: 建议修订的新后续步骤), `set_status` (goal_id, status: active|paused|done|cancelled), `note` (goal_id, note)。当用户提出多步骤、中长周期目标或项目时，创建或更新目标；并随着推进及时标记步骤状态与成果。',
+      description: '管理用户的跨会话目标、验收标准与真实交付物。支持三种模式：delivery(阶段交付)、watch(追踪观察)、portfolio(长期沉淀)。操作: `create`, `list`, `get`, `update`, `update_step`, `add_step`, `add_artifact` (登记成果/文件/报告), `propose`, `set_status`, `note`。默认不设定时周期，专注结果交付与产出沉淀。',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['create', 'list', 'get', 'update', 'update_step', 'add_step', 'propose', 'set_status', 'note'],
+            enum: ['create', 'list', 'get', 'update', 'update_step', 'add_step', 'add_artifact', 'propose', 'set_status', 'note'],
             description: '操作动作'
           },
           goal_id: { type: 'string', description: '目标 ID' },
           title: { type: 'string', description: '目标名称' },
           description: { type: 'string', description: '目标描述与背景说明' },
+          mode: {
+            type: 'string',
+            enum: ['delivery', 'watch', 'portfolio'],
+            description: '目标形态：delivery(阶段交付), watch(追踪观察), portfolio(长期沉淀)'
+          },
+          success_criteria: { type: 'string', description: '终局验收标准或达标条件' },
+          metric: {
+            type: 'object',
+            description: '可选量化指标 { label, current, target, unit }',
+            properties: {
+              label: { type: 'string' },
+              current: { type: 'string' },
+              target: { type: 'string' },
+              unit: { type: 'string' }
+            }
+          },
           steps: { type: 'array', items: { type: 'string' }, description: '步骤标题列表' },
+          step_owner: { type: 'string', enum: ['agent', 'human'], description: '步骤责任方：agent 或 human' },
+          assignee_bot_id: { type: 'string', description: '步骤指派的数字员工 ID' },
+          artifact_title: { type: 'string', description: '交付物标题 (add_artifact 时使用)' },
+          artifact_kind: { type: 'string', enum: ['file', 'doc', 'link', 'note', 'report'], description: '交付物类型' },
+          artifact_ref: { type: 'string', description: '交付物路径或链接' },
+          artifact_summary: { type: 'string', description: '交付物要点摘要' },
           category: {
             type: 'string',
-            description: '领域分类: career(职业), learning(学习), engineering(研发), finance(财务), health(健康), relationships(协作), home(日常), travel(差旅), creative(创意), other(其他)'
+            description: '领域分类: delivery(项目交付), engineering(研发技术), research(调研分析), operations(业务运营), growth(成长沉淀), other(通用)'
           },
           due: { type: 'string', description: '目标截止日期 (YYYY-MM-DD)' },
           cadence: {
             type: 'string',
-            description: '提醒与巡检周期，如 "daily 09:00", "weekdays 09:30", "weekly mon 10:00", "monthly 1 09:00" 或 ""(不提醒)'
+            description: '可选提醒与巡检周期，默认为空("")表示按需推进'
           },
           step_index: { type: 'integer', description: '步骤序号 (1-based)' },
           step_id: { type: 'string', description: '步骤 ID (如 s_1)' },
@@ -470,7 +509,7 @@ export function createDefaultTools(options?: {
       },
       execute: async (args, context) => {
         if (!goalProvider) {
-          return { error: '长周期目标服务提供者未初始化' };
+          return { error: '目标服务提供者未初始化' };
         }
         const action = String(args.action || '');
         const targetBot = context?.botId || 'muse';
@@ -482,10 +521,13 @@ export function createDefaultTools(options?: {
             const goal = goalProvider.create?.({
               title: String(args.title),
               description: args.description ? String(args.description) : '',
+              mode: (args.mode as any) || 'delivery',
+              successCriteria: args.success_criteria ? String(args.success_criteria) : undefined,
+              metric: args.metric && typeof args.metric === 'object' ? (args.metric as any) : undefined,
               steps: Array.isArray(args.steps) ? args.steps.map(String) : [],
               category: args.category ? String(args.category) : 'other',
               due: args.due ? String(args.due) : '',
-              cadence: args.cadence !== undefined ? String(args.cadence) : 'weekdays 09:30',
+              cadence: args.cadence !== undefined ? String(args.cadence) : '',
               botId: targetBot,
               userId: targetUser,
               notes: args.note ? String(args.note) : ''
@@ -501,6 +543,7 @@ export function createDefaultTools(options?: {
             const list = goalProvider.list?.({
               status: args.status ? (String(args.status) as any) : undefined,
               category: args.category ? String(args.category) : undefined,
+              mode: args.mode ? String(args.mode) : undefined,
               botId: targetBot,
               userId: targetUser
             }) || [];
@@ -528,6 +571,9 @@ export function createDefaultTools(options?: {
             const updates: Record<string, any> = {};
             if (args.title !== undefined) updates.title = String(args.title);
             if (args.description !== undefined) updates.description = String(args.description);
+            if (args.mode !== undefined) updates.mode = String(args.mode);
+            if (args.success_criteria !== undefined) updates.successCriteria = String(args.success_criteria);
+            if (args.metric !== undefined) updates.metric = args.metric;
             if (args.category !== undefined) updates.category = String(args.category);
             if (args.due !== undefined) updates.due = String(args.due);
             if (args.cadence !== undefined) updates.cadence = String(args.cadence);
@@ -556,12 +602,39 @@ export function createDefaultTools(options?: {
             if (stepsToAdd.length === 0) return { error: 'add_step 需要提供 title 或 steps 数组' };
             let updatedGoal: any;
             for (const stepTitle of stepsToAdd) {
-              updatedGoal = goalProvider.addStep?.(goalId, stepTitle, args.description ? String(args.description) : undefined);
+              updatedGoal = goalProvider.addStep?.(
+                goalId,
+                stepTitle,
+                args.description ? String(args.description) : undefined,
+                undefined,
+                {
+                  owner: args.step_owner === 'human' ? 'human' : 'agent',
+                  assigneeBotId: args.assignee_bot_id ? String(args.assignee_bot_id) : undefined
+                }
+              );
             }
             if (!updatedGoal) return { error: `增加步骤失败` };
             return {
               success: true,
               message: `已增加 ${stepsToAdd.length} 个步骤`,
+              output: goalProvider.render ? goalProvider.render(updatedGoal) : updatedGoal
+            };
+          }
+
+          if (action === 'add_artifact') {
+            const artTitle = args.artifact_title || args.title;
+            if (!artTitle) return { error: 'add_artifact 需要提供 artifact_title 参数' };
+            const updatedGoal = goalProvider.addArtifact?.(goalId, {
+              title: String(artTitle),
+              kind: (args.artifact_kind as any) || 'doc',
+              ref: args.artifact_ref ? String(args.artifact_ref) : undefined,
+              summary: args.artifact_summary ? String(args.artifact_summary) : undefined,
+              stepId: args.step_id ? String(args.step_id) : undefined
+            });
+            if (!updatedGoal) return { error: `登记交付物失败，未找到目标 ${goalId}` };
+            return {
+              success: true,
+              message: `已登记交付物「${artTitle}」`,
               output: goalProvider.render ? goalProvider.render(updatedGoal) : updatedGoal
             };
           }

@@ -1,7 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Goal, GoalStep, GoalProposal, GoalStatus, StepStatus } from './types.ts';
+import type {
+  Goal,
+  GoalStep,
+  GoalProposal,
+  GoalStatus,
+  StepStatus,
+  GoalMode,
+  GoalMetric,
+  GoalArtifact,
+  StepOwner
+} from './types.ts';
 import { cadenceToCron, computeNextCheckIn } from './cadence.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,13 +57,15 @@ export class GoalStore {
     try {
       const list: Goal[] = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
       for (const g of list) {
+        if (!g.mode) g.mode = 'delivery';
+        if (!Array.isArray(g.artifacts)) g.artifacts = [];
+        if (!Array.isArray(g.linkedRoutineIds)) g.linkedRoutineIds = [];
+        if (!Array.isArray(g.steps)) g.steps = [];
         g.progress = this.computeProgress(g);
-        // 保证 steps 带有 idx 属性
-        if (Array.isArray(g.steps)) {
-          g.steps.forEach((s, i) => {
-            if (!s.idx) s.idx = i + 1;
-          });
-        }
+        g.steps.forEach((s, i) => {
+          if (!s.idx) s.idx = i + 1;
+          if (!s.owner) s.owner = 'agent';
+        });
         this.goals.set(g.id, g);
       }
     } catch (err: any) {
@@ -72,15 +84,21 @@ export class GoalStore {
     fs.renameSync(tmp, this.filePath);
   }
 
-  public list(filter?: { botId?: string; status?: GoalStatus; category?: string; userId?: string }): Goal[] {
+  public list(
+    filter?: { botId?: string; status?: GoalStatus; category?: string; userId?: string; mode?: GoalMode } | GoalStatus
+  ): Goal[] {
+    const normalizedFilter = typeof filter === 'string' ? { status: filter } : filter;
     let list = Array.from(this.goals.values()).map((g) => {
       g.progress = this.computeProgress(g);
       return g;
     });
-    if (filter?.botId) list = list.filter((g) => g.botId === filter.botId);
-    if (filter?.status) list = list.filter((g) => g.status === filter.status);
-    if (filter?.category) list = list.filter((g) => g.category?.toLowerCase() === filter.category?.toLowerCase());
-    if (filter?.userId) list = list.filter((g) => g.userId === filter.userId);
+    if (normalizedFilter?.botId) list = list.filter((g) => g.botId === normalizedFilter.botId);
+    if (normalizedFilter?.status) list = list.filter((g) => g.status === normalizedFilter.status);
+    if (normalizedFilter?.mode) list = list.filter((g) => (g.mode || 'delivery') === normalizedFilter.mode);
+    if (normalizedFilter?.category) {
+      list = list.filter((g) => g.category?.toLowerCase() === normalizedFilter.category?.toLowerCase());
+    }
+    if (normalizedFilter?.userId) list = list.filter((g) => g.userId === normalizedFilter.userId);
     return list.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -96,6 +114,12 @@ export class GoalStore {
     id?: string;
     title: string;
     description?: string;
+    mode?: GoalMode;
+    successCriteria?: string;
+    metric?: GoalMetric;
+    artifacts?: GoalArtifact[];
+    linkedRoutineIds?: string[];
+    sessionId?: string;
     botId?: string;
     userId?: string;
     category?: string;
@@ -106,7 +130,8 @@ export class GoalStore {
   }): Goal {
     const id = data.id || `goal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const now = Date.now();
-    const cadence = data.cadence !== undefined ? data.cadence : 'weekdays 09:30';
+    const mode: GoalMode = data.mode || 'delivery';
+    const cadence = data.cadence !== undefined ? data.cadence : '';
     const cronExpr = cadence ? cadenceToCron(cadence) : '';
     const nextCheckInAt = cadence ? computeNextCheckIn(cadence) : 0;
 
@@ -118,6 +143,7 @@ export class GoalStore {
           idx: idx + 1,
           title: s.trim(),
           description: s.trim(),
+          owner: 'agent',
           status: 'pending',
           updatedAt: now
         };
@@ -127,6 +153,8 @@ export class GoalStore {
         idx: s.idx || idx + 1,
         title: s.title || `步骤 ${idx + 1}`,
         description: s.description || s.title || '',
+        owner: s.owner || 'agent',
+        assigneeBotId: s.assigneeBotId,
         verificationCommand: s.verificationCommand,
         status: s.status || 'pending',
         note: s.note,
@@ -135,12 +163,13 @@ export class GoalStore {
       };
     });
 
-    if (steps.length === 0) {
+    if (steps.length === 0 && mode !== 'portfolio') {
       steps.push({
         id: 'step_1',
         idx: 1,
-        title: '初始目标梳理与背景准备',
-        description: data.description || data.title,
+        title: mode === 'watch' ? '建立基线并确认观测条件' : '梳理上下文与交付验收方案',
+        description: data.successCriteria || data.description || data.title,
+        owner: 'agent',
         status: 'pending',
         updatedAt: now
       });
@@ -150,6 +179,12 @@ export class GoalStore {
       id,
       title: data.title.trim(),
       description: (data.description || '').trim(),
+      mode,
+      successCriteria: data.successCriteria?.trim() || undefined,
+      metric: data.metric,
+      artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+      linkedRoutineIds: Array.isArray(data.linkedRoutineIds) ? data.linkedRoutineIds : [],
+      sessionId: data.sessionId,
       botId: data.botId || 'muse',
       userId: data.userId || 'user_web',
       category: (data.category || 'other').trim().toLowerCase(),
@@ -168,7 +203,7 @@ export class GoalStore {
     goal.progress = this.computeProgress(goal);
     this.goals.set(id, goal);
     this.save();
-    console.log(`[GoalStore] 创建新长周期目标: ${goal.title} (ID: ${id}, Category: ${goal.category}, Cadence: ${cadence})`);
+    console.log(`[GoalStore] 创建目标: ${goal.title} (ID: ${id}, Mode: ${mode}, Category: ${goal.category}, Cadence: "${cadence}")`);
     return goal;
   }
 
@@ -214,7 +249,8 @@ export class GoalStore {
     goalId: string,
     title: string,
     description?: string,
-    verificationCommand?: string
+    verificationCommand?: string,
+    options?: { owner?: StepOwner; assigneeBotId?: string }
   ): Goal | undefined {
     const goal = this.goals.get(goalId);
     if (!goal) return undefined;
@@ -226,6 +262,8 @@ export class GoalStore {
       idx: nextIdx,
       title: title.trim(),
       description: description?.trim() || title.trim(),
+      owner: options?.owner || 'agent',
+      assigneeBotId: options?.assigneeBotId?.trim() || undefined,
       verificationCommand: verificationCommand?.trim() || undefined,
       status: 'pending',
       updatedAt: Date.now()
@@ -233,6 +271,87 @@ export class GoalStore {
 
     goal.steps.push(newStep);
     goal.progress = this.computeProgress(goal);
+    goal.updatedAt = Date.now();
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 登记目标交付物或证据资产
+   */
+  public addArtifact(
+    goalId: string,
+    artifact: Omit<GoalArtifact, 'id' | 'createdAt'>
+  ): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+    if (!Array.isArray(goal.artifacts)) goal.artifacts = [];
+
+    const entry: GoalArtifact = {
+      id: `art_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      title: artifact.title.trim(),
+      kind: artifact.kind || 'doc',
+      ref: artifact.ref?.trim() || undefined,
+      summary: artifact.summary?.trim() || undefined,
+      stepId: artifact.stepId?.trim() || undefined,
+      createdAt: Date.now()
+    };
+
+    goal.artifacts.push(entry);
+    goal.updatedAt = Date.now();
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 移除目标交付物
+   */
+  public removeArtifact(goalId: string, artifactId: string): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal || !Array.isArray(goal.artifacts)) return undefined;
+    const next = goal.artifacts.filter((a) => a.id !== artifactId);
+    if (next.length === goal.artifacts.length) return undefined;
+    goal.artifacts = next;
+    goal.updatedAt = Date.now();
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 关联例行自动化任务
+   */
+  public linkRoutine(goalId: string, routineId: string): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+    if (!Array.isArray(goal.linkedRoutineIds)) goal.linkedRoutineIds = [];
+    if (!goal.linkedRoutineIds.includes(routineId)) {
+      goal.linkedRoutineIds.push(routineId);
+      goal.updatedAt = Date.now();
+      this.save();
+    }
+    return goal;
+  }
+
+  /**
+   * 解除关联例行自动化任务
+   */
+  public unlinkRoutine(goalId: string, routineId: string): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+    if (!Array.isArray(goal.linkedRoutineIds)) return goal;
+    goal.linkedRoutineIds = goal.linkedRoutineIds.filter((id) => id !== routineId);
+    goal.updatedAt = Date.now();
+    this.save();
+    return goal;
+  }
+
+  /**
+   * 绑定目标专属持久化会话 ID
+   */
+  public bindSession(goalId: string, sessionId: string): Goal | undefined {
+    const goal = this.goals.get(goalId);
+    if (!goal) return undefined;
+    goal.sessionId = sessionId;
     goal.updatedAt = Date.now();
     this.save();
     return goal;
@@ -474,16 +593,26 @@ export class GoalStore {
       blocked: '[!]',
       skipped: '[-]'
     };
-    const meta = [`状态=${goal.status}`, `进度=${goal.progress || 0}%`];
+    const modeLabel = goal.mode === 'watch' ? '追踪观察' : goal.mode === 'portfolio' ? '长期沉淀' : '阶段交付';
+    const meta = [`模式=${modeLabel}`, `状态=${goal.status}`, `进度=${goal.progress || 0}%`];
     if (goal.category) meta.push(`领域=${goal.category}`);
     if (goal.due) meta.push(`截止日期=${goal.due}`);
     if (goal.cadence) meta.push(`巡检周期="${goal.cadence}"`);
+    if (goal.artifacts && goal.artifacts.length > 0) meta.push(`成果=${goal.artifacts.length}`);
 
     const lines = [`目标 ${goal.id}: ${goal.title} (${meta.join(', ')})`];
     if (goal.description) lines.push(`  描述: ${goal.description}`);
+    if (goal.successCriteria) lines.push(`  验收标准: ${goal.successCriteria}`);
+    if (goal.metric) {
+      lines.push(`  量化指标: ${goal.metric.label} (${goal.metric.current} -> ${goal.metric.target}${goal.metric.unit ? ` ${goal.metric.unit}` : ''})`);
+    }
     for (const s of goal.steps || []) {
+      const ownerTag = s.owner === 'human' ? ' [人工]' : s.assigneeBotId ? ` [@${s.assigneeBotId}]` : '';
       const extra = s.note || s.result ? ` · ${s.note || s.result}` : '';
-      lines.push(`  ${icons[s.status] || '[ ]'} ${s.idx}. ${s.title}${extra}`);
+      lines.push(`  ${icons[s.status] || '[ ]'} ${s.idx}. ${s.title}${ownerTag}${extra}`);
+    }
+    if (goal.artifacts && goal.artifacts.length > 0) {
+      lines.push(`  已沉淀成果: ${goal.artifacts.map((a) => `[${a.kind}] ${a.title}`).join('; ')}`);
     }
     if (goal.proposal && goal.proposal.status === 'pending') {
       const pSteps = goal.proposal.proposedSteps.map((x) => (typeof x === 'string' ? x : x.title)).join('; ');

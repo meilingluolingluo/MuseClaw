@@ -93,10 +93,17 @@ export interface Message {
 
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked' | 'skipped';
 
+export type GoalMode = 'delivery' | 'watch' | 'portfolio';
+export type StepOwner = 'agent' | 'human';
+
 export type GoalCategory =
+  | 'delivery'
+  | 'engineering'
+  | 'research'
+  | 'operations'
+  | 'growth'
   | 'career'
   | 'learning'
-  | 'engineering'
   | 'finance'
   | 'health'
   | 'relationships'
@@ -106,11 +113,30 @@ export type GoalCategory =
   | 'other'
   | string;
 
+export interface GoalMetric {
+  label: string;
+  current: string;
+  target: string;
+  unit?: string;
+}
+
+export interface GoalArtifact {
+  id: string;
+  title: string;
+  kind: 'file' | 'doc' | 'link' | 'note' | 'report';
+  ref?: string;
+  summary?: string;
+  stepId?: string;
+  createdAt: number;
+}
+
 export interface GoalStep {
   id: string;
   idx?: number;
   title: string;
   description?: string;
+  owner?: StepOwner;
+  assigneeBotId?: string;
   verificationCommand?: string;
   verificationOutput?: string;
   status: StepStatus;
@@ -133,6 +159,12 @@ export interface Goal {
   id: string;
   title: string;
   description: string;
+  mode?: GoalMode;
+  successCriteria?: string;
+  metric?: GoalMetric;
+  artifacts?: GoalArtifact[];
+  linkedRoutineIds?: string[];
+  sessionId?: string;
   botId?: string;
   userId?: string;
   category?: string;

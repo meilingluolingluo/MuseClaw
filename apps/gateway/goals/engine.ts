@@ -121,10 +121,35 @@ export class GoalEngine {
     }
 
     if (!activeStep) {
+      if ((goal.mode || 'delivery') === 'portfolio' && goal.steps.length === 0) {
+        return {
+          goalId,
+          status: 'done',
+          goalCompleted: false,
+          output: '沉淀型目标无待办步骤，可继续追加成果或归档总结'
+        };
+      }
       goal.status = 'done';
       goal.updatedAt = Date.now();
       this.store.save();
       return { goalId, status: 'done', goalCompleted: true, output: '目标所有步骤均已完成' };
+    }
+
+    // 若步骤归属人工确认且未传入人工补充输入，安全停机等待人工介入
+    if (activeStep.owner === 'human' && !override?.guidance && override?.mockOutput === undefined) {
+      if (activeStep.status !== 'in_progress') {
+        activeStep.status = 'in_progress';
+        activeStep.updatedAt = Date.now();
+        this.store.save();
+      }
+      return {
+        goalId,
+        stepId: activeStep.id,
+        stepTitle: activeStep.title,
+        status: 'in_progress',
+        awaitingHuman: true,
+        output: `步骤 [${activeStep.title}] 需要人工确认或补充输入`
+      };
     }
 
     // 步骤置为 in_progress
@@ -141,17 +166,18 @@ export class GoalEngine {
       const blockMatch = output.match(/(?:^|\n)\s*\[BLOCKED\]:?\s*([^\n]+)/);
       isBlocked = !!blockMatch;
       if (isBlocked) {
-        blockedReason = blockMatch[1].trim() || '执行被阻塞';
+        blockedReason = blockMatch[1].trim().slice(0, 300) || '执行被阻塞';
       }
     } else {
-      let bot = this.botRegistry?.get(goal.botId);
+      const executorBotId = activeStep.assigneeBotId || goal.botId;
+      let bot = this.botRegistry?.get(executorBotId);
       if (!bot) {
         bot = {
-          id: goal.botId,
-          name: goal.botId,
-          system_prompt: '你是一个专注推进企业长周期任务的数字员工。',
+          id: executorBotId,
+          name: executorBotId,
+          system_prompt: '你是一个专注推进目标落地与交付的数字员工。',
           tool_allowlist: ['*'],
-          memory_ns: `bots/${goal.botId}`,
+          memory_ns: `bots/${executorBotId}`,
           enabled: true,
           created_at: Date.now(),
           updated_at: Date.now()
@@ -162,22 +188,41 @@ export class GoalEngine {
         bot = { ...bot, memory: this.botMemory.getMemory(bot.id, goal.userId) };
       }
 
-      let prompt = `【长周期目标自驱推进任务】
+      const recentDone = goal.steps
+        .filter((s) => s.status === 'done' && (s.note || s.result))
+        .slice(-3)
+        .map((s) => `- ${s.title}: ${(s.note || s.result || '').slice(0, 160)}`);
+      const artifactList = (goal.artifacts || []).slice(-6).map((a) => `- [${a.kind}] ${a.title}${a.ref ? ` (${a.ref})` : ''}`);
+
+      const modeLabel = goal.mode === 'watch' ? '追踪观察' : goal.mode === 'portfolio' ? '长期沉淀' : '阶段交付';
+      let prompt = `【目标自驱推进任务 (${modeLabel})】
 目标名称: ${goal.title}
-目标描述: ${goal.description}
-当前执行步骤: [${activeStep.id}] ${activeStep.title}
+目标描述: ${goal.description}`;
+      if (goal.successCriteria) {
+        prompt += `\n终局验收标准: ${goal.successCriteria}`;
+      }
+      if (goal.metric) {
+        prompt += `\n量化指标: ${goal.metric.label} (当前 ${goal.metric.current} -> 目标 ${goal.metric.target}${goal.metric.unit ? ` ${goal.metric.unit}` : ''})`;
+      }
+      prompt += `\n当前执行步骤: [${activeStep.id}] ${activeStep.title}
 步骤详情与预期: ${activeStep.description || activeStep.title}
 完整步骤链条:
-${goal.steps.map((s) => `- [${s.status}] ${s.id}: ${s.title}${s.verificationCommand ? ` (需通过验收脚本: ${s.verificationCommand})` : ''}`).join('\n')}`;
+${goal.steps.map((s) => `- [${s.status}${s.owner === 'human' ? '/人工' : ''}] ${s.id}: ${s.title}${s.verificationCommand ? ` (需通过验收脚本: ${s.verificationCommand})` : ''}`).join('\n')}`;
 
+      if (recentDone.length > 0) {
+        prompt += `\n\n已完成阶段摘要:\n${recentDone.join('\n')}`;
+      }
+      if (artifactList.length > 0) {
+        prompt += `\n\n已沉淀成果清单:\n${artifactList.join('\n')}`;
+      }
       if (override?.guidance) {
         prompt += `\n\n【用户人工补充指引 / 修正要求】:\n${override.guidance}`;
       }
 
       prompt += `\n\n执行要求：
-1. 专注完成当前步骤的具体要求；
+1. 专注完成当前步骤的具体要求，产出可验证的实际结果（如有文件/报告请使用 goals 工具 add_artifact 登记成果）；
 2. 完成时明确输出阶段性成果总结；
-3. 若遭遇外部依赖缺失、权限不足或客观环境阻碍确实无法继续，请在输出单独一行中以 "[BLOCKED]: 具体卡点原因" 开头，并详细说明阻塞原因与建议的后续调整方案。正常未受阻时切勿以 [BLOCKED] 开头。`;
+3. 若遭遇外部依赖缺失、权限不足或客观环境阻碍确实无法继续，请在输出单独一行中以 "[BLOCKED]: 具体卡点原因" 开头，并说明阻塞原因与建议调整方案。正常未受阻时切勿以 [BLOCKED] 开头。`;
 
       const sessionId = `goal_${goal.id}_${activeStep.id}_${Date.now()}`;
       const loop = runAgentLoop(
@@ -189,7 +234,7 @@ ${goal.steps.map((s) => `- [${s.status}] ${s.id}: ${s.title}${s.verificationComm
         {
           sessionId,
           userId: goal.userId,
-          botId: goal.botId,
+          botId: executorBotId,
           profile: bot,
           maxSteps: 6
         }
@@ -204,7 +249,7 @@ ${goal.steps.map((s) => `- [${s.status}] ${s.id}: ${s.title}${s.verificationComm
       const blockMatch = output.match(/(?:^|\n)\s*\[BLOCKED\]:?\s*([^\n]+)/);
       isBlocked = !!blockMatch;
       if (isBlocked) {
-        blockedReason = blockMatch[1].trim() || '执行被阻塞';
+        blockedReason = blockMatch[1].trim().slice(0, 300) || '执行被阻塞';
       }
     }
 
@@ -271,7 +316,7 @@ ${goal.steps.map((s) => `- [${s.status}] ${s.id}: ${s.title}${s.verificationComm
     // 更新 Check-in 时钟与下次巡检时间
     const updatedGoal = this.store.get(goalId)!;
     updatedGoal.lastCheckInAt = Date.now();
-    updatedGoal.nextCheckInAt = computeNextCheckIn(updatedGoal.cadence);
+    updatedGoal.nextCheckInAt = updatedGoal.cadence ? computeNextCheckIn(updatedGoal.cadence) : 0;
     this.store.save();
 
     return {
@@ -284,6 +329,52 @@ ${goal.steps.map((s) => `- [${s.status}] ${s.id}: ${s.title}${s.verificationComm
       verificationOutput,
       proposalRaised,
       goalCompleted: updatedGoal.status === 'done'
+    };
+  }
+
+  /**
+   * 连续多轮自驱推进目标，直到达成、遇到人工步骤、阻塞或达到轮次上限
+   */
+  public async runGoal(
+    goalId: string,
+    options?: { maxRounds?: number; guidance?: string; mockOutputs?: string[] }
+  ): Promise<GoalAdvanceResult> {
+    const maxRounds = Math.min(Math.max(options?.maxRounds ?? 4, 1), 8);
+    let lastResult: GoalAdvanceResult = { goalId, status: 'blocked', blockedReason: '未执行任何轮次' };
+    let roundsExecuted = 0;
+    let stoppedReason = 'max_rounds';
+
+    for (let i = 0; i < maxRounds; i++) {
+      const mockOutput = options?.mockOutputs ? options.mockOutputs[i] : undefined;
+      const res = await this.advanceGoal(goalId, {
+        guidance: i === 0 ? options?.guidance : undefined,
+        mockOutput
+      });
+      roundsExecuted += 1;
+      lastResult = res;
+
+      if (res.goalCompleted) {
+        stoppedReason = 'goal_completed';
+        break;
+      }
+      if (res.awaitingHuman) {
+        stoppedReason = 'awaiting_human';
+        break;
+      }
+      if (res.status === 'blocked' || res.proposalRaised) {
+        stoppedReason = 'blocked';
+        break;
+      }
+      if (res.status !== 'done') {
+        stoppedReason = 'no_progress';
+        break;
+      }
+    }
+
+    return {
+      ...lastResult,
+      roundsExecuted,
+      stoppedReason
     };
   }
 

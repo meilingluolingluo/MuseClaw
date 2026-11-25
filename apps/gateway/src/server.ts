@@ -197,7 +197,13 @@ const baseTools = createDefaultTools({
       }
       return goalStore.updateStep(id, stepIdOrIndex, status, options);
     },
-    addStep: (id, title, desc) => goalStore.addStep(id, title, desc),
+    addStep: (id, title, desc, verificationCommand, options) =>
+      goalStore.addStep(id, title, desc, verificationCommand, options),
+    addArtifact: (id, artifact) => goalStore.addArtifact(id, artifact),
+    removeArtifact: (id, artifactId) => goalStore.removeArtifact(id, artifactId),
+    linkRoutine: (id, routineId) => goalStore.linkRoutine(id, routineId),
+    unlinkRoutine: (id, routineId) => goalStore.unlinkRoutine(id, routineId),
+    bindSession: (id, sessionId) => goalStore.bindSession(id, sessionId),
     propose: (id, reason, steps) => goalStore.proposeReplan(id, reason, steps),
     setStatus: (id, status) => goalStore.setStatus(id, status),
     appendNote: (id, note) => goalStore.appendNote(id, note),
@@ -3067,13 +3073,14 @@ fi
       const botId = url.searchParams.get('bot_id') || undefined;
       const status = (url.searchParams.get('status') as any) || undefined;
       const category = url.searchParams.get('category') || undefined;
+      const mode = (url.searchParams.get('mode') as any) || undefined;
       const targetUserId = currentUser ? currentUser.username : undefined;
-      const goals = goalStore.list({ botId, status, category, userId: targetUserId });
+      const goals = goalStore.list({ botId, status, category, mode, userId: targetUserId });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(goals));
     }
 
-    // 创建新长周期目标 (POST /api/goals)
+    // 创建目标 (POST /api/goals)
     if (req.method === 'POST' && url.pathname === '/api/goals') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -3085,6 +3092,12 @@ fi
       const goal = goalStore.create({
         title: data.title,
         description: data.description || data.title,
+        mode: data.mode,
+        successCriteria: data.successCriteria,
+        metric: data.metric,
+        artifacts: data.artifacts,
+        linkedRoutineIds: data.linkedRoutineIds,
+        sessionId: data.sessionId,
         botId: data.botId || data.bot_id || 'muse',
         userId: currentUser?.username || data.userId || data.user_id || 'user_web',
         category: data.category,
@@ -3114,18 +3127,126 @@ fi
       const goalId = url.pathname.split('/')[3];
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { title, description, verificationCommand } = safeParse(body, {});
+      const { title, description, verificationCommand, owner, assigneeBotId } = safeParse(body, {});
       if (!title) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Field "title" is required' }));
       }
-      const updated = goalStore.addStep(goalId, title, description, verificationCommand);
+      const updated = goalStore.addStep(goalId, title, description, verificationCommand, {
+        owner,
+        assigneeBotId
+      });
       if (!updated) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Goal not found' }));
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(updated));
+    }
+
+    // 连续多轮推进目标 (POST /api/goals/:id/run)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/run$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { maxRounds, guidance } = safeParse(body, {});
+      try {
+        const result = await goalEngine.runGoal(goalId, { maxRounds, guidance });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, ...result }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    }
+
+    // 登记目标交付物或证据 (POST /api/goals/:id/artifacts)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/artifacts$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { title, kind, ref, summary, stepId } = safeParse(body, {});
+      if (!title) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "title" is required' }));
+      }
+      const updated = goalStore.addArtifact(goalId, {
+        title,
+        kind: kind || 'doc',
+        ref,
+        summary,
+        stepId
+      });
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(updated));
+    }
+
+    // 移除目标交付物 (DELETE /api/goals/:id/artifacts/:artifactId)
+    if (req.method === 'DELETE' && url.pathname.match(/^\/api\/goals\/[^/]+\/artifacts\/[^/]+$/)) {
+      const parts = url.pathname.split('/');
+      const goalId = parts[3];
+      const artifactId = parts[5];
+      const updated = goalStore.removeArtifact(goalId, artifactId);
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal or artifact not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(updated));
+    }
+
+    // 挂载/解绑关联 Routine (POST /api/goals/:id/routines)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/routines$/)) {
+      const goalId = url.pathname.split('/')[3];
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { routineId, action } = safeParse(body, {});
+      if (!routineId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "routineId" is required' }));
+      }
+      const updated =
+        action === 'unlink'
+          ? goalStore.unlinkRoutine(goalId, String(routineId))
+          : goalStore.linkRoutine(goalId, String(routineId));
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal not found' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(updated));
+    }
+
+    // 打开或创建目标专属持久化会话 (POST /api/goals/:id/session)
+    if (req.method === 'POST' && url.pathname.match(/^\/api\/goals\/[^/]+\/session$/)) {
+      const goalId = url.pathname.split('/')[3];
+      const goal = goalStore.get(goalId);
+      if (!goal) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Goal not found' }));
+      }
+      const targetUserId = currentUser?.username || goal.userId || 'user_web';
+      const targetBotId = goal.botId || 'muse';
+      const targetSessionId = goal.sessionId || `sess_goal_${goal.id}`;
+      const existingSession = sessionStore.get(targetSessionId, targetUserId);
+      const session =
+        existingSession ||
+        sessionStore.create(
+          targetSessionId,
+          targetBotId,
+          `[目标] ${goal.title.slice(0, 24)}`,
+          targetUserId,
+          'side'
+        );
+      if (goal.sessionId !== session.id) {
+        goalStore.bindSession(goal.id, session.id);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: true, sessionId: session.id, session, goal: goalStore.get(goal.id) }));
     }
 
     // 更新单个步骤 (PATCH /api/goals/:id/steps/:stepId)
@@ -3268,7 +3389,23 @@ fi
       try {
         const patch = safeParse(body, {});
         const allowed: Record<string, unknown> = {};
-        for (const key of ['title', 'description', 'status', 'progress', 'cadence', 'due', 'category', 'notes', 'steps', 'botId']) {
+        for (const key of [
+          'title',
+          'description',
+          'mode',
+          'successCriteria',
+          'metric',
+          'linkedRoutineIds',
+          'sessionId',
+          'status',
+          'progress',
+          'cadence',
+          'due',
+          'category',
+          'notes',
+          'steps',
+          'botId'
+        ]) {
           if (patch[key] !== undefined) allowed[key] = patch[key];
         }
 

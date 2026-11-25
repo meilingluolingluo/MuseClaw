@@ -189,10 +189,11 @@ export const api = {
     }),
 
   // Goals
-  getGoals: (filter?: { category?: string; status?: string }) => {
+  getGoals: (filter?: { category?: string; status?: string; mode?: string }) => {
     const params = new URLSearchParams();
     if (filter?.category) params.set('category', filter.category);
     if (filter?.status) params.set('status', filter.status);
+    if (filter?.mode) params.set('mode', filter.mode);
     const qs = params.toString();
     return request<Goal[]>(`/api/goals${qs ? `?${qs}` : ''}`);
   },
@@ -200,8 +201,10 @@ export const api = {
   updateGoal: (id: string, data: Partial<Goal> & Record<string, any>) =>
     request<Goal>(`/api/goals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteGoal: (id: string) => request<{ success: boolean }>(`/api/goals/${id}`, { method: 'DELETE' }),
-  addGoalStep: (goalId: string, data: { title: string; description?: string; verificationCommand?: string }) =>
-    request<Goal>(`/api/goals/${goalId}/steps`, { method: 'POST', body: JSON.stringify(data) }),
+  addGoalStep: (
+    goalId: string,
+    data: { title: string; description?: string; verificationCommand?: string; owner?: 'agent' | 'human'; assigneeBotId?: string }
+  ) => request<Goal>(`/api/goals/${goalId}/steps`, { method: 'POST', body: JSON.stringify(data) }),
   updateGoalStep: (
     goalId: string,
     stepId: string,
@@ -209,6 +212,21 @@ export const api = {
   ) => request<Goal>(`/api/goals/${goalId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   advanceGoal: (id: string, override?: any) =>
     request<any>(`/api/goals/${id}/advance`, { method: 'POST', body: JSON.stringify(override || {}) }),
+  runGoal: (id: string, opts?: { maxRounds?: number; guidance?: string }) =>
+    request<any>(`/api/goals/${id}/run`, { method: 'POST', body: JSON.stringify(opts || {}) }),
+  addGoalArtifact: (
+    goalId: string,
+    data: { title: string; kind?: 'file' | 'doc' | 'link' | 'note' | 'report'; ref?: string; summary?: string; stepId?: string }
+  ) => request<Goal>(`/api/goals/${goalId}/artifacts`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteGoalArtifact: (goalId: string, artifactId: string) =>
+    request<Goal>(`/api/goals/${goalId}/artifacts/${artifactId}`, { method: 'DELETE' }),
+  updateGoalRoutineLink: (goalId: string, routineId: string, action: 'link' | 'unlink') =>
+    request<Goal>(`/api/goals/${goalId}/routines`, { method: 'POST', body: JSON.stringify({ routineId, action }) }),
+  openGoalSession: (goalId: string) =>
+    request<{ success: boolean; sessionId: string; session: Session; goal: Goal }>(`/api/goals/${goalId}/session`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    }),
   checkInGoal: (id: string, note?: string) =>
     request<any>(`/api/goals/${id}/checkin`, { method: 'POST', body: JSON.stringify({ note }) }),
   retryGoal: (id: string, data?: { stepId?: string; guidance?: string }) =>

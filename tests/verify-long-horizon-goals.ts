@@ -255,7 +255,84 @@ assert.strictEqual(gAfterRollback.progress, 0, '打回后进度自动归零');
 
 console.log('  ✅ verificationCommand 确定性自动化验收、补充重试与步骤打回返工验证 100% 通过\n');
 
+// =========================================================================
+// 8. 验证目标形态(delivery/watch/portfolio)、默认无闹钟、成果沉淀、人工卡点与连续推进
+// =========================================================================
+console.log('8. 验证目标工作区新特性 (Modes, Default No-Cadence, Artifacts, Human Step & runGoal)...');
+
+// 8.1 默认不设周期闹钟
+const deliveryGoal = store.create({
+  title: '核心模块迁移与上线交付',
+  description: '跨团队逐步切流迁移',
+  mode: 'delivery',
+  successCriteria: '全量调用方切流完成且输出复盘报告',
+  metric: { label: '已迁移调用方', current: '8', target: '20', unit: '个' },
+  category: 'delivery',
+  steps: [
+    { id: 'd_1', title: '扫描依赖并完成首波迁移', owner: 'agent' },
+    { id: 'd_2', title: '推动上下游确认切流窗口', owner: 'human' },
+    { id: 'd_3', title: '清理兼容开关并沉淀结项报告', owner: 'agent' }
+  ]
+});
+
+assert.strictEqual(deliveryGoal.cadence, '', '新建目标默认不应强制绑定周期闹钟');
+assert.strictEqual(deliveryGoal.nextCheckInAt, 0, '无周期闹钟时 nextCheckInAt 应为 0');
+assert.strictEqual(deliveryGoal.mode, 'delivery');
+assert.strictEqual(deliveryGoal.successCriteria, '全量调用方切流完成且输出复盘报告');
+
+// 8.2 连续推进：自动完成 AI 步骤 d_1，并在人工步骤 d_2 处安全停机等待人工确认
+const runRes1 = await engine.runGoal(deliveryGoal.id, {
+  maxRounds: 4,
+  mockOutputs: ['✅ 已完成依赖扫描与首波迁移']
+});
+assert.strictEqual(runRes1.roundsExecuted, 2, '第 1 轮完成 d_1，第 2 轮遇到 human 步骤 d_2 停机');
+assert.strictEqual(runRes1.stoppedReason, 'awaiting_human');
+assert.strictEqual(runRes1.awaitingHuman, true);
+assert.strictEqual(store.get(deliveryGoal.id)!.steps[0].status, 'done');
+assert.strictEqual(store.get(deliveryGoal.id)!.steps[1].status, 'in_progress');
+
+// 8.3 人工补充确认后继续连续推进直到全部达成
+const runRes2 = await engine.runGoal(deliveryGoal.id, {
+  maxRounds: 4,
+  guidance: '上下游已确认周四晚切流',
+  mockOutputs: ['✅ 切流窗口已确认', '✅ 开关已清理并生成结项报告']
+});
+assert.strictEqual(runRes2.goalCompleted, true);
+assert.strictEqual(runRes2.stoppedReason, 'goal_completed');
+assert.strictEqual(store.get(deliveryGoal.id)!.status, 'done');
+
+// 8.4 长期沉淀模式 (portfolio) 允许无步骤且支持成果归档、Routine 挂载与专属会话绑定
+const portfolioGoal = store.create({
+  title: '核心交付与架构成果沉淀库',
+  mode: 'portfolio',
+  category: 'growth',
+  successCriteria: '沉淀 5+ 份量化交付证据'
+});
+assert.strictEqual(portfolioGoal.steps.length, 0, 'portfolio 模式不应强制塞入默认步骤');
+
+store.addArtifact(portfolioGoal.id, {
+  title: '核心模块架构迁移结项报告',
+  kind: 'report',
+  ref: 'docs/migration-postmortem.md',
+  summary: '零故障完成 20 个调用方迁移，P99 降低 35%'
+});
+store.linkRoutine(portfolioGoal.id, 'routine_biweekly_review');
+store.bindSession(portfolioGoal.id, 'sess_goal_portfolio_1');
+
+const reloadedPortfolio = new GoalStore(testGoalsFile).get(portfolioGoal.id)!;
+assert.strictEqual(reloadedPortfolio.artifacts?.length, 1);
+assert.strictEqual(reloadedPortfolio.artifacts?.[0].title, '核心模块架构迁移结项报告');
+assert.deepStrictEqual(reloadedPortfolio.linkedRoutineIds, ['routine_biweekly_review']);
+assert.strictEqual(reloadedPortfolio.sessionId, 'sess_goal_portfolio_1');
+
+store.removeArtifact(portfolioGoal.id, reloadedPortfolio.artifacts![0].id);
+store.unlinkRoutine(portfolioGoal.id, 'routine_biweekly_review');
+assert.strictEqual(store.get(portfolioGoal.id)!.artifacts?.length, 0);
+assert.strictEqual(store.get(portfolioGoal.id)!.linkedRoutineIds?.length, 0);
+
+console.log('  ✅ 目标形态、默认无闹钟、成果沉淀、人工卡点与连续推进验证 100% 通过\n');
+
 // 清理测试目录
 fs.rmSync(testDataDir, { recursive: true, force: true });
 
-console.log('🎉 长周期目标 (Long-Horizon Goals) 与自主推进巡检机制 100% 验收通过！');
+console.log('🎉 目标工作区 (Goals) 全链路验收通过！');
