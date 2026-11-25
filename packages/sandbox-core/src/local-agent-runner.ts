@@ -348,22 +348,52 @@ export async function runLocalAgent(
 }
 
 /**
+ * 提取并序列化消息正文为纯文本，支持纯字符串与多模态 ContentPart 复合结构
+ */
+function extractContentText(content: any): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object') {
+          if (part.type === 'text') return part.text || '';
+          if (part.type === 'image_url') {
+            const url = part.image_url?.url || '';
+            if (url.startsWith('data:image/')) {
+              const mime = url.substring(5, url.indexOf(';'));
+              return `[图片附件: base64 ${mime} 图像]`;
+            }
+            return `[图片附件: ${url}]`;
+          }
+          if (part.text) return String(part.text);
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return String(content || '');
+}
+
+/**
  * 将 LLMMessage 数组格式化为本地 Agent 可识别的提示词
  */
 export function formatLLMMessagesToPrompt(messages: LLMMessage[]): string {
   if (!Array.isArray(messages)) {
-    return String(messages || '');
+    return extractContentText(messages);
   }
   if (messages.length === 1 && messages[0].content) {
-    return messages[0].content;
+    return extractContentText(messages[0].content);
   }
   return messages
     .filter((m) => Boolean(m.content))
     .map((m) => {
-      if (m.role === 'system') return `[System Instruction]\n${m.content}`;
-      if (m.role === 'user') return `[User]\n${m.content}`;
-      if (m.role === 'assistant') return `[Assistant]\n${m.content}`;
-      return `[Tool Result ${m.tool_call_id || ''}]\n${m.content}`;
+      const text = extractContentText(m.content);
+      if (m.role === 'system') return `[System Instruction]\n${text}`;
+      if (m.role === 'user') return `[User]\n${text}`;
+      if (m.role === 'assistant') return `[Assistant]\n${text}`;
+      return `[Tool Result ${m.tool_call_id || ''}]\n${text}`;
     })
     .join('\n\n');
 }

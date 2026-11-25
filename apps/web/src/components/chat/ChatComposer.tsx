@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   ChevronDown,
   Check,
+  Loader2,
 } from 'lucide-react';
 import type { MessageAttachment, Skill } from '../../types';
 import { api } from '../../services/api';
@@ -73,6 +74,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
   const { showToast, setTab, createNewSession, activeBot, setApprovalMode, tab } = useApp();
   const [inputText, setInputText] = useState('');
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [isAttachPopoverOpen, setIsAttachPopoverOpen] = useState(false);
   const [isApprovalPopoverOpen, setIsApprovalPopoverOpen] = useState(false);
   const [isCommandsPopoverOpen, setIsCommandsPopoverOpen] = useState(false);
@@ -264,26 +266,30 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const uploadRes = await api.uploadFile(file);
-        setAttachments((prev) => [
-          ...prev,
-          {
-            name: file.name,
-            size: file.size,
-            type: file.type.startsWith('image/') ? 'image' : 'file',
-            url: uploadRes.url,
-          },
-        ]);
-      } catch (err: any) {
-        // 失败已经用 toast 告诉用户了，控制台只留一条 warning 便于排查
-        console.warn('File upload failed:', err?.message || err);
-        showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
+    setIsUploading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+          const uploadRes = await api.uploadFile(file);
+          setAttachments((prev) => [
+            ...prev,
+            {
+              name: file.name,
+              size: file.size,
+              type: file.type.startsWith('image/') ? 'image' : 'file',
+              url: uploadRes.url,
+            },
+          ]);
+        } catch (err: any) {
+          console.warn('File upload failed:', err?.message || err);
+          showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
+        }
       }
+    } finally {
+      setIsUploading(false);
+      setIsAttachPopoverOpen(false);
     }
-    setIsAttachPopoverOpen(false);
   };
 
   // Clipboard paste support for images
@@ -321,11 +327,27 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
       />
 
       {/* Attachments Preview Bar */}
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || isUploading) && (
         <div className="composer-attachments-bar">
           {attachments.map((att, idx) => (
-            <div key={idx} className="composer-attachment-tag">
-              <span className="attachment-tag-name">{att.name}</span>
+            <div
+              key={idx}
+              className={`composer-attachment-tag ${att.type === 'image' ? 'composer-attachment-image' : ''}`}
+            >
+              {att.type === 'image' && att.url ? (
+                <img
+                  src={att.url}
+                  alt={att.name}
+                  className="attachment-thumbnail"
+                  onClick={() => window.open(att.url, '_blank')}
+                  title="点击查看原图"
+                />
+              ) : (
+                <span className="attachment-tag-icon">
+                  <Paperclip size={12} />
+                </span>
+              )}
+              <span className="attachment-tag-name" title={att.name}>{att.name}</span>
               <button
                 type="button"
                 className="attachment-tag-remove"
@@ -336,6 +358,12 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
               </button>
             </div>
           ))}
+          {isUploading && (
+            <div className="composer-attachment-tag is-uploading">
+              <Loader2 size={12} className="spin-icon" />
+              <span className="attachment-tag-name">正在上传中...</span>
+            </div>
+          )}
         </div>
       )}
 

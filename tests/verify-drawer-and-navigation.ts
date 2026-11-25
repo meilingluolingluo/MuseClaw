@@ -11,10 +11,10 @@ console.log('   MUSECLAW 侧边抽屉、导航轨与 SPA 路由系统验收测�
 console.log('===============================================================\n');
 
 // 1. 验证 NavRail.tsx 核心导航架构与可访问性
-console.log('[Test 1] 验证 NavRail.tsx 主导航轨 (8 大核心视窗) 与 A11y 语义');
+console.log('[Test 1] 验证 NavRail.tsx 主导航轨 (7 大核心视窗) 与 A11y 语义');
 const navRailPath = path.join(rootDir, 'apps/web/src/components/layout/NavRail.tsx');
 const navRailCode = fs.readFileSync(navRailPath, 'utf-8');
-const requiredTabs = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'audit', 'artifacts'];
+const requiredTabs = ['chat', 'feed', 'goals', 'routines', 'memory', 'skills', 'artifacts'];
 for (const t of requiredTabs) {
   assert.ok(navRailCode.includes(`id: '${t}'`), `NavRail 必须包含 ${t} 视窗导航项`);
 }

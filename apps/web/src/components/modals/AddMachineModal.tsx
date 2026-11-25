@@ -70,7 +70,15 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
     if (success) {
       showToast('已复制整组接入命令到剪贴板！', 'success');
     } else {
-      showToast('复制失败，请手动全选文本框内容复制', 'warning');
+      const preEl = document.querySelector('.add-machine-cmd-pre');
+      if (preEl) {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(preEl);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      showToast('已全选整组接入命令，可直接按快捷键 (Cmd+C / Ctrl+C) 复制', 'info');
     }
   };
 
@@ -137,7 +145,17 @@ curl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | ba
               </button>
             </div>
 
-            <pre className="add-machine-cmd-pre">
+            <pre
+              className="add-machine-cmd-pre"
+              title="点击可全选命令文本"
+              onClick={(e) => {
+                const selection = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(e.currentTarget);
+                selection?.removeAllRanges();
+                selection?.addRange(range);
+              }}
+            >
               {installCmd}
             </pre>
           </div>

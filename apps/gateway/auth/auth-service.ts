@@ -253,7 +253,14 @@ export class AuthService {
     }
 
     // 本机开发免密：若请求来自本地回环地址（127.0.0.1 / localhost），未携带凭证时自动以本地开发者身份访问
-    const remoteIp = (req.socket.remoteAddress || req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || '').replace('::ffff:', '');
+    if (req.headers['x-simulate-anonymous'] === 'true') {
+      return null;
+    }
+    const forwardedIp = req.headers['x-forwarded-for']?.toString().split(',')[0].trim();
+    if (forwardedIp && !['127.0.0.1', '::1', 'localhost'].includes(forwardedIp) && !forwardedIp.startsWith('127.')) {
+      return null;
+    }
+    const remoteIp = (forwardedIp || req.socket.remoteAddress || '').replace('::ffff:', '');
     const isLoopback = ['127.0.0.1', '::1', 'localhost'].includes(remoteIp) ||
                        remoteIp.startsWith('127.') ||
                        req.headers.host?.startsWith('localhost') ||

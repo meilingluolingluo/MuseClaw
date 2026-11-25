@@ -8,12 +8,18 @@ export interface InfoflowReceiverConfig {
 }
 
 export class InfoflowReceiver {
-  private crypto: InfoflowCrypto;
+  private crypto?: InfoflowCrypto;
   private bridge?: InfoflowApprovalBridge;
   private seenNonces = new Map<string, number>();
 
   constructor(config: InfoflowReceiverConfig, bridge?: InfoflowApprovalBridge) {
-    this.crypto = new InfoflowCrypto(config.token, config.encodingAesKey, config.appId);
+    if (config.encodingAesKey) {
+      try {
+        this.crypto = new InfoflowCrypto(config.token, config.encodingAesKey, config.appId);
+      } catch (err: any) {
+        console.warn(`[Infoflow] 暂未配置有效 EncodingAESKey，加解密通道未激活: ${err.message}`);
+      }
+    }
     this.bridge = bridge;
   }
 
@@ -24,6 +30,9 @@ export class InfoflowReceiver {
     const { signature, timestamp, nonce, echostr } = query;
     if (!signature || !timestamp || !nonce || !echostr) {
       throw new Error('如流 URL 验证参数缺失');
+    }
+    if (!this.crypto) {
+      throw new Error('如流尚未配置有效 EncodingAESKey');
     }
     return this.crypto.verifyAndDecryptEchoStr(timestamp, nonce, echostr, signature);
   }
@@ -38,6 +47,9 @@ export class InfoflowReceiver {
     const { signature, timestamp, nonce } = query;
     if (!signature || !timestamp || !nonce) {
       throw new Error('如流消息回调签名参数缺失');
+    }
+    if (!this.crypto) {
+      throw new Error('如流尚未配置有效 EncodingAESKey');
     }
 
     // 时间戳时效窗口校验 (5 分钟)

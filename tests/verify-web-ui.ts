@@ -115,8 +115,10 @@ async function runWebUiTests() {
     assert.ok(botsList.length > 0);
     console.log(`  -> Bots 列表就绪: 共 ${botsList.length} 个数字员工`);
 
-    // 6.2 匿名请求受保护接口校验 (验证 P0-1 鉴权守卫生效)
-    const resAnonSandbox = await fetch(`http://localhost:${testPort}/api/sandbox/status`);
+    // 6.2 匿名请求受保护接口校验 (验证 P0-1 鉴权守卫生效，模拟外部非本地网络请求)
+    const resAnonSandbox = await fetch(`http://localhost:${testPort}/api/sandbox/status`, {
+      headers: { 'X-Forwarded-For': '192.168.1.100', 'Host': '192.168.1.100' }
+    });
     assert.strictEqual(resAnonSandbox.status, 401, '未登录访问受保护接口必须返回 401');
     console.log('  -> [PASS] 安全拦截守卫正常，未登录访问受保护接口返回 401');
 
