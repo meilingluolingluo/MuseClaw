@@ -128,6 +128,7 @@ export const SettingsModal: React.FC = () => {
     setAccentColor,
     showToast,
     setIsAuthModalOpen,
+    setTab,
     user,
     setUser,
   } = useApp();
@@ -451,11 +452,12 @@ export const SettingsModal: React.FC = () => {
         id: genId,
         label: customForm.name.trim(),
         category: customForm.category,
+        transport: customForm.transport,
         command: customForm.transport === 'stdio' ? customForm.command.trim() : undefined,
         args: customForm.args ? customForm.args.split(/\s+/).filter(Boolean) : undefined,
         url: customForm.transport !== 'stdio' ? customForm.url.trim() : undefined,
         env: envObj
-      });
+      } as any);
       showToast(`自定义连接器「${customForm.name}」已添加！`, 'success');
       setIsCustomModalOpen(false);
       setCustomForm({
@@ -1083,6 +1085,16 @@ export const SettingsModal: React.FC = () => {
                           onChange={(e) => setConnectorSearch(e.target.value)}
                         />
                       </div>
+                      <button
+                        type="button"
+                        className="connector-action-btn"
+                        onClick={() => {
+                          setIsSettingsModalOpen(false);
+                          setTab('mcp');
+                        }}
+                      >
+                        <Cpu size={14} /> 前往 MCP 工作台
+                      </button>
                       <button
                         type="button"
                         className="connector-add-btn"

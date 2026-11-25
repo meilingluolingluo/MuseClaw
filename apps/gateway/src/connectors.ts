@@ -611,21 +611,32 @@ export class ConnectorManager {
     const ecosystemIds = new Set(CATALOGUE_CONNECTORS.map((c) => c.id));
     for (const c of CATALOGUE_CONNECTORS) {
       const persisted = this.records.get(c.id);
-      if (persisted) {
-        const disabledSet = new Set(persisted.disabledTools || []);
+      const mcpSnap = this.mcpManager?.getServerSnapshot(c.id);
+      if (persisted || mcpSnap) {
+        const disabledSet = new Set(persisted?.disabledTools || []);
+        const toolsSource = mcpSnap && mcpSnap.tools.length > 0
+          ? mcpSnap.tools.map((t) => ({
+              name: t.fullName,
+              description: t.description,
+              enabled: t.enabled,
+              parameters: t.inputSchema
+            }))
+          : c.tools.map((t) => ({
+              ...t,
+              enabled: !disabledSet.has(t.name)
+            }));
         result.push({
           ...c,
-          status: persisted.status,
-          connectedAt: persisted.connectedAt,
-          updatedAt: persisted.updatedAt,
-          error: persisted.error,
-          url: persisted.url || c.url,
-          key: persisted.key ? '••••••••' : undefined,
+          status: mcpSnap
+            ? (mcpSnap.status === 'connected' ? 'connected' : mcpSnap.status === 'disabled' ? 'disconnected' : mcpSnap.status === 'auth_required' ? 'reauth' : 'error')
+            : persisted!.status,
+          connectedAt: mcpSnap?.connectedAt || persisted?.connectedAt,
+          updatedAt: persisted?.updatedAt,
+          error: mcpSnap?.error || persisted?.error,
+          url: persisted?.url || c.url,
+          key: persisted?.key ? '••••••••' : undefined,
           disabledTools: Array.from(disabledSet),
-          tools: c.tools.map((t) => ({
-            ...t,
-            enabled: !disabledSet.has(t.name)
-          }))
+          tools: toolsSource
         });
       } else {
         result.push({
@@ -640,27 +651,38 @@ export class ConnectorManager {
     // 3. 自定义新增的 MCP 连接器
     for (const [id, r] of this.records.entries()) {
       if (!BUILTIN_CONNECTORS.some((b) => b.id === id) && !ecosystemIds.has(id)) {
+        const mcpSnap = this.mcpManager?.getServerSnapshot(id);
         const disabledSet = new Set(r.disabledTools || []);
+        const toolsList = mcpSnap && mcpSnap.tools.length > 0
+          ? mcpSnap.tools.map((t) => ({
+              name: t.fullName,
+              description: t.description,
+              enabled: t.enabled,
+              parameters: t.inputSchema
+            }))
+          : (r.customTools || []).map((t) => ({
+              ...t,
+              enabled: !disabledSet.has(t.name)
+            }));
         result.push({
           id: r.id,
           name: r.name,
           category: r.category || 'custom',
           description: r.description || '自定义接入的扩展连接器',
-          status: r.status,
+          status: mcpSnap
+            ? (mcpSnap.status === 'connected' ? 'connected' : mcpSnap.status === 'disabled' ? 'disconnected' : mcpSnap.status === 'auth_required' ? 'reauth' : 'error')
+            : r.status,
           authType: r.authType,
           color: r.color || '#64748b',
           url: r.url,
           command: r.command,
           args: r.args,
           env: r.env,
-          connectedAt: r.connectedAt,
+          connectedAt: mcpSnap?.connectedAt || r.connectedAt,
           updatedAt: r.updatedAt,
-          error: r.error,
+          error: mcpSnap?.error || r.error,
           disabledTools: Array.from(disabledSet),
-          tools: (r.customTools || []).map((t) => ({
-            ...t,
-            enabled: !disabledSet.has(t.name)
-          }))
+          tools: toolsList
         });
       }
     }
@@ -688,6 +710,8 @@ export class ConnectorManager {
       command?: string;
       args?: string[];
       env?: Record<string, string>;
+      headers?: Record<string, string>;
+      transport?: 'stdio' | 'http' | 'sse';
       label?: string;
       description?: string;
       category?: ConnectorCategory;
@@ -699,6 +723,19 @@ export class ConnectorManager {
     let record = this.records.get(id);
     const now = Date.now();
 
+    const resolvedCommand = options.command ?? record?.command ?? existingPreset?.command;
+    const resolvedArgs = options.args ?? record?.args ?? existingPreset?.args;
+    const resolvedUrl = options.url ?? record?.url ?? existingPreset?.url;
+    const resolvedAuthType: ConnectorAuthType =
+      existingPreset?.authType ||
+      (options.transport === 'sse'
+        ? 'sse'
+        : resolvedCommand
+          ? 'stdio'
+          : options.key
+            ? 'key'
+            : 'none');
+
     if (!record) {
       record = {
         id,
@@ -706,11 +743,11 @@ export class ConnectorManager {
         category: options.category || existingPreset?.category || existingBuiltin?.category || 'custom',
         description: options.description || existingPreset?.description || existingBuiltin?.description || '扩展连接器',
         status: 'connected',
-        authType: existingPreset?.authType || (options.command ? 'stdio' : options.key ? 'key' : 'none'),
+        authType: resolvedAuthType,
         color: existingPreset?.color || '#0064d4',
-        url: options.url || existingPreset?.url,
-        command: options.command,
-        args: options.args,
+        url: resolvedUrl,
+        command: resolvedCommand,
+        args: resolvedArgs,
         env: options.env,
         key: options.key,
         token: options.token,
@@ -724,31 +761,47 @@ export class ConnectorManager {
       if (options.token !== undefined) record.token = options.token;
       if (options.url !== undefined) record.url = options.url;
       if (options.command !== undefined) record.command = options.command;
+      else if (!record.command && existingPreset?.command) record.command = existingPreset.command;
       if (options.args !== undefined) record.args = options.args;
+      else if (!record.args && existingPreset?.args) record.args = existingPreset.args;
       if (options.env !== undefined) record.env = options.env;
       if (options.label) record.name = options.label;
       record.error = undefined;
     }
 
-    // 若为命令行 stdio MCP 服务，挂载至 McpClientManager
-    if (record.command && this.mcpManager) {
-      try {
-        const mountedTools = await this.mcpManager.addServer(record.id, {
-          command: record.command,
-          args: record.args,
-          env: record.env
-        });
-        record.customTools = mountedTools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          enabled: true
-        }));
-        record.status = 'connected';
-        record.error = undefined;
-      } catch (err: any) {
-        record.status = 'error';
-        record.error = `MCP 进程启动失败: ${err.message}`;
+    const isCustomMcpRemote =
+      Boolean(record.url) &&
+      !existingBuiltin &&
+      !['discord', 'github', 'tavily', 'amap'].includes(id) &&
+      (options.transport === 'http' || options.transport === 'sse' || !existingPreset || record.category === 'custom');
+
+    // 若为命令行 stdio MCP 服务或自定义远程 MCP 服务，统一托管至 McpClientManager
+    if ((record.command || isCustomMcpRemote) && this.mcpManager) {
+      const headers: Record<string, string> = { ...(options.headers || {}) };
+      if (!headers.Authorization && (record.key || record.token)) {
+        const rawCred = record.key || record.token || '';
+        headers.Authorization = /^Bearer\s+/i.test(rawCred) ? rawCred : `Bearer ${rawCred}`;
       }
+      const snapshot = await this.mcpManager.upsertServer(record.id, {
+        transport: options.transport || (record.command ? 'stdio' : record.authType === 'sse' ? 'sse' : 'http'),
+        command: record.command,
+        args: record.args,
+        env: record.env,
+        url: record.url,
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+        description: record.description,
+        category: record.category,
+        enabled: true
+      });
+      record.customTools = snapshot.tools.map((t) => ({
+        name: t.fullName,
+        description: t.description,
+        enabled: t.enabled,
+        parameters: t.inputSchema
+      }));
+      record.status = snapshot.status === 'connected' ? 'connected' : snapshot.status === 'auth_required' ? 'reauth' : 'error';
+      record.error = snapshot.error;
+      if (snapshot.connectedAt) record.connectedAt = snapshot.connectedAt;
     } else {
       // 临时保存以便 test() 读取凭据进行真实测试
       this.records.set(id, record);
@@ -782,9 +835,9 @@ export class ConnectorManager {
     record.token = undefined;
     record.error = undefined;
 
-    // 若挂载过 MCP 客户端，则停止
-    if (this.mcpManager) {
-      await this.mcpManager.removeServer(id);
+    // 若挂载过 MCP 客户端，则停用
+    if (this.mcpManager && this.mcpManager.getServerSnapshot(id)) {
+      await this.mcpManager.setServerEnabled(id, false);
     }
 
     this.records.set(id, record);
@@ -799,6 +852,17 @@ export class ConnectorManager {
     const item = this.get(id);
     if (!item) {
       return { success: false, latencyMs: 0, message: '连接器不存在' };
+    }
+
+    if (this.mcpManager && this.mcpManager.getServerSnapshot(id)) {
+      const probe = await this.mcpManager.probeServer(id);
+      return {
+        success: probe.ok,
+        latencyMs: probe.latencyMs,
+        message: probe.ok
+          ? `MCP 握手成功，发现 ${probe.toolCount} 个工具 (${probe.latencyMs}ms)`
+          : probe.error || 'MCP 握手失败'
+      };
     }
 
     const record = this.records.get(id);

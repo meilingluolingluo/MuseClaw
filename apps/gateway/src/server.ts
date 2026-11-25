@@ -217,14 +217,18 @@ const mcpManager = new McpClientManager();
 const connectorManager = new ConnectorManager(undefined, mcpManager);
 let tools = [...baseTools];
 
-function refreshTools() {
+function refreshTools(botId?: string) {
   const allTools = [
     ...baseTools,
-    ...mcpManager.getToolDefinitions(),
+    ...mcpManager.getToolDefinitions(botId ? { botId } : undefined),
     ...connectorManager.getToolDefinitions()
   ];
-  tools = allTools.filter(t => connectorManager.isToolEnabled(t.name));
-  return tools;
+  sentinel.setDynamicAlwaysAskTools(mcpManager.getSensitiveToolNames());
+  const filtered = allTools.filter(t => connectorManager.isToolEnabled(t.name));
+  if (!botId) {
+    tools = filtered;
+  }
+  return filtered;
 }
 
 function resolveSkillPrompt(userText: string): string {
@@ -334,7 +338,7 @@ const infoflowChannel = createInfoflowChannel(
     const loop = runAgentLoop(
       bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
       resolveSkillPrompt(prompt),
-      refreshTools(),
+      refreshTools(bot.id),
       sentinel,
       callLLM,
       { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id), historyMessages }
@@ -399,7 +403,7 @@ const feishuChannel = createFeishuChannel(
     const loop = runAgentLoop(
       bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。请按步骤执行。',
       resolveSkillPrompt(prompt),
-      refreshTools(),
+      refreshTools(bot.id),
       sentinel,
       callLLM,
       { sessionId: finalSessionId, userId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id), historyMessages }
@@ -1472,7 +1476,7 @@ export function startGatewayServer(defaultPort = 8799) {
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
         resolveSkillPrompt(message),
-        refreshTools(),
+        refreshTools(bot.id),
         sentinel,
         callLLM,
         { sessionId: session.id, userId: apiUserId, botId: bot.id, profile: botWithMemory, maxSteps: 15, skills: getBotSkills(bot.id) }
@@ -1617,29 +1621,79 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // B5. 标准 MCP 工具生态管理接口 (Model Context Protocol)
     if (req.method === 'GET' && url.pathname === '/api/mcp/servers') {
+      const snapshots = mcpManager.getServerSnapshots();
+      const { runtimes } = mcpManager.getCatalog();
+      const totalTools = snapshots.reduce((sum, s) => sum + s.toolCount, 0);
+      const enabledTools = snapshots.reduce((sum, s) => sum + s.enabledToolCount, 0);
+      const connectedCount = snapshots.filter((s) => s.status === 'connected').length;
+      const estimatedTokens = snapshots.reduce((sum, s) => sum + s.estimatedTokens, 0);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
-        servers: mcpManager.listServers(),
-        totalTools: mcpManager.getToolDefinitions().length
+        servers: snapshots,
+        totalTools,
+        enabledTools,
+        connectedCount,
+        estimatedTokens,
+        runtimes
       }));
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/mcp/servers') {
+    if (req.method === 'GET' && url.pathname === '/api/mcp/catalog') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(mcpManager.getCatalog()));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/mcp/json') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ json: mcpManager.exportMcpJson() }));
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/mcp/json') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { name, command, args, env } = JSON.parse(body || '{}');
-      if (!name || !command) {
+      const payload = JSON.parse(body || '{}');
+      if (typeof payload.json !== 'string') {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Fields "name" and "command" are required' }));
+        return res.end(JSON.stringify({ error: 'Field "json" must be a string' }));
       }
       try {
-        await mcpManager.addServer(name, { command, args, env });
+        const servers = await mcpManager.applyMcpJson(payload.json);
+        refreshTools();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, servers, json: mcpManager.exportMcpJson() }));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/mcp/parse') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body || '{}');
+      const parsed = mcpManager.parsePaste(String(payload.text || ''));
+      res.writeHead(parsed.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(parsed));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/mcp/import') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body || '{}');
+      if (!Array.isArray(payload.entries) || payload.entries.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Field "entries" must be a non-empty array' }));
+      }
+      try {
+        const imported = await mcpManager.importBatch(payload.entries, {
+          connectNow: payload.connectNow !== false
+        });
         refreshTools();
         res.writeHead(201, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({
           success: true,
-          name,
-          servers: mcpManager.listServers()
+          imported,
+          servers: mcpManager.getServerSnapshots()
         }));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1647,12 +1701,166 @@ export function startGatewayServer(defaultPort = 8799) {
       }
     }
 
-    if (req.method === 'DELETE' && url.pathname.startsWith('/api/mcp/servers/')) {
-      const name = url.pathname.replace('/api/mcp/servers/', '');
-      const success = await mcpManager.removeServer(name);
-      refreshTools();
-      res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ success }));
+    if (req.method === 'POST' && url.pathname === '/api/mcp/probe') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body || '{}');
+      const result = await mcpManager.probeServer(payload);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(result));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/mcp/servers') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body || '{}');
+      const { name, connectNow, ...config } = payload;
+      if (!name || (!config.command && !config.url)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Fields "name" and ("command" or "url") are required' }));
+      }
+      try {
+        const server = await mcpManager.upsertServer(name, config, {
+          connectNow: connectNow !== false,
+          preserveSecrets: false
+        });
+        refreshTools();
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          success: true,
+          name: server.name,
+          server,
+          servers: mcpManager.getServerSnapshots()
+        }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    if (url.pathname.startsWith('/api/mcp/servers/')) {
+      const subPath = url.pathname.replace('/api/mcp/servers/', '');
+      const parts = subPath.split('/').filter(Boolean);
+      const serverName = decodeURIComponent(parts[0] || '');
+
+      if (!serverName) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Missing server name' }));
+      }
+
+      if (parts.length === 1) {
+        if (req.method === 'GET') {
+          const server = mcpManager.getServerSnapshot(serverName);
+          if (!server) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: `MCP 服务 [${serverName}] 不存在` }));
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ server, logs: mcpManager.getLogs(serverName) }));
+        }
+
+        if (req.method === 'PUT' || req.method === 'PATCH') {
+          let body = '';
+          for await (const chunk of req) body += chunk;
+          const payload = JSON.parse(body || '{}');
+          const updated = await mcpManager.updateServer(serverName, payload);
+          if (!updated) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: `MCP 服务 [${serverName}] 不存在` }));
+          }
+          refreshTools();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, server: updated, servers: mcpManager.getServerSnapshots() }));
+        }
+
+        if (req.method === 'DELETE') {
+          const success = await mcpManager.removeServer(serverName);
+          refreshTools();
+          res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success }));
+        }
+      }
+
+      if (parts.length === 2 && parts[1] === 'test' && req.method === 'POST') {
+        const result = await mcpManager.probeServer(serverName);
+        refreshTools();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+          ...result,
+          server: mcpManager.getServerSnapshot(serverName)
+        }));
+      }
+
+      if (parts.length === 2 && parts[1] === 'reconnect' && req.method === 'POST') {
+        const server = await mcpManager.reconnectServer(serverName);
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: `MCP 服务 [${serverName}] 不存在` }));
+        }
+        refreshTools();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, server }));
+      }
+
+      if (parts.length === 2 && parts[1] === 'logs') {
+        if (req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ logs: mcpManager.getLogs(serverName) }));
+        }
+        if (req.method === 'DELETE') {
+          mcpManager.clearLogs(serverName);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true }));
+        }
+      }
+
+      if (parts.length === 3 && parts[1] === 'tools' && parts[2] === 'toggle' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const payload = JSON.parse(body || '{}');
+        const server = typeof payload.enabledAll === 'boolean'
+          ? mcpManager.setAllToolsEnabled(serverName, payload.enabledAll)
+          : mcpManager.toggleTool(serverName, String(payload.toolName || ''), Boolean(payload.enabled));
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: `MCP 服务 [${serverName}] 不存在` }));
+        }
+        refreshTools();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, server }));
+      }
+
+      if (parts.length === 3 && parts[1] === 'tools' && req.method === 'PATCH') {
+        const toolName = decodeURIComponent(parts[2]);
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const payload = JSON.parse(body || '{}');
+        const server = mcpManager.setToolPolicy(serverName, toolName, {
+          ...(payload.enabled !== undefined ? { enabled: Boolean(payload.enabled) } : {}),
+          ...(payload.risk !== undefined ? { risk: payload.risk } : {})
+        });
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: `MCP 服务 [${serverName}] 不存在` }));
+        }
+        refreshTools();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, server }));
+      }
+
+      if (parts.length === 4 && parts[1] === 'tools' && parts[3] === 'call' && req.method === 'POST') {
+        const toolName = decodeURIComponent(parts[2]);
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const payload = JSON.parse(body || '{}');
+        const result = await mcpManager.callServerTool(
+          serverName,
+          toolName,
+          (payload.args && typeof payload.args === 'object' ? payload.args : {}) as Record<string, unknown>
+        );
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify(result));
+      }
     }
 
     // ==========================================
@@ -3450,7 +3658,7 @@ fi
       const loop = runAgentLoop(
         bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
         typeof userGoal === 'string' ? resolveSkillPrompt(userGoal) : userGoal,
-        refreshTools(),
+        refreshTools(bot.id),
         sentinel,
         userScopedCaller,
         {
@@ -3788,6 +3996,7 @@ fi
         '/routines',
         '/memory',
         '/skills',
+        '/mcp',
         '/audit',
         '/artifacts',
         '/sessions',

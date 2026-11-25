@@ -52,12 +52,17 @@ export class SentinelPolicyManager implements SentinelHook {
   // 声明式外部安全策略
   private policyConfig: SentinelPolicyConfig = {};
   private policyPath: string;
+  private dynamicAlwaysAskTools = new Set<string>();
 
   constructor(customStorePath?: string, customPolicyPath?: string) {
     this.grantStore = new GrantStore(customStorePath);
     this.auditLog = defaultAuditLog;
     this.policyPath = customPolicyPath || path.resolve(__dirname, '../../../config/sentinel-policy.json');
     this.loadPolicy();
+  }
+
+  public setDynamicAlwaysAskTools(toolNames: string[]): void {
+    this.dynamicAlwaysAskTools = new Set(toolNames);
   }
 
   public getChannelLadder(): ChannelLadderPolicy {
@@ -421,8 +426,11 @@ export class SentinelPolicyManager implements SentinelHook {
     // -------------------------------------------------------------------------
     // 4. 强制要求人工审批的工具 (always_ask_tools)
     // -------------------------------------------------------------------------
-    if (this.policyConfig.always_ask_tools && this.policyConfig.always_ask_tools.includes(name)) {
-      return { isDangerous: true, reason: `工具 [${name}] 在企业安全策略中被配置为必须人工确认 (always_ask_tools)` };
+    if (
+      (this.policyConfig.always_ask_tools && this.policyConfig.always_ask_tools.includes(name)) ||
+      this.dynamicAlwaysAskTools.has(name)
+    ) {
+      return { isDangerous: true, reason: `工具 [${name}] 在安全策略中被标记为敏感操作，必须人工确认` };
     }
 
     // -------------------------------------------------------------------------

@@ -25,6 +25,14 @@ import type {
   FeedActivity,
   SandboxStatus,
   McpServer,
+  McpProbeResult,
+  McpToolCallResult,
+  McpLogEntry,
+  McpCatalogEntry,
+  McpRuntimeStatus,
+  McpParsedImportEntry,
+  McpRiskLevel,
+  McpTransportType,
   Skill,
   SkillFileEntry,
   SkillLifecycleState,
@@ -39,23 +47,24 @@ export function setOnUnauthorizedCallback(cb: () => void) {
   onUnauthorizedCallback = cb;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  const { timeoutMs = 15000, ...fetchOptions } = options;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
-    controller.abort(new Error('请求超时 (15s)，请检查网络连接'));
-  }, 15000);
+    controller.abort(new Error(`请求超时 (${Math.round(timeoutMs / 1000)}s)，请检查网络连接`));
+  }, timeoutMs);
 
-  if (options.signal) {
-    options.signal.addEventListener('abort', () => controller.abort());
+  if (fetchOptions.signal) {
+    fetchOptions.signal.addEventListener('abort', () => controller.abort());
   }
 
   const init: RequestInit = {
-    ...options,
+    ...fetchOptions,
     signal: controller.signal,
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...fetchOptions.headers,
     },
   };
 
@@ -348,12 +357,152 @@ export const api = {
       ladder: res?.channelLadder || res?.channel_ladder,
     } as SandboxStatus;
   },
-  getMcpServers: async (): Promise<{ servers: McpServer[]; totalTools: number }> => {
+  getMcpServers: async (): Promise<{
+    servers: McpServer[];
+    totalTools: number;
+    enabledTools: number;
+    connectedCount: number;
+    estimatedTokens: number;
+    runtimes?: McpRuntimeStatus;
+  }> => {
     const res = await request<any>('/api/mcp/servers');
-    // 服务端返回 { servers, totalTools }
     const servers = Array.isArray(res) ? res : Array.isArray(res?.servers) ? res.servers : [];
-    return { servers, totalTools: typeof res?.totalTools === 'number' ? res.totalTools : 0 };
+    return {
+      servers,
+      totalTools: typeof res?.totalTools === 'number' ? res.totalTools : 0,
+      enabledTools: typeof res?.enabledTools === 'number' ? res.enabledTools : 0,
+      connectedCount: typeof res?.connectedCount === 'number' ? res.connectedCount : 0,
+      estimatedTokens: typeof res?.estimatedTokens === 'number' ? res.estimatedTokens : 0,
+      runtimes: res?.runtimes
+    };
   },
+  getMcpCatalog: () =>
+    request<{ catalog: McpCatalogEntry[]; runtimes: McpRuntimeStatus; installedNames: string[] }>('/api/mcp/catalog'),
+  getMcpJson: () => request<{ json: string }>('/api/mcp/json'),
+  saveMcpJson: (json: string) =>
+    request<{ success: boolean; servers: McpServer[]; json: string }>('/api/mcp/json', {
+      method: 'PUT',
+      timeoutMs: 60000,
+      body: JSON.stringify({ json })
+    }),
+  parseMcpPaste: (text: string) =>
+    request<{ ok: boolean; entries?: McpParsedImportEntry[]; error?: string }>('/api/mcp/parse', {
+      method: 'POST',
+      body: JSON.stringify({ text })
+    }),
+  importMcpServers: (entries: Array<{ name: string; config: Record<string, unknown> }>, connectNow = true) =>
+    request<{ success: boolean; imported: McpServer[]; servers: McpServer[] }>('/api/mcp/import', {
+      method: 'POST',
+      timeoutMs: 60000,
+      body: JSON.stringify({ entries, connectNow })
+    }),
+  probeMcpConfig: (config: Record<string, unknown>) =>
+    request<McpProbeResult>('/api/mcp/probe', {
+      method: 'POST',
+      timeoutMs: 45000,
+      body: JSON.stringify(config)
+    }),
+  addMcpServer: (payload: {
+    name: string;
+    transport?: McpTransportType;
+    command?: string;
+    args?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
+    description?: string;
+    category?: string;
+    docs?: string;
+    timeoutMs?: number;
+    connectTimeoutMs?: number;
+    maxResultBytes?: number;
+    risk?: McpRiskLevel;
+    enabled?: boolean;
+    everyBot?: boolean;
+    assignedBots?: string[];
+    connectNow?: boolean;
+  }) =>
+    request<{ success: boolean; name: string; server: McpServer; servers: McpServer[] }>('/api/mcp/servers', {
+      method: 'POST',
+      timeoutMs: 60000,
+      body: JSON.stringify(payload)
+    }),
+  updateMcpServer: (name: string, payload: Record<string, unknown>) =>
+    request<{ success: boolean; server: McpServer; servers: McpServer[] }>(
+      `/api/mcp/servers/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        timeoutMs: 60000,
+        body: JSON.stringify(payload)
+      }
+    ),
+  patchMcpServer: (name: string, patch: Record<string, unknown>) =>
+    request<{ success: boolean; server: McpServer; servers: McpServer[] }>(
+      `/api/mcp/servers/${encodeURIComponent(name)}`,
+      {
+        method: 'PATCH',
+        timeoutMs: 60000,
+        body: JSON.stringify(patch)
+      }
+    ),
+  deleteMcpServer: (name: string) =>
+    request<{ success: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+      method: 'DELETE'
+    }),
+  testMcpServer: (name: string) =>
+    request<McpProbeResult>(`/api/mcp/servers/${encodeURIComponent(name)}/test`, {
+      method: 'POST',
+      timeoutMs: 45000
+    }),
+  reconnectMcpServer: (name: string) =>
+    request<{ success: boolean; server: McpServer }>(`/api/mcp/servers/${encodeURIComponent(name)}/reconnect`, {
+      method: 'POST',
+      timeoutMs: 60000
+    }),
+  toggleMcpTool: (name: string, toolName: string, enabled: boolean) =>
+    request<{ success: boolean; server: McpServer }>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/tools/toggle`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ toolName, enabled })
+      }
+    ),
+  toggleAllMcpTools: (name: string, enabledAll: boolean) =>
+    request<{ success: boolean; server: McpServer }>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/tools/toggle`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ enabledAll })
+      }
+    ),
+  updateMcpToolPolicy: (
+    name: string,
+    toolName: string,
+    patch: { enabled?: boolean; risk?: McpRiskLevel }
+  ) =>
+    request<{ success: boolean; server: McpServer }>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/tools/${encodeURIComponent(toolName)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch)
+      }
+    ),
+  callMcpTool: (name: string, toolName: string, args: Record<string, unknown>) =>
+    request<McpToolCallResult>(
+      `/api/mcp/servers/${encodeURIComponent(name)}/tools/${encodeURIComponent(toolName)}/call`,
+      {
+        method: 'POST',
+        timeoutMs: 65000,
+        body: JSON.stringify({ args })
+      }
+    ),
+  getMcpServerLogs: (name: string) =>
+    request<{ logs: McpLogEntry[] }>(`/api/mcp/servers/${encodeURIComponent(name)}/logs`),
+  clearMcpServerLogs: (name: string) =>
+    request<{ success: boolean }>(`/api/mcp/servers/${encodeURIComponent(name)}/logs`, {
+      method: 'DELETE'
+    }),
 
   // Connectors 连接器体系
   getConnectors: () =>

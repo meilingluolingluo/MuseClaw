@@ -8,6 +8,7 @@ import {
   Clock,
   Brain,
   Boxes,
+  Plug,
   Package,
   Cpu,
   Settings,
@@ -24,6 +25,7 @@ export const NavRail: React.FC = () => {
     { id: 'routines', label: '定时', icon: <Clock size={20} /> },
     { id: 'memory', label: '记忆', icon: <Brain size={20} /> },
     { id: 'skills', label: '技能', icon: <Boxes size={20} /> },
+    { id: 'mcp', label: 'MCP', icon: <Plug size={20} /> },
     { id: 'artifacts', label: '工件', icon: <Package size={20} /> },
   ];
 

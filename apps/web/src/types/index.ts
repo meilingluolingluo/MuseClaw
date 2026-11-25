@@ -1,4 +1,4 @@
-export type TabType = 'chat' | 'feed' | 'goals' | 'routines' | 'memory' | 'skills' | 'artifacts';
+export type TabType = 'chat' | 'feed' | 'goals' | 'routines' | 'memory' | 'skills' | 'mcp' | 'artifacts';
 
 export interface User {
   id: string;
@@ -445,10 +445,163 @@ export interface SandboxStatus {
   details?: string;
 }
 
+export type McpTransportType = 'stdio' | 'http' | 'sse';
+export type McpServerStatus =
+  | 'connected'
+  | 'connecting'
+  | 'disconnected'
+  | 'error'
+  | 'auth_required'
+  | 'disabled';
+export type McpRiskLevel = 'safe' | 'moderate' | 'sensitive';
+
+export interface McpToolView {
+  name: string;
+  fullName: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  enabled: boolean;
+  risk: McpRiskLevel;
+  estimatedTokens: number;
+}
+
 export interface McpServer {
   name: string;
-  toolCount?: number;
-  tools?: string[];
+  transport: McpTransportType;
+  enabled: boolean;
+  status: McpServerStatus;
+  description: string;
+  category: string;
+  docs?: string;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  url?: string;
+  envMasked: Record<string, string>;
+  headersMasked: Record<string, string>;
+  envKeys: string[];
+  headerKeys: string[];
+  timeoutMs: number;
+  connectTimeoutMs: number;
+  maxResultBytes: number;
+  risk: McpRiskLevel;
+  everyBot: boolean;
+  assignedBots: string[];
+  serverInfo?: { name?: string; version?: string };
+  protocolVersion?: string;
+  connectedAt?: number;
+  lastProbeAt?: number;
+  lastLatencyMs?: number;
+  error?: string;
+  errorKind?: string;
+  toolCount: number;
+  enabledToolCount: number;
+  estimatedTokens: number;
+  tools: McpToolView[];
+  source: 'managed' | 'workspace' | 'catalog';
+}
+
+export interface McpProbeResult {
+  ok: boolean;
+  transport: McpTransportType;
+  latencyMs: number;
+  tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
+  toolCount: number;
+  estimatedTokens: number;
+  serverInfo?: { name?: string; version?: string };
+  protocolVersion?: string;
+  authRequired?: boolean;
+  error?: string;
+  errorKind?: string;
+  server?: McpServer | null;
+}
+
+export interface McpToolCallResult {
+  ok: boolean;
+  server: string;
+  tool: string;
+  fullName: string;
+  durationMs: number;
+  outputText: string;
+  raw?: unknown;
+  truncated: boolean;
+  originalBytes: number;
+  isError?: boolean;
+  error?: string;
+}
+
+export interface McpLogEntry {
+  ts: number;
+  level: 'info' | 'warn' | 'error' | 'stderr';
+  message: string;
+}
+
+export interface McpRuntimeStatus {
+  npx: boolean;
+  node: boolean;
+  uvx: boolean;
+  docker: boolean;
+  python3: boolean;
+}
+
+export interface McpCatalogField {
+  key: string;
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  secret?: boolean;
+  help?: string;
+}
+
+export interface McpCatalogArgField {
+  index: number;
+  key: string;
+  label: string;
+  placeholder?: string;
+  defaultValue?: string;
+  required?: boolean;
+}
+
+export interface McpCatalogEntry {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  transport: McpTransportType;
+  command?: string;
+  args?: string[];
+  url?: string;
+  docs?: string;
+  risk?: McpRiskLevel;
+  requiresRuntime?: keyof McpRuntimeStatus;
+  requiredEnv?: McpCatalogField[];
+  requiredHeaders?: McpCatalogField[];
+  requiredArgs?: McpCatalogArgField[];
+  tags?: string[];
+}
+
+export interface McpImportGap {
+  target: 'env' | 'header' | 'url' | 'arg';
+  key: string;
+  rawValue: string;
+  label: string;
+}
+
+export interface McpParsedImportEntry {
+  name: string;
+  config: {
+    transport?: McpTransportType;
+    command?: string;
+    args?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+    url?: string;
+    headers?: Record<string, string>;
+    description?: string;
+    category?: string;
+  };
+  gaps: McpImportGap[];
+  exists: boolean;
 }
 
 export type ConnectorCategory =

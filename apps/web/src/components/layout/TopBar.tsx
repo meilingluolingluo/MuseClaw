@@ -10,6 +10,7 @@ import {
   Target,
   Clock,
   Boxes,
+  Plug,
   Package,
   Brain,
   User as UserIcon,
@@ -60,6 +61,7 @@ export const TopBar: React.FC = () => {
     routines: { title: '例行自动化调度', icon: <Clock size={16} className="top-bar-tab-icon" /> },
     memory: { title: '员工受控记忆中枢', icon: <Brain size={16} className="top-bar-tab-icon" /> },
     skills: { title: '技能与工具规程库', icon: <Boxes size={16} className="top-bar-tab-icon" /> },
+    mcp: { title: 'MCP 服务与工具总线', icon: <Plug size={16} className="top-bar-tab-icon" /> },
     artifacts: { title: '交付物与成果抽屉', icon: <Package size={16} className="top-bar-tab-icon" /> },
   };
 

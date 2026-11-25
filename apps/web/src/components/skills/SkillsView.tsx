@@ -210,10 +210,15 @@ export const SkillsView: React.FC = () => {
               <Box size={12} />
               {sandbox?.available ? `微沙箱 · ${sandbox.engine}` : '受控子进程'}
             </span>
-            <span className="env-chip">
+            <button
+              type="button"
+              className="env-chip env-chip-link"
+              onClick={() => setTab('mcp')}
+              title="前往 MCP 服务中心配置与调试工具"
+            >
               <Cpu size={12} />
               MCP {mcpServers.length} · {mcpTotalTools} 工具
-            </span>
+            </button>
           </div>
           <p className="skills-sub">
             标准化任务规程、配套沙箱脚本与自学习能力沉淀，支持就地密钥配置、质量体检与真实 Loop 试运行。
