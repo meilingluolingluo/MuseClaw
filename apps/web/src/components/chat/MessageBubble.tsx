@@ -292,18 +292,17 @@ const MessageBubbleComponent: React.FC<MessageBubbleProps> = ({
       data-message-index={messageIndex >= 0 ? messageIndex : undefined}
       data-message-role={message.role}
     >
-      <div className="message-avatar">
-        {isUser ? (
-          <div className="user-message-avatar" title="用户">
-            <UserIcon size={16} />
-          </div>
-        ) : (
-          <BotAvatar bot={bot} size={36} motion="avatar-idle" />
-        )}
-      </div>
-
       <div className="message-bubble" ref={bubbleRef}>
         <div className="message-meta-bar">
+          {isUser ? (
+            <span className="message-inline-user-avatar" aria-hidden="true">
+              <UserIcon size={12} />
+            </span>
+          ) : (
+            <span className="message-inline-avatar" aria-hidden="true">
+              <BotAvatar bot={bot} size={24} motion="avatar-idle" />
+            </span>
+          )}
           <span className="message-sender-name">{isUser ? '我' : bot?.name || '数字员工'}</span>
           {formattedTime && <span className="message-timestamp">{formattedTime}</span>}
         </div>

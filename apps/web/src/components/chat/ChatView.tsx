@@ -1063,6 +1063,7 @@ export const ChatView: React.FC = () => {
         />
 
         <div className="chat-history" ref={chatContainerRef} onScroll={handleScroll}>
+          <div className="chat-history-inner">
           {loadingSession ? (
             <div className="chat-skeleton-container" role="status" aria-live="polite">
               <div className="chat-skeleton-bubble is-user" />
@@ -1231,6 +1232,7 @@ export const ChatView: React.FC = () => {
           )}
 
           <div ref={chatBottomRef} />
+          </div>
         </div>
 
         <TimelineRail

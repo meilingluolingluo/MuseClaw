@@ -1214,7 +1214,38 @@ html[data-theme="dark"] .ansi-fg-cyan { color: #22d3ee; }
   margin-bottom: 8px;
 }
 
-/* 11. 思考卡片增强与消息底部操作栏 */
+/* 11. 思考卡片增强、内联头像与消息底部操作栏 */
+.message-inline-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: var(--om-surface-2);
+}
+
+.message-inline-avatar img,
+.message-inline-avatar video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.message-inline-user-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: color-mix(in srgb, var(--om-bubble-user-fg) 14%, transparent);
+}
+
 .thinking-card.is-thinking-live {
   border-color: color-mix(in srgb, var(--om-accent) 40%, var(--om-border));
 }
@@ -1584,7 +1615,9 @@ html[data-theme="dark"] .ansi-fg-cyan { color: #22d3ee; }
 /* 13. Composer 拖拽、队列、引用、等待条、模型切换与语音 */
 .composer-drag-overlay {
   position: absolute;
-  inset: 6px 24px;
+  inset: 8px var(--chat-col-pad) 16px;
+  max-width: calc(var(--chat-col-max) - var(--chat-col-pad) * 2);
+  margin: 0 auto;
   border-radius: 22px;
   border: 2px dashed var(--om-accent);
   background-color: color-mix(in srgb, var(--om-accent-soft) 88%, transparent);

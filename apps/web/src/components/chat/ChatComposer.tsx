@@ -12,9 +12,7 @@ import {
   ShieldAlert,
   ChevronDown,
   Check,
-<<<<<<< HEAD
   Loader2,
-=======
   Mic,
   MicOff,
   Cpu,
@@ -25,7 +23,6 @@ import {
   Reply,
   Clock,
   UploadCloud,
->>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
 } from 'lucide-react';
 import type { MessageAttachment, Skill } from '../../types';
 import { api } from '../../services/api';
@@ -449,7 +446,6 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
 
   const handleFileUpload = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
-<<<<<<< HEAD
     setIsUploading(true);
     try {
       for (let i = 0; i < files.length; i++) {
@@ -469,24 +465,6 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
           console.warn('File upload failed:', err?.message || err);
           showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
         }
-=======
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const uploadRes = await api.uploadFile(file);
-        setAttachments((prev) => [
-          ...prev,
-          {
-            name: file.name,
-            size: file.size,
-            type: file.type.startsWith('image/') ? 'image' : 'file',
-            url: uploadRes.url,
-          },
-        ]);
-      } catch (err: any) {
-        console.warn('File upload failed:', err?.message || err);
-        showToast(`「${file.name}」上传失败：${err?.message || '请重试'}`, 'error');
->>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
       }
     } finally {
       setIsUploading(false);
@@ -609,10 +587,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
         onChange={(e) => handleFileUpload(e.target.files)}
       />
 
-<<<<<<< HEAD
-      {/* Attachments Preview Bar */}
-      {(attachments.length > 0 || isUploading) && (
-=======
+      <div className="chat-composer-inner">
       {/* 首字等待安抚提示 */}
       {isStreaming && waitingSeconds >= 8 && (
         <div className="composer-wait-line" role="status">
@@ -708,14 +683,12 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
       )}
 
       {/* 附件预览条 */}
-      {attachments.length > 0 && (
->>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
+      {(attachments.length > 0 || isUploading) && (
         <div className="composer-attachments-bar">
           {attachments.map((att, idx) => (
             <div
               key={idx}
-<<<<<<< HEAD
-              className={`composer-attachment-tag ${att.type === 'image' ? 'composer-attachment-image' : ''}`}
+              className={`composer-attachment-tag${att.type === 'image' ? ' composer-attachment-image' : ''}`}
             >
               {att.type === 'image' && att.url ? (
                 <img
@@ -726,22 +699,10 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                   title="点击查看原图"
                 />
               ) : (
-                <span className="attachment-tag-icon">
-                  <Paperclip size={12} />
-                </span>
-              )}
-              <span className="attachment-tag-name" title={att.name}>{att.name}</span>
-=======
-              className={`composer-attachment-tag${att.type === 'image' ? ' composer-attachment-image' : ''}`}
-            >
-              {att.type === 'image' && att.url ? (
-                <img src={att.url} alt={att.name} className="attachment-thumbnail" />
-              ) : (
                 <FileText size={13} className="attachment-tag-icon" />
               )}
-              <span className="attachment-tag-name">{att.name}</span>
+              <span className="attachment-tag-name" title={att.name}>{att.name}</span>
               {att.size ? <span className="attachment-tag-size">{formatFileSize(att.size)}</span> : null}
->>>>>>> d1461ec0b (feat(chat): widen layout, enrich markdown rendering, and upgrade chat UX)
               <button
                 type="button"
                 className="attachment-tag-remove"
@@ -1124,6 +1085,7 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
       <div className="composer-footer-disclaimer">
         <span className="disclaimer-dot" />
         <span>MuseClaw 数字员工运行于受控微沙箱 · 重要系统指令与配置变更将触发门禁审批</span>
+      </div>
       </div>
     </div>
   );
