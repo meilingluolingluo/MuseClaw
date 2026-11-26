@@ -2,10 +2,16 @@ import { spawn } from 'node:child_process';
 import {
   getAugmentedPath,
   findExecutableInPath,
+  expandHomePath,
+  resolveExecutableLaunchTarget,
+  probeClaudeAuth,
+  discoverClaudeModels,
   discoverCodexModels,
   discoverPiModels,
   discoverDuccModels,
-  discoverDucxModels
+  discoverDucxModels,
+  executeVersionProbe,
+  type LocalAgentAuthInfo
 } from './local-agent-prober.ts';
 import { globalRunnerMesh } from './runner-mesh.ts';
 import type { LLMCaller, LLMMessage, ToolDefinition } from './loop.ts';
@@ -16,8 +22,16 @@ import { splitReasoningAndContent } from './reasoning.ts';
 export interface LocalAgentRunOptions {
   model?: string;
   cwd?: string;
-  timeoutMs?: number;
+  binaryPath?: string;
+  configDir?: string;
+  extraArgs?: string;
+  env?: Record<string, string>;
+  baseUrl?: string;
   apiKey?: string;
+  maxTurns?: number;
+  disableHooks?: boolean;
+  disableMcp?: boolean;
+  timeoutMs?: number;
   userId?: string;
   targetMachineId?: string;
   onChunk?: (delta: string, reasoningDelta?: string) => void;
@@ -29,6 +43,136 @@ export interface LocalAgentRunResult {
   reasoning?: string;
   latencyMs: number;
   error?: string;
+}
+
+export interface LocalAgentTestResult {
+  ok: boolean;
+  latencyMs: number;
+  version?: string;
+  auth?: LocalAgentAuthInfo;
+  replyPreview?: string;
+  diagnosticCode?: 'ready' | 'not_found' | 'unauthenticated' | 'execution_failed';
+  error?: string;
+}
+
+export type ClaudeStreamEvent =
+  | { kind: 'init'; model?: string; version?: string; sessionId?: string; apiKeySource?: string }
+  | { kind: 'text_delta'; text: string }
+  | { kind: 'thinking_delta'; thinking: string }
+  | { kind: 'assistant'; textParts: string[]; thinkingParts: string[]; isApiError?: boolean; errorCode?: string }
+  | { kind: 'result'; text?: string; isError: boolean; errorMessage?: string; durationMs?: number; sessionId?: string };
+
+/**
+ * 解析附加 CLI 参数字符串（支持单引号与双引号包裹的带空格参数）
+ */
+export function parseCliExtraArgs(raw?: string): string[] {
+  if (!raw || !raw.trim()) return [];
+  const tokens: string[] = [];
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    const val = match[1] ?? match[2] ?? match[3];
+    if (val !== undefined && val.length > 0) {
+      tokens.push(val);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * 解析 Claude Code `--output-format stream-json` 输出的单行 NDJSON 事件
+ */
+export function parseClaudeStreamLine(line: string): ClaudeStreamEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed || !trimmed.startsWith('{')) return null;
+
+  let parsed: Record<string, any>;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (parsed.type === 'system' && parsed.subtype === 'init') {
+    return {
+      kind: 'init',
+      model: typeof parsed.model === 'string' ? parsed.model : undefined,
+      version: typeof parsed.claude_code_version === 'string' ? parsed.claude_code_version : undefined,
+      sessionId: typeof parsed.session_id === 'string' ? parsed.session_id : undefined,
+      apiKeySource: typeof parsed.apiKeySource === 'string' ? parsed.apiKeySource : undefined
+    };
+  }
+
+  if (parsed.type === 'stream_event' && parsed.event && typeof parsed.event === 'object') {
+    const ev = parsed.event;
+    if (ev.type === 'content_block_delta' && ev.delta && typeof ev.delta === 'object') {
+      if (ev.delta.type === 'text_delta' && typeof ev.delta.text === 'string' && ev.delta.text.length > 0) {
+        return { kind: 'text_delta', text: ev.delta.text };
+      }
+      if (ev.delta.type === 'thinking_delta' && typeof ev.delta.thinking === 'string' && ev.delta.thinking.length > 0) {
+        return { kind: 'thinking_delta', thinking: ev.delta.thinking };
+      }
+    }
+    return null;
+  }
+
+  if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+    const textParts: string[] = [];
+    const thinkingParts: string[] = [];
+    for (const part of parsed.message.content) {
+      if (part && part.type === 'thinking' && typeof part.thinking === 'string' && part.thinking.trim()) {
+        thinkingParts.push(part.thinking.trim());
+      } else if (part && part.type === 'text' && typeof part.text === 'string' && part.text.length > 0) {
+        textParts.push(part.text);
+      }
+    }
+    return {
+      kind: 'assistant',
+      textParts,
+      thinkingParts,
+      isApiError: Boolean(parsed.is_api_error_message),
+      errorCode: typeof parsed.error === 'string' ? parsed.error : undefined
+    };
+  }
+
+  if (parsed.type === 'result') {
+    const isError = Boolean(parsed.is_error);
+    const resultText = typeof parsed.result === 'string' ? parsed.result : undefined;
+    return {
+      kind: 'result',
+      text: resultText,
+      isError,
+      errorMessage: isError ? resultText || 'Claude Code 执行返回错误' : undefined,
+      durationMs: typeof parsed.duration_ms === 'number' ? parsed.duration_ms : undefined,
+      sessionId: typeof parsed.session_id === 'string' ? parsed.session_id : undefined
+    };
+  }
+
+  return null;
+}
+
+function formatClaudeFriendlyError(rawError: string, errorCode?: string): string {
+  const lower = rawError.toLowerCase();
+  if (
+    errorCode === 'authentication_failed' ||
+    lower.includes('not logged in') ||
+    lower.includes('please run /login') ||
+    lower.includes('authentication_failed')
+  ) {
+    return 'Claude Code 尚未登录认证。请在终端运行 `claude auth login` 完成登录，或在配置面板中填写自定义 API Base URL 与 Key。';
+  }
+  return rawError;
+}
+
+function isRunningAsRoot(): boolean {
+  return (
+    (typeof process.getuid === 'function' && process.getuid() === 0) ||
+    process.env.USER === 'root' ||
+    process.env.LOGNAME === 'root' ||
+    Boolean(process.env.SUDO_USER) ||
+    Boolean(process.env.SUDO_UID) ||
+    process.env.UID === '0'
+  );
 }
 
 /**
@@ -48,19 +192,16 @@ export function resolveModelAlias(
 
   const clean = requestedModel.trim();
 
-  // 1. 精确匹配
   if (availableModels.includes(clean)) {
     return clean;
   }
 
-  // 2. 忽略大小写精确匹配
   const lower = clean.toLowerCase();
   const exactCase = availableModels.find((m) => m.toLowerCase() === lower);
   if (exactCase) {
     return exactCase;
   }
 
-  // 3. 常见模型别名/系列族模糊归一化
   const keywords = ['deepseek', 'sonnet', 'opus', 'haiku', 'claude', 'gpt-6', 'gpt-5', 'gpt-4', 'glm', 'kimi', 'ernie', 'grok', 'minimax', 'qwen'];
   for (const kw of keywords) {
     if (lower.includes(kw)) {
@@ -71,52 +212,82 @@ export function resolveModelAlias(
     }
   }
 
-  // 4. 任意子串包含匹配
   const partial = availableModels.find((m) => m.toLowerCase().includes(lower) || lower.includes(m.toLowerCase()));
   if (partial) {
     return partial;
   }
 
-  // 5. 兜底回退为当前可用默认模型或列表首个模型
   return defaultModel || availableModels[0];
 }
 
 /**
- * 快速测试指定本地 Agent 的健康度与延迟 (支持携带具体模型与指定用户专属节点进行真实探针验证)
+ * 快速测试指定本地 Agent 的健康度、认证状态与延迟
  */
 export async function testLocalAgent(
   agentId: string,
   model?: string,
-  userId?: string
-): Promise<{ ok: boolean; latencyMs: number; version?: string; error?: string }> {
+  userId?: string,
+  options: LocalAgentRunOptions = {}
+): Promise<LocalAgentTestResult> {
   const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId, userId);
-  const exe = findExecutableInPath(agentId);
+  const exe = options.binaryPath
+    ? findExecutableInPath(options.binaryPath)
+    : findExecutableInPath(agentId);
 
-  // 1. 如果网关未安装但有远程节点，或明确路由至远程计算节点
+  // 1. 远程节点路由
   if (remoteRunner && (!exe || userId)) {
     const rt = remoteRunner.runtimes.find((r) => r.id === agentId);
     if (!rt) {
-      return { ok: false, latencyMs: 0, error: `远程计算节点 (${remoteRunner.hostname}) 未就绪运行时: ${agentId}` };
+      return {
+        ok: false,
+        latencyMs: 0,
+        diagnosticCode: 'not_found',
+        error: `远程计算节点 (${remoteRunner.hostname}) 未就绪运行时: ${agentId}`
+      };
     }
 
-    // 若指定了模型，派发轻量级探针任务验证端到端可用性
-    if (model) {
-      const runResult = await globalRunnerMesh.dispatchTask(agentId, 'Hi', {
+    if (rt.auth?.status === 'unauthenticated' && !options.baseUrl && !options.apiKey) {
+      return {
+        ok: false,
+        latencyMs: 0,
+        version: rt.version,
+        auth: rt.auth,
+        diagnosticCode: 'unauthenticated',
+        error: rt.statusMessage || `远程计算节点 (${remoteRunner.hostname}) 的 ${agentId} 尚未登录认证`
+      };
+    }
+
+    if (model || agentId === 'claude') {
+      const runResult = await globalRunnerMesh.dispatchTask(agentId, 'Reply with just: OK', {
         model,
         userId,
         targetMachineId: remoteRunner.id,
-        timeoutMs: 15000
+        binaryPath: options.binaryPath,
+        configDir: options.configDir,
+        cwd: options.cwd,
+        extraArgs: options.extraArgs,
+        env: options.env,
+        baseUrl: options.baseUrl,
+        apiKey: options.apiKey,
+        maxTurns: agentId === 'claude' ? 1 : undefined,
+        timeoutMs: 25000
       });
       if (runResult.ok) {
         return {
           ok: true,
           latencyMs: runResult.latencyMs,
-          version: `${rt.version || '在线就绪'} (节点: ${remoteRunner.hostname})`
+          version: `${rt.version || '在线就绪'} (节点: ${remoteRunner.hostname})`,
+          auth: rt.auth,
+          replyPreview: runResult.text.trim().slice(0, 100),
+          diagnosticCode: 'ready'
         };
       }
       return {
         ok: false,
         latencyMs: runResult.latencyMs,
+        version: rt.version,
+        auth: rt.auth,
+        diagnosticCode: 'execution_failed',
         error: runResult.error || `远程计算节点 (${remoteRunner.hostname}) 模型验证未通过`
       };
     }
@@ -124,50 +295,124 @@ export async function testLocalAgent(
     return {
       ok: true,
       latencyMs: 15,
-      version: `${rt.version || '在线就绪'} (节点: ${remoteRunner.hostname})`
+      version: `${rt.version || '在线就绪'} (节点: ${remoteRunner.hostname})`,
+      auth: rt.auth,
+      diagnosticCode: 'ready'
     };
   }
 
   // 2. 本地执行程序检测
   if (!exe) {
     const userHint = userId ? ` (所属用户: ${userId})` : '';
-    return { ok: false, latencyMs: 0, error: `未在系统 PATH 或已连接的远程计算节点${userHint}中找到: ${agentId}` };
+    const pathHint = options.binaryPath ? `自定义路径 "${options.binaryPath}"` : `系统 PATH 或远程节点${userHint}`;
+    return {
+      ok: false,
+      latencyMs: 0,
+      diagnosticCode: 'not_found',
+      error: `未在${pathHint}中找到: ${agentId}`
+    };
   }
 
-  if (model) {
-    const runResult = await runLocalAgent(agentId, 'Hi', { model, userId, timeoutMs: 15000 });
-    if (runResult.ok) {
-      return { ok: true, latencyMs: runResult.latencyMs, version: `本地就绪 (${runResult.latencyMs}ms)` };
+  // 3. Claude Code 专属双段式探测（先检查版本与认证态，就绪后再发轻量级真实对话探针）
+  if (agentId === 'claude') {
+    const start = Date.now();
+    const versionProbe = await executeVersionProbe(exe, ['--version']);
+    if (!versionProbe.ok) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        diagnosticCode: 'execution_failed',
+        error: versionProbe.error || 'Claude Code --version 执行失败'
+      };
     }
-    return { ok: false, latencyMs: runResult.latencyMs, error: runResult.error || '本地 Agent 模型验证未通过' };
+
+    const discovery = discoverClaudeModels(options.configDir, exe);
+    const authProbe = await probeClaudeAuth(
+      exe,
+      {
+        binaryPath: options.binaryPath,
+        configDir: options.configDir,
+        baseUrl: options.baseUrl,
+        apiKey: options.apiKey,
+        env: options.env
+      },
+      discovery.settingsEnv
+    );
+
+    if (authProbe.status === 'unauthenticated') {
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        version: versionProbe.version,
+        auth: authProbe.auth,
+        diagnosticCode: 'unauthenticated',
+        error: authProbe.statusMessage || 'Claude Code 尚未完成认证，请先登录或配置自定义网关。'
+      };
+    }
+
+    const runResult = await runLocalAgent('claude', 'Reply with just: OK', {
+      ...options,
+      model,
+      maxTurns: 1,
+      disableHooks: true,
+      disableMcp: true,
+      timeoutMs: 25000
+    });
+
+    if (runResult.ok) {
+      return {
+        ok: true,
+        latencyMs: runResult.latencyMs,
+        version: versionProbe.version,
+        auth: authProbe.auth,
+        replyPreview: runResult.text.trim().slice(0, 100),
+        diagnosticCode: 'ready'
+      };
+    }
+
+    const isUnauth = runResult.error?.includes('尚未登录认证') || runResult.error?.includes('Not logged in');
+    return {
+      ok: false,
+      latencyMs: runResult.latencyMs,
+      version: versionProbe.version,
+      auth: authProbe.auth,
+      diagnosticCode: isUnauth ? 'unauthenticated' : 'execution_failed',
+      error: runResult.error || 'Claude Code 探针调用失败'
+    };
+  }
+
+  // 4. 其他本地 Agent 验证
+  if (model) {
+    const runResult = await runLocalAgent(agentId, 'Hi', { ...options, model, userId, timeoutMs: 15000 });
+    if (runResult.ok) {
+      return {
+        ok: true,
+        latencyMs: runResult.latencyMs,
+        version: `本地就绪 (${runResult.latencyMs}ms)`,
+        replyPreview: runResult.text.trim().slice(0, 100),
+        diagnosticCode: 'ready'
+      };
+    }
+    return {
+      ok: false,
+      latencyMs: runResult.latencyMs,
+      diagnosticCode: 'execution_failed',
+      error: runResult.error || '本地 Agent 模型验证未通过'
+    };
   }
 
   const start = Date.now();
-  return new Promise((resolve) => {
-    const child = spawn(exe, ['--version'], {
-      env: { ...process.env, PATH: getAugmentedPath() },
-      timeout: 4000,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-
-    child.on('close', (code) => {
-      const latencyMs = Date.now() - start;
-      if (code === 0) {
-        resolve({ ok: true, latencyMs, version: stdout.trim().split('\n')[0] });
-      } else {
-        resolve({ ok: false, latencyMs, error: stderr.trim() || `进程异常退出 (code ${code})` });
-      }
-    });
-
-    child.on('error', (err) => {
-      resolve({ ok: false, latencyMs: Date.now() - start, error: err.message });
-    });
-  });
+  const ver = await executeVersionProbe(exe, ['--version']);
+  const latencyMs = Date.now() - start;
+  if (ver.ok) {
+    return { ok: true, latencyMs, version: ver.version, diagnosticCode: 'ready' };
+  }
+  return {
+    ok: false,
+    latencyMs,
+    diagnosticCode: 'execution_failed',
+    error: ver.error || '进程探针异常退出'
+  };
 }
 
 /**
@@ -178,54 +423,89 @@ export async function runLocalAgent(
   prompt: string,
   options: LocalAgentRunOptions = {}
 ): Promise<LocalAgentRunResult> {
-  // 1. 如果指定了用户专属节点且该节点在线，优先派发至用户个人节点执行
-  if (options.userId) {
+  // 1. 若用户有在线远程节点且未强指定本机自定义二进制路径，优先路由到用户的计算节点
+  if (options.userId && !options.binaryPath) {
     const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId, options.userId);
     if (remoteRunner) {
-      return globalRunnerMesh.dispatchTask(agentId, prompt, { ...options, targetMachineId: remoteRunner.id });
+      return globalRunnerMesh.dispatchTask(agentId, prompt, {
+        ...options,
+        targetMachineId: remoteRunner.id
+      });
     }
   }
 
-  // 2. 检查当前网关本地是否存在该可执行程序
-  const exe = findExecutableInPath(agentId);
+  // 2. 查找当前主机可执行文件
+  const exe = options.binaryPath
+    ? findExecutableInPath(options.binaryPath)
+    : findExecutableInPath(agentId);
   if (!exe) {
-    const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId);
-    if (remoteRunner) {
-      return globalRunnerMesh.dispatchTask(agentId, prompt, { ...options, targetMachineId: remoteRunner.id });
+    if (!options.binaryPath) {
+      const remoteRunner = globalRunnerMesh.findAvailableRunnerForAgent(agentId);
+      if (remoteRunner) {
+        return globalRunnerMesh.dispatchTask(agentId, prompt, {
+          ...options,
+          targetMachineId: remoteRunner.id
+        });
+      }
     }
     const userHint = options.userId ? ` (所属用户: ${options.userId})` : '';
-    return { ok: false, text: '', latencyMs: 0, error: `未在服务器或已连接的远程计算节点${userHint}中找到 ${agentId}。请在个人电脑上运行伴侣命令连接此网关。` };
+    return {
+      ok: false,
+      text: '',
+      latencyMs: 0,
+      error: options.binaryPath
+        ? `未在自定义路径找到 ${agentId}: ${options.binaryPath}`
+        : `未在服务器或已连接的远程计算节点${userHint}中找到 ${agentId}。请在个人电脑上运行伴侣命令连接此网关。`
+    };
   }
 
   const start = Date.now();
-  const timeoutMs = options.timeoutMs || 90000;
+  const timeoutMs = options.timeoutMs || 120000;
+  const extraCliArgs = parseCliExtraArgs(options.extraArgs);
 
   let args: string[] = [];
   let feedViaStdin = true;
 
-  if (agentId === 'codex') {
+  if (agentId === 'claude') {
+    args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+    if (options.disableHooks !== false) {
+      args.push('--settings', JSON.stringify({ disableAllHooks: true }));
+    }
+    if (options.disableMcp !== false) {
+      args.push('--strict-mcp-config', '--mcp-config', JSON.stringify({ mcpServers: {} }));
+    }
+    if (options.maxTurns && options.maxTurns > 0) {
+      args.push('--max-turns', String(options.maxTurns));
+    }
+    if (!isRunningAsRoot() && !extraCliArgs.includes('--permission-mode')) {
+      args.push('--dangerously-skip-permissions');
+    }
+    const requestedModel = options.model?.trim();
+    if (requestedModel && requestedModel !== 'default' && requestedModel !== 'auto') {
+      args.push('--model', requestedModel);
+    }
+    if (extraCliArgs.length > 0) {
+      args.push(...extraCliArgs);
+    }
+  } else if (agentId === 'codex') {
     args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
-    const codexInfo = discoverCodexModels();
+    const codexInfo = discoverCodexModels(options.configDir);
     const targetModel = resolveModelAlias(options.model, codexInfo.models, codexInfo.defaultModel);
     if (targetModel) {
       args.push('--model', targetModel);
     }
+    if (extraCliArgs.length > 0) args.push(...extraCliArgs);
     args.push('-');
   } else if (agentId === 'pi') {
     args = ['-p', '--no-session'];
-    const piInfo = discoverPiModels();
+    const piInfo = discoverPiModels(options.configDir);
     const targetModel = resolveModelAlias(options.model, piInfo.models, piInfo.defaultModel);
     if (targetModel) {
       args.push('--model', targetModel);
     }
+    if (extraCliArgs.length > 0) args.push(...extraCliArgs);
   } else if (agentId === 'ducc') {
-    const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
-                   process.env.USER === 'root' ||
-                   process.env.LOGNAME === 'root' ||
-                   Boolean(process.env.SUDO_USER) ||
-                   Boolean(process.env.SUDO_UID) ||
-                   process.env.UID === '0';
-    args = isRoot
+    args = isRunningAsRoot()
       ? ['-p', '--output-format=stream-json', '--verbose']
       : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
     const duccInfo = discoverDuccModels();
@@ -233,6 +513,7 @@ export async function runLocalAgent(
     if (targetModel) {
       args.push('--model', targetModel);
     }
+    if (extraCliArgs.length > 0) args.push(...extraCliArgs);
   } else if (agentId === 'ducx') {
     args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
     const ducxInfo = discoverDucxModels();
@@ -240,31 +521,78 @@ export async function runLocalAgent(
     if (targetModel) {
       args.push('--model', targetModel);
     }
+    if (extraCliArgs.length > 0) args.push(...extraCliArgs);
     args.push('-');
   } else if (agentId === 'dsh') {
-    args = ['headless', prompt];
+    args = ['headless', ...extraCliArgs, prompt];
     feedViaStdin = false;
   } else {
-    args = [prompt];
+    args = [...extraCliArgs, prompt];
     feedViaStdin = false;
   }
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: getAugmentedPath(),
-    IS_SANDBOX: '1',
-    CLAUDE_ALLOW_ROOT: '1',
-    ...(options.apiKey ? { DEEPSEEK_API_KEY: options.apiKey } : {})
+    CLAUDE_CODE_AUTO_CONNECT_IDE: '0',
+    CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1',
+    ENABLE_CLAUDEAI_MCP_SERVERS: 'false'
   };
+
+  if (agentId !== 'claude') {
+    env.IS_SANDBOX = '1';
+    env.CLAUDE_ALLOW_ROOT = '1';
+  }
+
+  const expandedConfigDir = expandHomePath(options.configDir);
+  if (expandedConfigDir) {
+    if (agentId === 'claude') env.CLAUDE_CONFIG_DIR = expandedConfigDir;
+    else if (agentId === 'codex') env.CODEX_HOME = expandedConfigDir;
+  }
+
+  if (options.baseUrl && !options.baseUrl.startsWith('local://') && agentId === 'claude') {
+    env.ANTHROPIC_BASE_URL = options.baseUrl.trim();
+  }
+
+  if (options.apiKey && options.apiKey.trim()) {
+    if (agentId === 'claude') {
+      const cleanKey = options.apiKey.trim();
+      env.ANTHROPIC_API_KEY = cleanKey;
+      if (env.ANTHROPIC_BASE_URL && !env.ANTHROPIC_AUTH_TOKEN) {
+        env.ANTHROPIC_AUTH_TOKEN = cleanKey;
+      }
+    } else {
+      env.DEEPSEEK_API_KEY = options.apiKey.trim();
+    }
+  }
+
+  if (options.env) {
+    for (const [k, v] of Object.entries(options.env)) {
+      if (typeof v === 'string' && v.trim() !== '') {
+        env[k] = v;
+      }
+    }
+  }
+
+  const expandedCwd = expandHomePath(options.cwd);
+  const spawnTarget = resolveExecutableLaunchTarget(exe);
 
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
+    let streamLineBuf = '';
+    let claudeDeltaText = '';
+    let claudeDeltaReasoning = '';
+    let claudeAssistantText = '';
+    let claudeAssistantReasoning = '';
+    let claudeResultText = '';
+    let claudeErrorText = '';
+    let claudeErrorCode: string | undefined;
 
-    const child = spawn(exe, args, {
-      cwd: options.cwd || process.cwd(),
+    const child = spawn(spawnTarget.command, [...spawnTarget.argsPrefix, ...args], {
+      cwd: expandedCwd || process.cwd(),
       env,
-      timeout: timeoutMs,
+      timeout: timeoutMs
     });
 
     if (feedViaStdin) {
@@ -277,6 +605,51 @@ export async function runLocalAgent(
     child.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
+
+      if (agentId === 'claude') {
+        streamLineBuf += text;
+        const lines = streamLineBuf.split('\n');
+        streamLineBuf = lines.pop() || '';
+        for (const line of lines) {
+          const ev = parseClaudeStreamLine(line);
+          if (!ev) continue;
+          if (ev.kind === 'text_delta') {
+            claudeDeltaText += ev.text;
+            options.onChunk?.(ev.text);
+          } else if (ev.kind === 'thinking_delta') {
+            claudeDeltaReasoning += ev.thinking;
+            options.onChunk?.('', ev.thinking);
+          } else if (ev.kind === 'assistant') {
+            if (ev.isApiError) {
+              claudeErrorCode = ev.errorCode;
+              claudeErrorText = ev.textParts.join('\n').trim();
+            } else {
+              if (ev.thinkingParts.length > 0) {
+                const th = ev.thinkingParts.join('\n\n');
+                if (!claudeDeltaReasoning && th) {
+                  options.onChunk?.('', th);
+                }
+                claudeAssistantReasoning = (claudeAssistantReasoning ? `${claudeAssistantReasoning}\n\n` : '') + th;
+              }
+              if (ev.textParts.length > 0) {
+                const txt = ev.textParts.join('');
+                if (!claudeDeltaText && txt) {
+                  options.onChunk?.(txt);
+                }
+                claudeAssistantText += txt;
+              }
+            }
+          } else if (ev.kind === 'result') {
+            if (ev.isError) {
+              claudeErrorText = ev.errorMessage || claudeErrorText || 'Claude Code 返回执行错误';
+            } else if (ev.text) {
+              claudeResultText = ev.text;
+            }
+          }
+        }
+        return;
+      }
+
       if (options.onChunk) {
         options.onChunk(text);
       }
@@ -288,6 +661,70 @@ export async function runLocalAgent(
 
     child.on('close', (code) => {
       const latencyMs = Date.now() - start;
+
+      if (agentId === 'claude') {
+        if (streamLineBuf.trim()) {
+          const ev = parseClaudeStreamLine(streamLineBuf);
+          if (ev) {
+            if (ev.kind === 'text_delta') {
+              claudeDeltaText += ev.text;
+              options.onChunk?.(ev.text);
+            } else if (ev.kind === 'thinking_delta') {
+              claudeDeltaReasoning += ev.thinking;
+              options.onChunk?.('', ev.thinking);
+            } else if (ev.kind === 'assistant') {
+              if (ev.isApiError) {
+                claudeErrorCode = ev.errorCode;
+                claudeErrorText = ev.textParts.join('\n').trim();
+              } else {
+                if (ev.thinkingParts.length > 0) {
+                  claudeAssistantReasoning =
+                    (claudeAssistantReasoning ? `${claudeAssistantReasoning}\n\n` : '') +
+                    ev.thinkingParts.join('\n\n');
+                }
+                if (ev.textParts.length > 0) {
+                  claudeAssistantText += ev.textParts.join('');
+                }
+              }
+            } else if (ev.kind === 'result') {
+              if (ev.isError) {
+                claudeErrorText = ev.errorMessage || claudeErrorText;
+              } else if (ev.text) {
+                claudeResultText = ev.text;
+              }
+            }
+          }
+        }
+
+        if (claudeErrorText) {
+          return resolve({
+            ok: false,
+            text: '',
+            latencyMs,
+            error: formatClaudeFriendlyError(claudeErrorText, claudeErrorCode)
+          });
+        }
+
+        const finalText = (claudeDeltaText || claudeAssistantText || claudeResultText).trim();
+        const finalReasoning = (claudeDeltaReasoning || claudeAssistantReasoning).trim() || undefined;
+        if (code === 0 && finalText) {
+          return resolve({
+            ok: true,
+            text: finalText,
+            reasoning: finalReasoning,
+            latencyMs
+          });
+        }
+
+        const rawErr = stderr.trim() || stdout.trim() || `Claude Code 异常退出 (code ${code})`;
+        return resolve({
+          ok: false,
+          text: finalText,
+          latencyMs,
+          error: formatClaudeFriendlyError(rawErr, claudeErrorCode)
+        });
+      }
+
       if (code === 0 && stdout.trim()) {
         let extractedText = stdout.trim();
         let extractedReasoning: string | undefined;
@@ -419,7 +856,7 @@ export function formatLLMMessagesToPrompt(messages: LLMMessage[]): string {
 }
 
 /**
- * 创建对接本地 Agent 的 LLMCaller 实例 (支持按用户路由隔离)
+ * 创建对接本地 Agent 的 LLMCaller 实例 (支持按用户路由隔离与本地运行时配置覆写)
  */
 export function createLocalAgentCaller(
   config: ModelProviderConfig,
@@ -431,13 +868,19 @@ export function createLocalAgentCaller(
     onChunk?: (delta: string, reasoningDelta?: string) => void
   ) => {
     const prompt = formatLLMMessagesToPrompt(messages);
-    const apiKey = resolveApiKey(config.apiKey, config.id) || resolveApiKey(undefined, 'deepseek');
+    const apiKey = resolveApiKey(config.apiKey, config.id) || (config.id === 'dsh' ? resolveApiKey(undefined, 'deepseek') : '');
 
     let accumulatedReasoning = '';
     let streamBuffer = '';
     const res = await runLocalAgent(config.id, prompt, {
       model: config.model,
-      apiKey,
+      apiKey: apiKey || undefined,
+      baseUrl: config.baseUrl,
+      binaryPath: config.binaryPath,
+      configDir: config.configDir,
+      cwd: config.cwd,
+      extraArgs: config.extraArgs,
+      env: config.env,
       userId: callerOptions.userId,
       onChunk: (chunk, reasoning) => {
         if (!onChunk) return;
@@ -448,7 +891,11 @@ export function createLocalAgentCaller(
         }
         if (!chunk) return;
 
-        // 如果是已由远程 Runner 提取的纯文本增量，直接透传至前端
+        if (config.id === 'claude') {
+          onChunk(chunk);
+          return;
+        }
+
         if (!chunk.includes('{"type":') && !chunk.startsWith('{')) {
           onChunk(chunk);
           return;

@@ -20,6 +20,35 @@ export const ClawLogo: React.FC<{ size?: number; color?: string; className?: str
 
 export const ProviderIcon: React.FC<{ providerId: string; size?: number }> = ({ providerId, size = 20 }) => {
   const p = (providerId || '').toLowerCase();
+  if (p === 'claude') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="20" height="20" x="2" y="2" rx="6" fill="#D97757" />
+        <path
+          fill="#FFFFFF"
+          d="M12 6.2l1.25 4.25 4.25 1.25-4.25 1.25L12 17.2l-1.25-4.25-4.25-1.25 4.25-1.25L12 6.2z"
+        />
+      </svg>
+    );
+  }
+  if (p === 'ollama') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="20" height="20" x="2" y="2" rx="6" fill="#18181B" />
+        <circle cx="9.5" cy="11" r="1.4" fill="#FFFFFF" />
+        <circle cx="14.5" cy="11" r="1.4" fill="#FFFFFF" />
+        <path d="M9.5 14.8c1.5 1.2 3.5 1.2 5 0" stroke="#FFFFFF" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+      </svg>
+    );
+  }
+  if (p === 'dsh') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="20" height="20" x="2" y="2" rx="6" fill="#4F46E5" />
+        <path d="M7.5 9l3.5 3-3.5 3M12 15h4.5" stroke="#FFFFFF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      </svg>
+    );
+  }
   if (p === 'deepseek') {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

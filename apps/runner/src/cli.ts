@@ -1,11 +1,19 @@
 #!/usr/bin/env node
-import { spawn, execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, copyFileSync } from 'node:fs';
+import { spawn, execSync, execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import os, { homedir, hostname } from 'node:os';
-import path, { delimiter, join } from 'node:path';
+import path, { delimiter, dirname, extname, join } from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import readline from 'node:readline';
+
+interface RuntimeAuthInfo {
+  status: 'authenticated' | 'unauthenticated' | 'unknown';
+  method?: string;
+  label?: string;
+  email?: string;
+  endpoint?: string;
+}
 
 interface RuntimeDef {
   id: string;
@@ -14,6 +22,10 @@ interface RuntimeDef {
   executablePath?: string;
   models: string[];
   defaultModel: string;
+  protocol?: string;
+  status?: 'ready' | 'unauthenticated' | 'warning' | 'error' | 'not_found';
+  statusMessage?: string;
+  auth?: RuntimeAuthInfo;
 }
 
 interface RunnerTask {
@@ -22,12 +34,84 @@ interface RunnerTask {
   model?: string;
   prompt: string;
   timeoutMs: number;
+  binaryPath?: string;
+  configDir?: string;
+  cwd?: string;
+  extraArgs?: string;
+  env?: Record<string, string>;
+  baseUrl?: string;
+  apiKey?: string;
+  maxTurns?: number;
+}
+
+const WINDOWS_SHIM_EXTENSIONS = new Set(['.cmd', '.bat', '.ps1']);
+const CLAUDE_PACKAGE_ENTRIES = [
+  ['node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'],
+  ['node_modules', '@anthropic-ai', 'claude-code', 'cli.js'],
+  ['..', 'Packages', 'Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe', 'claude.exe']
+];
+
+function expandHomePath(inputPath?: string): string | undefined {
+  if (!inputPath) return undefined;
+  const trimmed = inputPath.trim();
+  if (!trimmed) return undefined;
+  if (trimmed === '~') return homedir();
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  return trimmed;
+}
+
+function isExistingFile(filePath: string): boolean {
+  try {
+    return existsSync(filePath) && statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveExecutableLaunchTarget(executablePath: string): { command: string; argsPrefix: string[] } {
+  if (process.platform !== 'win32') {
+    return { command: executablePath, argsPrefix: [] };
+  }
+  const ext = extname(executablePath).toLowerCase();
+  if (!WINDOWS_SHIM_EXTENSIONS.has(ext)) {
+    return { command: executablePath, argsPrefix: [] };
+  }
+  const shimDir = dirname(executablePath);
+  for (const segments of CLAUDE_PACKAGE_ENTRIES) {
+    const candidate = join(shimDir, ...segments);
+    if (isExistingFile(candidate)) {
+      if (candidate.toLowerCase().endsWith('.js')) {
+        return { command: process.execPath, argsPrefix: [candidate] };
+      }
+      return { command: candidate, argsPrefix: [] };
+    }
+  }
+  return { command: executablePath, argsPrefix: [] };
+}
+
+function parseCliExtraArgs(raw?: string): string[] {
+  if (!raw || !raw.trim()) return [];
+  const tokens: string[] = [];
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    const val = match[1] ?? match[2] ?? match[3];
+    if (val !== undefined && val.length > 0) {
+      tokens.push(val);
+    }
+  }
+  return tokens;
 }
 
 function getAugmentedPath(): string {
   const home = homedir();
   const extraDirs = [
     join(home, '.local', 'bin'),
+    join(home, '.npm-global', 'bin'),
+    join(home, '.bun', 'bin'),
+    join(home, '.volta', 'bin'),
     join(home, '.baidu-cc', 'baidu-cc', 'bin'),
     join(home, '.comate', 'baidu-cc', 'bin'),
     join(home, '.baidu-cx', 'baidu-cx', 'bin'),
@@ -44,15 +128,53 @@ function getAugmentedPath(): string {
 }
 
 function findExecutable(command: string): string | null {
-  if (existsSync(command)) return command;
+  const expanded = expandHomePath(command) || command;
+  if (!expanded) return null;
+  const isExplicit = expanded.includes('/') || expanded.includes('\\') || expanded.startsWith('.');
+  if (isExplicit || isExistingFile(expanded)) {
+    if (isExistingFile(expanded)) return expanded;
+    if (process.platform === 'win32') {
+      for (const ext of ['.exe', '.cmd', '.bat']) {
+        if (isExistingFile(`${expanded}${ext}`)) return `${expanded}${ext}`;
+      }
+    }
+    if (isExplicit) return null;
+  }
+
   const pathEnv = getAugmentedPath();
   const dirs = pathEnv.split(delimiter);
+  const candidates = process.platform === 'win32' && !extname(expanded)
+    ? [expanded, `${expanded}.exe`, `${expanded}.cmd`, `${expanded}.bat`]
+    : [expanded];
+
   for (const dir of dirs) {
     if (!dir) continue;
-    const fullPath = join(dir, command);
-    if (existsSync(fullPath)) return fullPath;
+    for (const name of candidates) {
+      const fullPath = join(dir, name);
+      if (isExistingFile(fullPath)) return fullPath;
+    }
   }
   return null;
+}
+
+function probeVersionSafe(executablePath: string): string | undefined {
+  try {
+    const target = resolveExecutableLaunchTarget(executablePath);
+    const out = execFileSync(target.command, [...target.argsPrefix, '--version'], {
+      timeout: 4500,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: {
+        ...process.env,
+        PATH: getAugmentedPath(),
+        CLAUDE_CODE_AUTO_CONNECT_IDE: '0',
+        CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1'
+      }
+    });
+    return (out || '').trim().split('\n')[0] || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function queryCliModels(binPath: string, cmdArgs: string[] = ['models']): string[] {
@@ -124,6 +246,114 @@ function resolveModelAlias(
 function detectLocalRuntimes(): RuntimeDef[] {
   const home = homedir();
   const runtimes: RuntimeDef[] = [];
+
+  // 0. claude (Claude Code)
+  const claudePath = findExecutable('claude');
+  if (claudePath) {
+    const version = probeVersionSafe(claudePath);
+    const defaultClaudeModels = [
+      'claude-sonnet-4-6',
+      'claude-opus-4-6',
+      'claude-haiku-4-5',
+      'sonnet',
+      'opus',
+      'haiku'
+    ];
+    let activeModel = '';
+    const settingsEnv: Record<string, string> = {};
+    const claudeCandidateDirs = [join(home, '.claude')];
+    const winMatch = claudePath.match(/^(\/mnt\/[a-zA-Z]\/Users\/[^/]+)\//);
+    if (winMatch && winMatch[1]) {
+      claudeCandidateDirs.push(join(winMatch[1], '.claude'));
+    }
+    for (const dir of claudeCandidateDirs) {
+      const settingsFile = join(dir, 'settings.json');
+      if (!isExistingFile(settingsFile)) continue;
+      try {
+        const raw = JSON.parse(readFileSync(settingsFile, 'utf8'));
+        if (typeof raw.model === 'string' && raw.model.trim()) activeModel = raw.model.trim();
+        if (raw.env && typeof raw.env === 'object') {
+          for (const [k, v] of Object.entries(raw.env)) {
+            if (typeof v === 'string' && v.trim()) settingsEnv[k] = v.trim();
+          }
+          if (!activeModel && settingsEnv.ANTHROPIC_MODEL) activeModel = settingsEnv.ANTHROPIC_MODEL;
+        }
+        break;
+      } catch {}
+    }
+
+    let auth: RuntimeAuthInfo = { status: 'unknown' };
+    let status: RuntimeDef['status'] = version ? 'ready' : 'error';
+    let statusMessage: string | undefined;
+
+    if (version) {
+      let authJson: Record<string, any> | null = null;
+      try {
+        const target = resolveExecutableLaunchTarget(claudePath);
+        const out = execFileSync(target.command, [...target.argsPrefix, 'auth', 'status'], {
+          timeout: 4500,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          env: {
+            ...process.env,
+            PATH: getAugmentedPath(),
+            CLAUDE_CODE_AUTO_CONNECT_IDE: '0',
+            CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1'
+          }
+        });
+        if (out && out.trim().startsWith('{')) authJson = JSON.parse(out.trim());
+      } catch (err: any) {
+        const out = err?.stdout ? String(err.stdout).trim() : '';
+        if (out.startsWith('{')) {
+          try { authJson = JSON.parse(out); } catch {}
+        }
+      }
+
+      const customEndpoint = settingsEnv.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL || '';
+      const hasApiKey = Boolean(
+        settingsEnv.ANTHROPIC_API_KEY ||
+        settingsEnv.ANTHROPIC_AUTH_TOKEN ||
+        process.env.ANTHROPIC_API_KEY ||
+        process.env.ANTHROPIC_AUTH_TOKEN
+      );
+
+      if (authJson && authJson.loggedIn === true) {
+        auth = {
+          status: 'authenticated',
+          method: typeof authJson.authMethod === 'string' ? authJson.authMethod : 'oauth',
+          label: typeof authJson.subscriptionType === 'string' ? `Claude ${authJson.subscriptionType}` : 'Claude 账号已登录',
+          email: typeof authJson.email === 'string' ? authJson.email : undefined
+        };
+        status = 'ready';
+      } else if (customEndpoint || hasApiKey) {
+        auth = {
+          status: 'authenticated',
+          method: customEndpoint ? 'customEndpoint' : 'apiKey',
+          label: customEndpoint ? '自定义 Anthropic 网关' : 'Anthropic API Key',
+          ...(customEndpoint ? { endpoint: customEndpoint } : {})
+        };
+        status = 'ready';
+      } else {
+        auth = { status: 'unauthenticated', method: 'none', label: '未登录认证' };
+        status = 'unauthenticated';
+        statusMessage = '已检测到 Claude Code，但尚未完成登录认证。';
+      }
+    }
+
+    const models = Array.from(new Set([...(activeModel ? [activeModel] : []), ...defaultClaudeModels]));
+    runtimes.push({
+      id: 'claude',
+      name: 'Claude Code (本地 Agent)',
+      version,
+      executablePath: claudePath,
+      models,
+      defaultModel: activeModel || models[0],
+      protocol: 'acp-stdio',
+      status,
+      statusMessage,
+      auth
+    });
+  }
 
   // 1. ducc (Baidu CC)
   const duccPath = findExecutable('ducc');
@@ -451,6 +681,14 @@ function installService(config: { serverUrl: string; token: string; name: string
   const nodeBin = process.execPath;
   const envPath = getAugmentedPath();
 
+  if (os.platform() === 'win32') {
+    console.log('\n===========================================================');
+    console.log('⚠️ Windows 环境下建议使用前台或任务计划程序运行伴侣进程:');
+    console.log(`   node "${paths.clientScript}" --server "${config.serverUrl}" --token "${config.token}"`);
+    console.log('===========================================================\n');
+    return;
+  }
+
   if (paths.isMac) {
     const launchAgentsDir = join(paths.home, 'Library', 'LaunchAgents');
     if (!existsSync(launchAgentsDir)) {
@@ -546,6 +784,14 @@ WantedBy=default.target
 
 function uninstallService(): void {
   const paths = getServicePaths();
+  if (os.platform() === 'win32') {
+    console.log('\n===========================================================');
+    console.log('⚠️ Windows 环境下建议使用前台或任务计划程序运行伴侣进程:');
+    console.log(`   node "${paths.clientScript}" --server "${config.serverUrl}" --token "${config.token}"`);
+    console.log('===========================================================\n');
+    return;
+  }
+
   if (paths.isMac) {
     try {
       execSync(`launchctl unload -w "${paths.launchdPlist}" 2>/dev/null`, { stdio: 'ignore' });
@@ -574,6 +820,14 @@ function getServiceStatus(): void {
   console.log('-----------------------------------------------------------');
 
   let statusText = '未安装系统自启服务';
+
+  if (os.platform() === 'win32') {
+    console.log('\n===========================================================');
+    console.log('⚠️ Windows 环境下建议使用前台或任务计划程序运行伴侣进程:');
+    console.log(`   node "${paths.clientScript}" --server "${config.serverUrl}" --token "${config.token}"`);
+    console.log('===========================================================\n');
+    return;
+  }
 
   if (paths.isMac) {
     const isInstalled = existsSync(paths.launchdPlist);
@@ -626,6 +880,14 @@ function getServiceStatus(): void {
 
 function restartService(): void {
   const paths = getServicePaths();
+  if (os.platform() === 'win32') {
+    console.log('\n===========================================================');
+    console.log('⚠️ Windows 环境下建议使用前台或任务计划程序运行伴侣进程:');
+    console.log(`   node "${paths.clientScript}" --server "${config.serverUrl}" --token "${config.token}"`);
+    console.log('===========================================================\n');
+    return;
+  }
+
   if (paths.isMac) {
     try {
       execSync(`launchctl unload -w "${paths.launchdPlist}" 2>/dev/null`, { stdio: 'ignore' });
@@ -780,7 +1042,9 @@ class MuseClawRunnerClient {
   private async executeTask(task: RunnerTask): Promise<void> {
     const start = Date.now();
     const runtime = this.runtimes.find((r) => r.id === task.agentId);
-    const exe = runtime?.executablePath || findExecutable(task.agentId);
+    const exe = task.binaryPath
+      ? findExecutable(task.binaryPath)
+      : (runtime?.executablePath || findExecutable(task.agentId));
 
     if (!exe) {
       await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
@@ -792,53 +1056,168 @@ class MuseClawRunnerClient {
     }
 
     let targetModel = task.model;
-    if (runtime && runtime.models && runtime.models.length > 0) {
+    if (task.agentId !== 'claude' && runtime && runtime.models && runtime.models.length > 0) {
       targetModel = resolveModelAlias(task.model, runtime.models, runtime.defaultModel);
       if (task.model && targetModel && task.model !== targetModel) {
         console.log(`🔄 [${task.agentId}] 模型别名自动对齐: "${task.model}" -> "${targetModel}"`);
       }
     }
 
+    const extraCliArgs = parseCliExtraArgs(task.extraArgs);
+    const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
+      process.env.USER === 'root' ||
+      process.env.LOGNAME === 'root' ||
+      Boolean(process.env.SUDO_USER) ||
+      Boolean(process.env.SUDO_UID) ||
+      process.env.UID === '0';
+
     let args: string[] = [];
-    if (task.agentId === 'ducc') {
-      const isRoot = (typeof process.getuid === 'function' && process.getuid() === 0) ||
-                     process.env.USER === 'root' ||
-                     process.env.LOGNAME === 'root' ||
-                     Boolean(process.env.SUDO_USER) ||
-                     Boolean(process.env.SUDO_UID) ||
-                     process.env.UID === '0';
+    if (task.agentId === 'claude') {
+      args = [
+        '-p',
+        '--output-format', 'stream-json',
+        '--verbose',
+        '--include-partial-messages',
+        '--settings', JSON.stringify({ disableAllHooks: true }),
+        '--strict-mcp-config',
+        '--mcp-config', JSON.stringify({ mcpServers: {} })
+      ];
+      if (task.maxTurns && task.maxTurns > 0) {
+        args.push('--max-turns', String(task.maxTurns));
+      }
+      if (!isRoot && !extraCliArgs.includes('--permission-mode')) {
+        args.push('--dangerously-skip-permissions');
+      }
+      if (targetModel && targetModel !== 'default' && targetModel !== 'auto') {
+        args.push('--model', targetModel);
+      }
+      if (extraCliArgs.length > 0) args.push(...extraCliArgs);
+    } else if (task.agentId === 'ducc') {
       args = isRoot
         ? ['-p', '--output-format=stream-json', '--verbose']
         : ['-p', '--output-format=stream-json', '--verbose', '--dangerously-skip-permissions'];
       if (targetModel) args.push('--model', targetModel);
+      if (extraCliArgs.length > 0) args.push(...extraCliArgs);
     } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
       args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
       if (targetModel) args.push('--model', targetModel);
+      if (extraCliArgs.length > 0) args.push(...extraCliArgs);
       args.push('-');
     } else if (task.agentId === 'pi') {
       args = ['-p', '--no-session'];
       if (targetModel) args.push('--model', targetModel);
+      if (extraCliArgs.length > 0) args.push(...extraCliArgs);
     } else {
-      args = [task.prompt];
+      args = [...extraCliArgs, task.prompt];
     }
 
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       PATH: getAugmentedPath(),
-      IS_SANDBOX: '1',
-      CLAUDE_ALLOW_ROOT: '1'
+      CLAUDE_CODE_AUTO_CONNECT_IDE: '0',
+      CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1',
+      ENABLE_CLAUDEAI_MCP_SERVERS: 'false'
     };
-    const child = spawn(exe, args, { env, timeout: task.timeoutMs || 90000 });
+    if (task.agentId !== 'claude') {
+      env.IS_SANDBOX = '1';
+      env.CLAUDE_ALLOW_ROOT = '1';
+    }
+    const expandedConfigDir = expandHomePath(task.configDir);
+    if (expandedConfigDir) {
+      if (task.agentId === 'claude') env.CLAUDE_CONFIG_DIR = expandedConfigDir;
+      else if (task.agentId === 'codex') env.CODEX_HOME = expandedConfigDir;
+    }
+    if (task.baseUrl && !task.baseUrl.startsWith('local://') && task.agentId === 'claude') {
+      env.ANTHROPIC_BASE_URL = task.baseUrl.trim();
+    }
+    if (task.apiKey && task.apiKey.trim()) {
+      if (task.agentId === 'claude') {
+        const cleanKey = task.apiKey.trim();
+        env.ANTHROPIC_API_KEY = cleanKey;
+        if (env.ANTHROPIC_BASE_URL && !env.ANTHROPIC_AUTH_TOKEN) {
+          env.ANTHROPIC_AUTH_TOKEN = cleanKey;
+        }
+      } else {
+        env.DEEPSEEK_API_KEY = task.apiKey.trim();
+      }
+    }
+    if (task.env) {
+      for (const [k, v] of Object.entries(task.env)) {
+        if (typeof v === 'string' && v.trim() !== '') env[k] = v;
+      }
+    }
+
+    const spawnTarget = resolveExecutableLaunchTarget(exe);
+    const expandedCwd = expandHomePath(task.cwd);
+    const child = spawn(spawnTarget.command, [...spawnTarget.argsPrefix, ...args], {
+      cwd: expandedCwd || process.cwd(),
+      env,
+      timeout: task.timeoutMs || 120000
+    });
 
     let stdout = '';
     let stderr = '';
     let streamBuffer = '';
+    let claudeDeltaText = '';
+    let claudeDeltaReasoning = '';
+    let claudeAssistantText = '';
+    let claudeAssistantReasoning = '';
+    let claudeResultText = '';
+    let claudeErrorText = '';
+
+    const handleClaudeLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('{')) return;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.type === 'stream_event' && parsed.event?.type === 'content_block_delta' && parsed.event.delta) {
+          const d = parsed.event.delta;
+          if (d.type === 'text_delta' && d.text) {
+            claudeDeltaText += d.text;
+            this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: d.text });
+          } else if (d.type === 'thinking_delta' && d.thinking) {
+            claudeDeltaReasoning += d.thinking;
+            this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: '', reasoning: d.thinking });
+          }
+        } else if (parsed.type === 'assistant' && parsed.message && Array.isArray(parsed.message.content)) {
+          if (parsed.is_api_error_message) {
+            claudeErrorText = parsed.message.content.map((c: any) => c.text || '').join('\n').trim();
+          } else {
+            for (const c of parsed.message.content) {
+              if (c.type === 'thinking' && c.thinking) {
+                const th = c.thinking.trim();
+                claudeAssistantReasoning = (claudeAssistantReasoning ? `${claudeAssistantReasoning}\n\n` : '') + th;
+                if (!claudeDeltaReasoning && th) {
+                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: '', reasoning: th });
+                }
+              } else if (c.type === 'text' && c.text) {
+                claudeAssistantText += c.text;
+                if (!claudeDeltaText) {
+                  this.request(`/api/runner/tasks/${task.taskId}/stream`, 'POST', { chunk: c.text });
+                }
+              }
+            }
+          }
+        } else if (parsed.type === 'result') {
+          if (parsed.is_error) {
+            claudeErrorText = parsed.result || claudeErrorText || 'Claude Code 返回执行错误';
+          } else if (typeof parsed.result === 'string') {
+            claudeResultText = parsed.result;
+          }
+        }
+      } catch {}
+    };
 
     child.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
 
-      if (task.agentId === 'ducx' || task.agentId === 'codex') {
+      if (task.agentId === 'claude') {
+        streamBuffer += text;
+        const lines = streamBuffer.split('\n');
+        streamBuffer = lines.pop() || '';
+        for (const line of lines) handleClaudeLine(line);
+      } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
         streamBuffer += text;
         const lines = streamBuffer.split('\n');
         streamBuffer = lines.pop() || '';
@@ -897,7 +1276,7 @@ class MuseClawRunnerClient {
 
     child.stderr.on('data', (d) => { stderr += d.toString(); });
 
-    if (task.agentId === 'ducc' || task.agentId === 'ducx' || task.agentId === 'codex') {
+    if (task.agentId === 'claude' || task.agentId === 'ducc' || task.agentId === 'ducx' || task.agentId === 'codex') {
       child.stdin.write(task.prompt);
       child.stdin.end();
     } else {
@@ -909,7 +1288,20 @@ class MuseClawRunnerClient {
       let extractedText = stdout.trim();
       let extractedReasoning: string | undefined;
 
-      if (task.agentId === 'ducx' || task.agentId === 'codex') {
+      if (task.agentId === 'claude') {
+        if (streamBuffer.trim()) handleClaudeLine(streamBuffer);
+        if (claudeErrorText) {
+          await this.request(`/api/runner/tasks/${task.taskId}/complete`, 'POST', {
+            ok: false,
+            text: '',
+            latencyMs,
+            error: claudeErrorText
+          });
+          return;
+        }
+        extractedText = (claudeDeltaText || claudeAssistantText || claudeResultText).trim();
+        extractedReasoning = (claudeDeltaReasoning || claudeAssistantReasoning).trim() || undefined;
+      } else if (task.agentId === 'ducx' || task.agentId === 'codex') {
         const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
         const msgs: string[] = [];
         const reasoningParts: string[] = [];
@@ -1008,6 +1400,7 @@ function parseArgs() {
     else if (arg === '--uninstall-service' || arg === 'service:uninstall') action = 'uninstall-service';
     else if (arg === '--restart-service' || arg === 'service:restart') action = 'restart-service';
     else if (arg === '--status' || arg === '-v' || arg === 'service:status') action = 'status';
+    else if (arg === '--probe') action = 'probe';
   }
 
   return { serverUrl, token, name, action };
@@ -1015,7 +1408,10 @@ function parseArgs() {
 
 const config = parseArgs();
 
-if (config.action === 'install-service') {
+if (config.action === 'probe') {
+  console.log(JSON.stringify(detectLocalRuntimes(), null, 2));
+  process.exit(0);
+} else if (config.action === 'install-service') {
   installService({ serverUrl: config.serverUrl, token: config.token, name: config.name });
   process.exit(0);
 } else if (config.action === 'uninstall-service') {

@@ -43,7 +43,7 @@ interface AppContextType {
   isMobileDrawerOpen: boolean;
   setIsMobileDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   modelsConfig: ModelsConfig | null;
-  loadModelsConfig: () => Promise<void>;
+  loadModelsConfig: (forceRefresh?: boolean) => Promise<void>;
   isModelModalOpen: boolean;
   setIsModelModalOpen: (open: boolean) => void;
   isImageModelModalOpen: boolean;
@@ -237,9 +237,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Models Config
   const [modelsConfig, setModelsConfig] = useState<ModelsConfig | null>(null);
 
-  const loadModelsConfig = useCallback(async () => {
+  const loadModelsConfig = useCallback(async (forceRefresh = false) => {
     try {
-      const cfg = await api.getModelsConfig();
+      const cfg = await api.getModelsConfig(forceRefresh);
       setModelsConfig(cfg);
     } catch (err) {
       console.error('Failed to load models config:', err);

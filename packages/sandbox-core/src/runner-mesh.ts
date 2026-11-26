@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LocalAgentInfo } from './local-agent-prober.ts';
+import type { LocalAgentAuthInfo, LocalAgentInfo, LocalAgentStatus } from './local-agent-prober.ts';
 import type { LocalAgentRunResult } from './local-agent-runner.ts';
 
 export interface RemoteRunnerRuntime {
@@ -12,6 +12,9 @@ export interface RemoteRunnerRuntime {
   models: string[];
   defaultModel: string;
   protocol?: string;
+  status?: LocalAgentStatus;
+  statusMessage?: string;
+  auth?: LocalAgentAuthInfo;
 }
 
 export interface RunnerMachine {
@@ -35,6 +38,14 @@ export interface RunnerTask {
   model?: string;
   prompt: string;
   timeoutMs: number;
+  binaryPath?: string;
+  configDir?: string;
+  cwd?: string;
+  extraArgs?: string;
+  env?: Record<string, string>;
+  baseUrl?: string;
+  apiKey?: string;
+  maxTurns?: number;
   createdAt: number;
 }
 
@@ -246,7 +257,7 @@ export class RunnerMeshManager extends EventEmitter {
   }
 
   /**
-   * 寻找具备指定 Agent 运行时的在线计算节点 (优先匹配指定用户专属节点)
+   * 寻找具备指定 Agent 运行时的在线计算节点 (严格隔离不同用户的私有节点)
    */
   public findAvailableRunnerForAgent(agentId: string, userId?: string): RunnerMachine | null {
     const candidates: RunnerMachine[] = [];
@@ -262,7 +273,7 @@ export class RunnerMeshManager extends EventEmitter {
 
     if (candidates.length === 0) return null;
 
-    // 优先分配当前用户的专属计算节点
+    // 1. 优先分配当前用户的专属计算节点
     if (userId) {
       const userOwned = candidates.filter((m) => m.userId === userId);
       if (userOwned.length > 0) {
@@ -271,7 +282,7 @@ export class RunnerMeshManager extends EventEmitter {
       }
     }
 
-    // 次优分配未绑定特定用户或公共池计算节点
+    // 2. 次优分配未绑定特定用户或公共池计算节点（绝不跨用户分配他人私有节点）
     const publicNodes = candidates.filter(
       (m) => !m.userId || m.userId === 'default-mesh-token' || m.userId === 'user_web' || m.userId === 'admin'
     );
@@ -280,9 +291,7 @@ export class RunnerMeshManager extends EventEmitter {
       return publicNodes[0];
     }
 
-    // 降级分配当前就绪计算节点
-    candidates.sort((a, b) => a.activeTaskCount - b.activeTaskCount);
-    return candidates[0];
+    return null;
   }
 
   /**
@@ -296,6 +305,14 @@ export class RunnerMeshManager extends EventEmitter {
       timeoutMs?: number;
       targetMachineId?: string;
       userId?: string;
+      binaryPath?: string;
+      configDir?: string;
+      cwd?: string;
+      extraArgs?: string;
+      env?: Record<string, string>;
+      baseUrl?: string;
+      apiKey?: string;
+      maxTurns?: number;
       onChunk?: (chunk: string, reasoning?: string) => void;
     } = {}
   ): Promise<LocalAgentRunResult> {
@@ -321,6 +338,14 @@ export class RunnerMeshManager extends EventEmitter {
       model: options.model,
       prompt,
       timeoutMs,
+      binaryPath: options.binaryPath,
+      configDir: options.configDir,
+      cwd: options.cwd,
+      extraArgs: options.extraArgs,
+      env: options.env,
+      baseUrl: options.baseUrl,
+      apiKey: options.apiKey,
+      maxTurns: options.maxTurns,
       createdAt: Date.now()
     };
 
@@ -407,12 +432,20 @@ export class RunnerMeshManager extends EventEmitter {
             id: r.id as any,
             name: `${r.name} (远程节点: ${machine.hostname})`,
             installed: true,
+            isAvailable: r.status ? r.status === 'ready' : true,
+            status: r.status || 'ready',
+            statusMessage: r.statusMessage,
+            auth: r.auth,
             version: r.version || `在线就绪 (节点: ${machine.hostname})`,
             executablePath: r.executablePath || `通过远程计算节点 (${machine.hostname})`,
             protocol: (r.protocol as any) || 'acp-stdio',
-            description: `运行在远程计算节点 ${machine.hostname} (${machine.ip || 'LAN'}) 上的企业 Agent 运行时`,
+            category: (r.id === 'ducc' || r.id === 'ducx') ? 'intranet_agent' : 'local_agent',
+            description: `运行在远程计算节点 ${machine.hostname} (${machine.ip || 'LAN'}) 上的本地 Agent 运行时`,
             candidateModels: models,
-            defaultModel: existing?.defaultModel || r.defaultModel || models[0] || ''
+            defaultModel: existing?.defaultModel || r.defaultModel || models[0] || '',
+            source: 'remote',
+            machineName: machine.hostname,
+            checkedAt: machine.lastHeartbeat
           });
         }
       }

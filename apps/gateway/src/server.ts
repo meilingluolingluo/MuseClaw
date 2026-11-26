@@ -715,6 +715,7 @@ export function startGatewayServer(defaultPort = 8799) {
       '/api/v1/logout',
       '/runner/client.js',
       '/runner/install.sh',
+      '/runner/install.ps1',
       '/api/runner/register',
       '/api/runner/poll',
       '/api/runner/machines'
@@ -2743,17 +2744,22 @@ export function startGatewayServer(defaultPort = 8799) {
 
     // D1.4 AI 大模型提供商与服务接入接口 (AI Model Providers API)
     if (req.method === 'GET' && url.pathname === '/api/models/config') {
-      const config = await globalModelStore.getPublicConfig(currentUser?.username);
+      const forceRefresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
+      const config = await globalModelStore.getPublicConfig(currentUser?.username, { forceRefresh });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(config));
     }
 
     if (req.method === 'GET' && url.pathname === '/api/models/local-agents') {
-      const agents = await probeLocalAgents();
+      const forceRefresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
+      const agents = await probeLocalAgents({ userId: currentUser?.username, forceRefresh });
       const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(currentUser?.username);
-      const allAgents = Array.from(new Set([...agents, ...remoteAgents]));
+      const mergedMap = new Map(agents.map((a) => [a.id, a]));
+      for (const ra of remoteAgents) {
+        if (!mergedMap.has(ra.id)) mergedMap.set(ra.id, ra);
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true, agents: allAgents }));
+      return res.end(JSON.stringify({ ok: true, agents: Array.from(mergedMap.values()) }));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/models/config') {
@@ -2784,6 +2790,11 @@ export function startGatewayServer(defaultPort = 8799) {
         latencyMs: result.latencyMs,
         latency: result.latencyMs,
         model: result.model,
+        version: result.version,
+        auth: result.auth,
+        replyPreview: result.replyPreview,
+        diagnosticCode: result.diagnosticCode,
+        models: result.models,
         error: result.error,
         message: result.error || (isSuccess ? '连通性测试通过' : '连接超时或未响应')
       };
@@ -2929,6 +2940,37 @@ fi
         'Content-Disposition': 'inline'
       });
       return res.end(script);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/runner/install.ps1') {
+      const host = req.headers.host || 'localhost:8799';
+      const defaultToken = url.searchParams.get('token') || currentUser?.username || '';
+      const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0].trim() || 'http';
+      const psScript = `# MuseClaw Remote Mesh Runner Windows PowerShell Installer
+$ErrorActionPreference = "Stop"
+$ServerUrl = if ($env:MUSECLAW_SERVER_URL) { $env:MUSECLAW_SERVER_URL } else { "${proto}://${host}" }
+$Token = if ($env:MUSECLAW_TOKEN) { $env:MUSECLAW_TOKEN } else { "${defaultToken}" }
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Error "Node.js not found. Please install Node.js v18+ first."
+  exit 1
+}
+
+$MuseDir = Join-Path $HOME ".museclaw"
+New-Item -ItemType Directory -Force -Path $MuseDir | Out-Null
+$ClientJs = Join-Path $MuseDir "client.js"
+
+Write-Host "Downloading MuseClaw Runner client from $ServerUrl/runner/client.js ..."
+Invoke-WebRequest -Uri "$ServerUrl/runner/client.js" -OutFile $ClientJs -UseBasicParsing
+
+Write-Host "Starting MuseClaw Runner..."
+& node $ClientJs --server $ServerUrl --token $Token
+`;
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Disposition': 'inline'
+      });
+      return res.end(psScript);
     }
 
     if (req.method === 'GET' && url.pathname === '/runner/client.js') {

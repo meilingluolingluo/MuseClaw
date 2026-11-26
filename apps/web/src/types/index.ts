@@ -404,27 +404,79 @@ export interface Grant {
   expiresAt?: number;
 }
 
+export interface LocalAgentAuthInfo {
+  status: 'authenticated' | 'unauthenticated' | 'unknown';
+  method?: string;
+  label?: string;
+  email?: string;
+  endpoint?: string;
+}
+
 export interface ModelProvider {
   id: string;
   name: string;
   baseUrl?: string;
   endpoint?: string;
   apiKey?: string;
+  clearApiKey?: boolean;
   model?: string;
   modelId?: string;
   candidateModels?: string[];
   supportedModels?: string[];
+  customModels?: string[];
   description?: string;
   isLocalAgent?: boolean;
+  category?: 'local_agent' | 'cloud_api' | 'intranet_agent';
   installed?: boolean;
   isAvailable?: boolean;
+  protocol?: string;
+  status?: 'ready' | 'unauthenticated' | 'warning' | 'error' | 'not_found';
+  statusMessage?: string;
+  auth?: LocalAgentAuthInfo;
   executablePath?: string;
   cliPath?: string;
+  binaryPath?: string;
+  configDir?: string;
+  cwd?: string;
+  extraArgs?: string;
+  env?: Record<string, string>;
   version?: string;
   detectedVersion?: string;
   hasKey?: boolean;
   maskedKey?: string;
   custom?: boolean;
+  source?: 'local' | 'remote';
+  machineName?: string;
+  installCommand?: string;
+  docUrl?: string;
+  checkedAt?: number;
+}
+
+export interface RunnerMachineRuntime {
+  id: string;
+  name: string;
+  version?: string;
+  executablePath?: string;
+  models: string[];
+  defaultModel: string;
+  protocol?: string;
+  status?: 'ready' | 'unauthenticated' | 'warning' | 'error' | 'not_found';
+  statusMessage?: string;
+  auth?: LocalAgentAuthInfo;
+}
+
+export interface RunnerMachine {
+  id: string;
+  hostname: string;
+  platform: string;
+  arch: string;
+  ip?: string;
+  userId?: string;
+  status: 'online' | 'offline';
+  registeredAt: number;
+  lastHeartbeat: number;
+  runtimes: RunnerMachineRuntime[];
+  activeTaskCount: number;
 }
 
 export interface ModelsConfig {

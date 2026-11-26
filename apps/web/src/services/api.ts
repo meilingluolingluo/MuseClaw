@@ -18,6 +18,7 @@ import type {
   Grant,
   ModelsConfig,
   ModelProvider,
+  RunnerMachine,
   AvatarStudioView,
   AvatarSession,
   AvatarPreset,
@@ -159,13 +160,45 @@ export const api = {
     }),
 
   // Models
-  getModelsConfig: () => request<ModelsConfig>('/api/models/config'),
+  getModelsConfig: (forceRefresh = false) =>
+    request<ModelsConfig>(`/api/models/config${forceRefresh ? '?refresh=1' : ''}`),
   saveModelsConfig: (data: { activeProviderId?: string; provider?: Partial<ModelProvider> & { id: string } }) =>
     request<{ success: boolean }>('/api/models/config', { method: 'POST', body: JSON.stringify(data) }),
-  testModel: (providerId: string, modelId?: string) =>
-    request<{ success?: boolean; ok?: boolean; latency?: number; latencyMs?: number; message?: string; error?: string }>('/api/models/test', {
+  testModel: (
+    providerId: string,
+    modelId?: string,
+    overrides?: Partial<ModelProvider>
+  ) =>
+    request<{
+      success?: boolean;
+      ok?: boolean;
+      latency?: number;
+      latencyMs?: number;
+      version?: string;
+      auth?: ModelProvider['auth'];
+      replyPreview?: string;
+      diagnosticCode?: string;
+      models?: string[];
+      message?: string;
+      error?: string;
+    }>('/api/models/test', {
       method: 'POST',
-      body: JSON.stringify({ providerId, id: providerId, model: modelId }),
+      timeoutMs: 35000,
+      body: JSON.stringify({
+        ...overrides,
+        providerId,
+        id: providerId,
+        model: modelId
+      }),
+    }),
+  probeOllama: (url?: string) =>
+    request<{ ok: boolean; models: string[]; error?: string }>(
+      `/api/models/ollama/probe${url ? `?url=${encodeURIComponent(url)}` : ''}`
+    ),
+  fetchProviderModels: (data: { providerId: string; baseUrl?: string; apiKey?: string }) =>
+    request<{ ok: boolean; models: string[]; error?: string }>('/api/models/fetch-models', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
   probeCli: (cliName: string) =>
     request<{ available: boolean; version?: string; path?: string }>('/api/models/probe-cli', {
@@ -173,6 +206,10 @@ export const api = {
       body: JSON.stringify({ cliName }),
     }),
   getMeshNodes: () => request<any[]>('/api/mesh/nodes'),
+  getRunnerMachines: (userId?: string) =>
+    request<{ ok: boolean; machines: RunnerMachine[] }>(
+      `/api/runner/machines${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`
+    ),
 
   // Image Generation Models (独立生图模型管理)
   getImageModelsConfig: () =>
