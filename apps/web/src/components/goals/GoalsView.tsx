@@ -28,7 +28,8 @@ import {
   X,
   Gauge,
   CheckCheck,
-  Repeat
+  Repeat,
+  ExternalLink
 } from 'lucide-react';
 import type {
   Goal,
@@ -88,7 +89,7 @@ function attentionSummary(goal: Goal): string {
 }
 
 export const GoalsView: React.FC = () => {
-  const { showToast, setTab, activeBot, activeBotId, bots, selectSession, loadSessions } = useApp();
+  const { showToast, setTab, activeBot, activeBotId, selectBot, bots, selectSession, loadSessions } = useApp();
   const botName = activeBot?.name || '数字员工';
 
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -162,6 +163,7 @@ export const GoalsView: React.FC = () => {
   const [artifactKindInputs, setArtifactKindInputs] = useState<Record<string, GoalArtifact['kind']>>({});
   const [artifactRefInputs, setArtifactRefInputs] = useState<Record<string, string>>({});
   const [artifactSummaryInputs, setArtifactSummaryInputs] = useState<Record<string, string>>({});
+  const [artifactContentInputs, setArtifactContentInputs] = useState<Record<string, string>>({});
   const [savingArtifactGoalId, setSavingArtifactGoalId] = useState<string | null>(null);
 
   // 行内挂载 Routine 选择器
@@ -359,11 +361,11 @@ export const GoalsView: React.FC = () => {
       if (res.awaitingHuman) {
         showToast(`当前步骤需人工确认：${res.stepTitle || '请补充输入或确认完成'}`, 'info');
       } else if (res.status === 'blocked') {
-        showToast(`推进受阻: ${res.blockedReason || '需处理阻碍或修订'}`, 'warning');
+        showToast(`推进受阻，执行过程已写入绑定旁聊：${res.blockedReason || '需处理阻碍或修订'}`, 'warning');
       } else if (res.goalCompleted) {
-        showToast('目标已全部推进完成达成', 'success');
+        showToast('目标已全部推进完成，成果与执行过程已同步至工件页及绑定旁聊', 'success');
       } else {
-        showToast(`推进成功: 步骤 [${res.stepTitle || '当前阶段'}] 已完成`, 'success');
+        showToast(`步骤 [${res.stepTitle || '当前阶段'}] 已完成，过程已同步写入绑定旁聊与工件页`, 'success');
       }
       await loadGoals();
     } catch (err: any) {
@@ -380,13 +382,13 @@ export const GoalsView: React.FC = () => {
       const res = await api.runGoal(goalId, { maxRounds: 4 });
       const rounds = res.roundsExecuted || 1;
       if (res.goalCompleted) {
-        showToast(`连续推进 ${rounds} 步，目标已全部达成`, 'success');
+        showToast(`连续推进 ${rounds} 步，目标已全部达成（过程与产出已写入旁聊与工件页）`, 'success');
       } else if (res.awaitingHuman) {
         showToast(`已推进 ${rounds} 轮，当前停在人工确认步骤：${res.stepTitle || ''}`, 'info');
       } else if (res.status === 'blocked') {
-        showToast(`推进 ${rounds} 轮后受阻：${res.blockedReason || '需人工协助'}`, 'warning');
+        showToast(`推进 ${rounds} 轮后受阻，详情已记录至绑定旁聊：${res.blockedReason || '需人工协助'}`, 'warning');
       } else {
-        showToast(`已连续完成 ${rounds} 步推进`, 'success');
+        showToast(`已连续完成 ${rounds} 步推进，过程已写入绑定旁聊与工件页`, 'success');
       }
       await loadGoals();
     } catch (err: any) {
@@ -425,20 +427,33 @@ export const GoalsView: React.FC = () => {
     const kind = artifactKindInputs[goalId] || 'doc';
     const ref = (artifactRefInputs[goalId] || '').trim() || undefined;
     const summary = (artifactSummaryInputs[goalId] || '').trim() || undefined;
+    const content = (artifactContentInputs[goalId] || '').trim() || undefined;
     setSavingArtifactGoalId(goalId);
     try {
-      await api.addGoalArtifact(goalId, { title, kind, ref, summary });
+      await api.addGoalArtifact(goalId, { title, kind, ref, summary, content });
       setArtifactTitleInputs((prev) => ({ ...prev, [goalId]: '' }));
       setArtifactRefInputs((prev) => ({ ...prev, [goalId]: '' }));
       setArtifactSummaryInputs((prev) => ({ ...prev, [goalId]: '' }));
+      setArtifactContentInputs((prev) => ({ ...prev, [goalId]: '' }));
       setArtifactDraftOpen((prev) => ({ ...prev, [goalId]: false }));
-      showToast(`已归档成果「${title}」`, 'success');
+      showToast(`已归档成果「${title}」并同步至工件页`, 'success');
       await loadGoals();
     } catch (err: any) {
       showToast(`归档成果失败: ${err.message}`, 'error');
     } finally {
       setSavingArtifactGoalId(null);
     }
+  };
+
+  const handleOpenArtifactInView = (goal: Goal, art: GoalArtifact) => {
+    sessionStorage.setItem(
+      'museclaw_artifact_focus',
+      JSON.stringify({
+        goalId: goal.id,
+        filename: art.filename
+      })
+    );
+    setTab('artifacts');
   };
 
   const handleDeleteArtifact = async (goalId: string, artifactId: string) => {
@@ -467,10 +482,13 @@ export const GoalsView: React.FC = () => {
     try {
       const res = await api.openGoalSession(goal.id);
       const targetBot = goal.botId || activeBotId || 'muse';
+      if (targetBot && targetBot !== activeBotId) {
+        selectBot(targetBot);
+      }
       await loadSessions(targetBot, res.sessionId);
       selectSession(res.sessionId);
 
-      // 若目标专属会话尚无消息，预填上下文开场草稿方便直接开聊
+      // 若目标专属旁聊尚无消息，预填上下文开场草稿方便直接开聊
       if (!res.session?.messageCount || res.session.messageCount === 0) {
         const draft = `围绕目标【${goal.title}】继续推进${goal.successCriteria ? `（验收标准：${goal.successCriteria}）` : ''}。请帮我盘点当前状态并开始下一步。`;
         sessionStorage.setItem('museclaw_chat_draft', draft);
@@ -478,7 +496,7 @@ export const GoalsView: React.FC = () => {
       }
       setTab('chat');
     } catch (err: any) {
-      showToast(`打开目标对话失败: ${err.message}`, 'error');
+      showToast(`打开目标旁聊失败: ${err.message}`, 'error');
     } finally {
       setOpeningSessionId(null);
     }
@@ -1138,14 +1156,14 @@ export const GoalsView: React.FC = () => {
                       className="btn-secondary goal-session-btn"
                       disabled={openingSessionId === goal.id}
                       onClick={() => handleOpenGoalSession(goal)}
-                      title="打开该目标绑定的专属持久化对话"
+                      title="打开该目标单独绑定的旁聊会话，查看完整执行过程与对话记录"
                     >
                       {openingSessionId === goal.id ? (
                         <Loader2 size={13} className="spin-icon" />
                       ) : (
                         <MessageCircle size={13} />
                       )}
-                      <span>{goal.sessionId ? '进入专属对话' : '开启专属对话'}</span>
+                      <span>{goal.sessionId ? '查看执行旁聊' : '开启执行旁聊'}</span>
                     </button>
 
                     {!isDone && !isPortfolio && (
@@ -1333,6 +1351,7 @@ export const GoalsView: React.FC = () => {
                     <div className="goal-artifacts-list">
                       {artifacts.map((art) => {
                         const kDef = artifactKindDef(art.kind);
+                        const hasStoredArtifact = Boolean(art.filename || art.url);
                         return (
                           <div key={art.id} className="goal-artifact-item">
                             <span className="goal-artifact-kind">
@@ -1346,6 +1365,17 @@ export const GoalsView: React.FC = () => {
                               )}
                               {art.ref && <div className="goal-artifact-ref">{art.ref}</div>}
                             </div>
+                            {hasStoredArtifact && (
+                              <button
+                                type="button"
+                                className="btn-secondary goal-btn-xs goal-artifact-open-btn"
+                                title="跳转到工件页预览与下载"
+                                onClick={() => handleOpenArtifactInView(goal, art)}
+                              >
+                                <ExternalLink size={12} />
+                                <span>工件页预览</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="goal-artifact-remove"
@@ -1438,6 +1468,18 @@ export const GoalsView: React.FC = () => {
                           {savingArtifactGoalId === goal.id ? '保存中…' : '确认归档'}
                         </button>
                       </div>
+                      <textarea
+                        rows={2}
+                        placeholder="可选：填写成果 Markdown 正文，将直接落盘到「工件」页供预览与下载"
+                        value={artifactContentInputs[goal.id] || ''}
+                        onChange={(e) =>
+                          setArtifactContentInputs((prev) => ({
+                            ...prev,
+                            [goal.id]: e.target.value
+                          }))
+                        }
+                        className="goal-form-textarea"
+                      />
                     </div>
                   )}
                 </div>

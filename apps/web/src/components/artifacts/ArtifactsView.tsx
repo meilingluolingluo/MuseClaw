@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Package, RefreshCw, Download, FileText, ExternalLink, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Package, RefreshCw, Download, FileText, ExternalLink, AlertTriangle, Target } from 'lucide-react';
 import type { Artifact } from '../../types';
 import { api } from '../../services/api';
 import { formatFileSize, formatTime } from '../../utils/format';
@@ -8,9 +8,13 @@ import { WidgetCard } from '../chat/WidgetCard';
 import { useApp } from '../../context/AppContext';
 import { renderMarkdown } from '../../utils/markdown';
 
+type ArtifactScope = 'all' | 'goals' | 'other';
+
 export const ArtifactsView: React.FC = () => {
-  const { user, setIsAuthModalOpen } = useApp();
+  const { user, setIsAuthModalOpen, setTab } = useApp();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [scopeFilter, setScopeFilter] = useState<ArtifactScope>('all');
+  const [selectedGoalId, setSelectedGoalId] = useState<string>('');
   const [preview, setPreview] = useState<
     | { loading: true }
     | { html: string }
@@ -26,25 +30,7 @@ export const ArtifactsView: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
 
-  const loadArtifacts = async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const data = await api.getArtifacts();
-      setArtifacts(Array.isArray(data) ? data : []);
-    } catch (err: any) {
-      console.error('Failed to load artifacts:', err);
-      setLoadError(err.message || '工件列表加载失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadArtifacts();
-  }, []);
-
-  const getArtifactName = (art: any) => {
+  const getArtifactName = (art: Artifact) => {
     if (art.title) return art.title;
     if (art.name) return art.name;
     if (art.filename) return art.filename;
@@ -54,21 +40,13 @@ export const ArtifactsView: React.FC = () => {
     return '未命名工件';
   };
 
-  const getDownloadUrl = (art: any) => {
+  const getDownloadUrl = (art: Artifact) => {
     return art.previewUrl || art.url || (art.filename ? `/api/artifacts/${encodeURIComponent(art.filename)}` : '#');
   };
 
-  const closePreview = () => {
-    setSelectedArtifact(null);
-    setPreview(null);
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-  };
-
-  const openPreview = async (art: any) => {
+  const openPreview = useCallback(async (art: Artifact) => {
     const name = getArtifactName(art);
+    const extSource = art.filename || art.name || name;
     const url = getDownloadUrl(art);
     setSelectedArtifact({ ...art, title: name, previewUrl: url });
     setPreview({ loading: true });
@@ -80,7 +58,7 @@ export const ArtifactsView: React.FC = () => {
         );
       }
       const type = res.headers.get('content-type') || '';
-      const isHtmlOrSvg = /\.(html?|svg)$/i.test(name);
+      const isHtmlOrSvg = /\.(html?|svg)$/i.test(extSource);
       if (type.startsWith('image/') && !isHtmlOrSvg) {
         const blob = await res.blob();
         const objectUrl = URL.createObjectURL(blob);
@@ -88,12 +66,12 @@ export const ArtifactsView: React.FC = () => {
         setPreview({ imageUrl: objectUrl });
       } else if (type.includes('text/') || type.includes('json') || isHtmlOrSvg) {
         const text = await res.text();
-        if (/\.svg$/i.test(name)) {
+        if (/\.svg$/i.test(extSource)) {
           setPreview({ widgetHtml: text, title: name, kind: 'svg' });
-        } else if (/\.(html?)$/i.test(name)) {
+        } else if (/\.(html?)$/i.test(extSource)) {
           setPreview({ widgetHtml: text, title: name, kind: 'html' });
         } else {
-          setPreview(/\.(md|markdown)$/i.test(name) ? { html: renderMarkdown(text) } : { text });
+          setPreview(/\.(md|markdown)$/i.test(extSource) ? { html: renderMarkdown(text) } : { text });
         }
       } else {
         setPreview({ binary: true, url });
@@ -101,11 +79,85 @@ export const ArtifactsView: React.FC = () => {
     } catch (err: any) {
       setPreview({ error: err?.message || '预览失败' });
     }
+  }, []);
+
+  const loadArtifacts = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await api.getArtifacts();
+      const list = Array.isArray(data) ? data : [];
+      setArtifacts(list);
+
+      const rawFocus = sessionStorage.getItem('museclaw_artifact_focus');
+      if (rawFocus) {
+        sessionStorage.removeItem('museclaw_artifact_focus');
+        try {
+          const focus = JSON.parse(rawFocus) as { goalId?: string; filename?: string };
+          if (focus.goalId) {
+            setScopeFilter('goals');
+            setSelectedGoalId(focus.goalId);
+          }
+          if (focus.filename) {
+            const matched = list.find(
+              (item) => item.filename === focus.filename || item.name === focus.filename
+            );
+            if (matched) {
+              void openPreview(matched);
+            }
+          }
+        } catch {
+          // 忽略格式异常的跳转缓存
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to load artifacts:', err);
+      setLoadError(err.message || '工件列表加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [openPreview]);
+
+  useEffect(() => {
+    void loadArtifacts();
+  }, [loadArtifacts]);
+
+  const closePreview = () => {
+    setSelectedArtifact(null);
+    setPreview(null);
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
   };
 
   useEffect(() => () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
   }, []);
+
+  const goalOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const art of artifacts) {
+      if (art.goalId && art.goalTitle) {
+        map.set(art.goalId, art.goalTitle);
+      }
+    }
+    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
+  }, [artifacts]);
+
+  const goalArtifactsCount = useMemo(
+    () => artifacts.filter((a) => Boolean(a.goalId)).length,
+    [artifacts]
+  );
+
+  const filteredArtifacts = useMemo(() => {
+    return artifacts.filter((art) => {
+      if (scopeFilter === 'goals' && !art.goalId) return false;
+      if (scopeFilter === 'other' && Boolean(art.goalId)) return false;
+      if (selectedGoalId && art.goalId !== selectedGoalId) return false;
+      return true;
+    });
+  }, [artifacts, scopeFilter, selectedGoalId]);
 
   return (
     <section className="view-stage artifacts-stage" aria-label="交付工件与产出物">
@@ -116,7 +168,7 @@ export const ArtifactsView: React.FC = () => {
             <span>交付工件与产出物</span>
           </div>
           <div className="view-sub artifacts-sub">
-            Agent 运行产生的正式交付物（巡检报告、配置导出、数据总结、代码快照）。
+            集中管理数字员工运行及目标推进产出的正式交付物（阶段报告、调研文档、巡检记录、导出文件）。
           </div>
         </div>
         <div className="artifacts-header-actions">
@@ -125,6 +177,51 @@ export const ArtifactsView: React.FC = () => {
             <span>刷新工件列表</span>
           </button>
         </div>
+      </div>
+
+      {/* 归属筛选工具栏 */}
+      <div className="artifacts-filter-bar">
+        <div className="artifacts-scope-tabs">
+          {[
+            { id: 'all', label: '全部工件', count: artifacts.length },
+            { id: 'goals', label: '目标产出', count: goalArtifactsCount },
+            { id: 'other', label: '其他工件', count: artifacts.length - goalArtifactsCount }
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`goal-status-tab-btn ${scopeFilter === item.id ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => {
+                const next = item.id as ArtifactScope;
+                setScopeFilter(next);
+                if (next !== 'goals') setSelectedGoalId('');
+              }}
+            >
+              <span>{item.label}</span>
+              <span className="goal-status-tab-count">{item.count}</span>
+            </button>
+          ))}
+        </div>
+
+        {goalOptions.length > 0 && (
+          <select
+            aria-label="按目标筛选工件"
+            className="goal-form-select artifacts-goal-select"
+            value={selectedGoalId}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedGoalId(val);
+              if (val) setScopeFilter('goals');
+            }}
+          >
+            <option value="">全部关联目标 ({goalOptions.length})</option>
+            {goalOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                目标：{opt.title}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {loadError && (
@@ -136,20 +233,24 @@ export const ArtifactsView: React.FC = () => {
       )}
 
       <div className="artifacts-grid">
-        {artifacts.length === 0 ? (
+        {filteredArtifacts.length === 0 ? (
           <div className="artifacts-empty-panel">
-            <div className="artifacts-empty-icon">📦</div>
-            <div className="artifacts-empty-title">暂无交付工件</div>
+            <div className="artifacts-empty-icon">
+              <Package size={30} />
+            </div>
+            <div className="artifacts-empty-title">
+              {artifacts.length === 0 ? '暂无交付工件' : '当前筛选下暂无工件'}
+            </div>
             <div className="artifacts-empty-sub">
-              当智能体执行指令并产出报表、文档或代码时，将自动归档至此处。
+              当目标推进产生阶段成果或智能体输出报表、文档与代码时，将自动归档至此处。
             </div>
           </div>
         ) : (
-          artifacts.map((art: any, index) => {
+          filteredArtifacts.map((art, index) => {
             const displayName = getArtifactName(art);
             const downloadUrl = getDownloadUrl(art);
-            const size = art.size || art.sizeBytes || 0;
-            const time = art.createdAt || art.updatedAt || Date.now();
+            const size = art.size || (art as any).sizeBytes || 0;
+            const time = art.updatedAt || art.createdAt || Date.now();
 
             return (
               <div
@@ -170,6 +271,25 @@ export const ArtifactsView: React.FC = () => {
                   </div>
                 </div>
 
+                {art.goalTitle && (
+                  <div className="artifact-goal-row">
+                    <button
+                      type="button"
+                      className="artifact-goal-badge"
+                      title="跳转到所属目标"
+                      onClick={() => setTab('goals')}
+                    >
+                      <Target size={11} />
+                      <span>{art.goalTitle}</span>
+                    </button>
+                    {art.kind && <span className="artifact-kind-badge">{art.kind}</span>}
+                  </div>
+                )}
+
+                {art.summary && (
+                  <div className="artifact-summary-text">{art.summary}</div>
+                )}
+
                 <div className="artifact-card-actions">
                   <button
                     type="button"
@@ -182,7 +302,7 @@ export const ArtifactsView: React.FC = () => {
                     user ? (
                       <a
                         href={downloadUrl}
-                        download
+                        download={art.filename || displayName}
                         className="btn-secondary artifact-action-btn"
                       >
                         <Download size={12} /> <span>下载</span>
@@ -214,8 +334,13 @@ export const ArtifactsView: React.FC = () => {
         >
           <div className="artifact-modal-body">
             <div className="artifact-path-line">
-              文件路径: <code>{selectedArtifact.path || selectedArtifact.previewUrl || selectedArtifact.title}</code>
+              文件路径: <code>{selectedArtifact.filename || selectedArtifact.path || selectedArtifact.previewUrl || selectedArtifact.title}</code>
             </div>
+            {selectedArtifact.goalTitle && (
+              <div className="artifact-path-line">
+                所属目标: <span>{selectedArtifact.goalTitle}</span>
+              </div>
+            )}
             {preview && 'loading' in preview && <div className="chat-loading"><span className="chat-loading-dot" />正在读取文件…</div>}
             {preview && 'error' in preview && (
               <div className="artifact-error">

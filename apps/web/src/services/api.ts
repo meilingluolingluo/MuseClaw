@@ -216,7 +216,14 @@ export const api = {
     request<any>(`/api/goals/${id}/run`, { method: 'POST', body: JSON.stringify(opts || {}) }),
   addGoalArtifact: (
     goalId: string,
-    data: { title: string; kind?: 'file' | 'doc' | 'link' | 'note' | 'report'; ref?: string; summary?: string; stepId?: string }
+    data: {
+      title: string;
+      kind?: 'file' | 'doc' | 'link' | 'note' | 'report';
+      ref?: string;
+      summary?: string;
+      content?: string;
+      stepId?: string;
+    }
   ) => request<Goal>(`/api/goals/${goalId}/artifacts`, { method: 'POST', body: JSON.stringify(data) }),
   deleteGoalArtifact: (goalId: string, artifactId: string) =>
     request<Goal>(`/api/goals/${goalId}/artifacts/${artifactId}`, { method: 'DELETE' }),

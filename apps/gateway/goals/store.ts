@@ -29,18 +29,30 @@ export function formatBeijingTimestamp(date: Date = new Date()): string {
 
 export class GoalStore {
   private filePath: string;
+  private artifactsDir: string;
   private goals = new Map<string, Goal>();
 
-  constructor(filePath?: string) {
+  constructor(filePath?: string, artifactsDir?: string) {
     this.filePath = filePath || path.resolve(__dirname, '../data/goals.json');
+    this.artifactsDir = artifactsDir || path.resolve(path.dirname(this.filePath), 'artifacts');
     this.ensureDir();
     this.load();
+  }
+
+  public getArtifactsDir(): string {
+    return this.artifactsDir;
   }
 
   private ensureDir() {
     const dir = path.dirname(this.filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  private ensureArtifactsDir() {
+    if (!fs.existsSync(this.artifactsDir)) {
+      fs.mkdirSync(this.artifactsDir, { recursive: true });
     }
   }
 
@@ -277,7 +289,7 @@ export class GoalStore {
   }
 
   /**
-   * 登记目标交付物或证据资产
+   * 登记目标交付物或证据资产，并同步落盘到工件目录供工件页统一预览与下载
    */
   public addArtifact(
     goalId: string,
@@ -287,31 +299,125 @@ export class GoalStore {
     if (!goal) return undefined;
     if (!Array.isArray(goal.artifacts)) goal.artifacts = [];
 
+    const now = Date.now();
+    const title = artifact.title.trim();
+    const kind = artifact.kind || 'doc';
+    const rawRef = artifact.ref?.trim() || undefined;
+    const summary = artifact.summary?.trim() || undefined;
+    const rawContent = artifact.content?.trim() || undefined;
+    const shortGoalId = goal.id.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8) || 'goal';
+    const slug =
+      title
+        .toLowerCase()
+        .replace(/[^a-z0-9\u4e00-\u9fa5_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 32) || 'artifact';
+
+    let filename: string | undefined = artifact.filename?.trim() || undefined;
+    let url: string | undefined = artifact.url?.trim() || undefined;
+    let finalRef = rawRef;
+
+    if (filename) {
+      url = url || `/api/artifacts/${encodeURIComponent(path.basename(filename))}`;
+    } else if (rawRef && rawRef.startsWith('/api/artifacts/')) {
+      try {
+        filename = path.basename(decodeURIComponent(rawRef.replace('/api/artifacts/', '')));
+        url = `/api/artifacts/${encodeURIComponent(filename)}`;
+      } catch {
+        filename = path.basename(rawRef.replace('/api/artifacts/', ''));
+        url = rawRef;
+      }
+    } else if (rawContent || (['doc', 'report', 'note'].includes(kind) && !(rawRef && /^https?:\/\//i.test(rawRef)))) {
+      try {
+        this.ensureArtifactsDir();
+        const generatedName = `goal-${shortGoalId}-${slug}-${now.toString(36)}.md`;
+        const filePath = path.join(this.artifactsDir, generatedName);
+        const sections: string[] = [
+          `# ${title}`,
+          '',
+          `- **所属目标**：${goal.title} (\`${goal.id}\`)`,
+          `- **产出类型**：${kind}`,
+          `- **归档时间**：${formatBeijingTimestamp(new Date(now))}`
+        ];
+        if (rawRef) {
+          sections.push(`- **关联路径/链接**：${rawRef}`);
+        }
+        sections.push('');
+        if (summary && summary !== rawContent) {
+          sections.push('## 核心摘要', '', summary, '');
+        }
+        if (rawContent) {
+          sections.push('## 详细内容', '', rawContent, '');
+        } else if (!summary && rawRef) {
+          sections.push(`参考位置：\`${rawRef}\``, '');
+        }
+        fs.writeFileSync(filePath, sections.join('\n'), 'utf-8');
+        filename = generatedName;
+        url = `/api/artifacts/${encodeURIComponent(generatedName)}`;
+        finalRef = finalRef || url;
+      } catch (err: any) {
+        console.warn(`[GoalStore] 写入目标工件文件失败: ${err.message}`);
+      }
+    } else if (rawRef && !/^https?:\/\//i.test(rawRef)) {
+      try {
+        const resolved = path.isAbsolute(rawRef) ? rawRef : path.resolve(process.cwd(), rawRef);
+        if (fs.existsSync(resolved)) {
+          const stat = fs.statSync(resolved);
+          if (stat.isFile() && stat.size <= 5 * 1024 * 1024) {
+            this.ensureArtifactsDir();
+            const base = path.basename(resolved).replace(/[^\w.\u4e00-\u9fa5-]/g, '_');
+            const copiedName = `goal-${shortGoalId}-${now.toString(36)}-${base}`;
+            fs.copyFileSync(resolved, path.join(this.artifactsDir, copiedName));
+            filename = copiedName;
+            url = `/api/artifacts/${encodeURIComponent(copiedName)}`;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[GoalStore] 同步本地工件文件失败: ${err.message}`);
+      }
+    }
+
     const entry: GoalArtifact = {
-      id: `art_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-      title: artifact.title.trim(),
-      kind: artifact.kind || 'doc',
-      ref: artifact.ref?.trim() || undefined,
-      summary: artifact.summary?.trim() || undefined,
+      id: `art_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      title,
+      kind,
+      ref: finalRef,
+      filename,
+      url,
+      summary,
       stepId: artifact.stepId?.trim() || undefined,
-      createdAt: Date.now()
+      createdAt: now
     };
 
     goal.artifacts.push(entry);
-    goal.updatedAt = Date.now();
+    goal.updatedAt = now;
     this.save();
     return goal;
   }
 
   /**
-   * 移除目标交付物
+   * 移除目标交付物，并清理自动落盘的专属工件文件
    */
   public removeArtifact(goalId: string, artifactId: string): Goal | undefined {
     const goal = this.goals.get(goalId);
     if (!goal || !Array.isArray(goal.artifacts)) return undefined;
-    const next = goal.artifacts.filter((a) => a.id !== artifactId);
-    if (next.length === goal.artifacts.length) return undefined;
-    goal.artifacts = next;
+    const target = goal.artifacts.find((a) => a.id === artifactId);
+    if (!target) return undefined;
+
+    const shortGoalId = goal.id.replace(/[^a-zA-Z0-9_-]/g, '').slice(-8) || 'goal';
+    if (target.filename && target.filename.startsWith(`goal-${shortGoalId}-`)) {
+      const safeName = path.basename(target.filename);
+      const fullPath = path.join(this.artifactsDir, safeName);
+      if (fs.existsSync(fullPath)) {
+        try {
+          fs.unlinkSync(fullPath);
+        } catch (err: any) {
+          console.warn(`[GoalStore] 清理工件文件失败: ${err.message}`);
+        }
+      }
+    }
+
+    goal.artifacts = goal.artifacts.filter((a) => a.id !== artifactId);
     goal.updatedAt = Date.now();
     this.save();
     return goal;

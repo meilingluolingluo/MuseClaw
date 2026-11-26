@@ -36,7 +36,10 @@ export interface GoalArtifact {
   title: string;
   kind: 'file' | 'doc' | 'link' | 'note' | 'report';
   ref?: string;
+  filename?: string;
+  url?: string;
   summary?: string;
+  content?: string;
   stepId?: string;
   createdAt: number;
 }
@@ -106,4 +109,6 @@ export interface GoalAdvanceResult {
   awaitingHuman?: boolean;
   roundsExecuted?: number;
   stoppedReason?: string;
+  sessionId?: string;
+  artifact?: GoalArtifact;
 }

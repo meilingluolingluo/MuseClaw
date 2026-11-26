@@ -125,6 +125,8 @@ export interface GoalArtifact {
   title: string;
   kind: 'file' | 'doc' | 'link' | 'note' | 'report';
   ref?: string;
+  filename?: string;
+  url?: string;
   summary?: string;
   stepId?: string;
   createdAt: number;
@@ -362,11 +364,21 @@ export interface MemoryReport {
 export interface Artifact {
   id: string;
   title: string;
-  type: string;
+  type?: string;
   path: string;
   size: number;
   createdAt: number;
+  updatedAt?: number;
   previewUrl?: string;
+  filename?: string;
+  name?: string;
+  url?: string;
+  goalId?: string;
+  goalTitle?: string;
+  goalMode?: GoalMode;
+  kind?: string;
+  summary?: string;
+  stepId?: string;
 }
 
 export interface AuditLog {

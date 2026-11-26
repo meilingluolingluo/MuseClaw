@@ -11,6 +11,7 @@ import {
   type GoalStep
 } from '../apps/gateway/goals/index.ts';
 import { SentinelPolicyManager } from '../apps/sentinel/src/guard.ts';
+import { SessionStore } from '../apps/gateway/bots/session-store.ts';
 import { createDefaultTools } from '../packages/sandbox-core/src/tools.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -331,6 +332,84 @@ assert.strictEqual(store.get(portfolioGoal.id)!.artifacts?.length, 0);
 assert.strictEqual(store.get(portfolioGoal.id)!.linkedRoutineIds?.length, 0);
 
 console.log('  ✅ 目标形态、默认无闹钟、成果沉淀、人工卡点与连续推进验证 100% 通过\n');
+
+// =========================================================================
+// 9. 验证目标产出物落盘至工件目录 & 执行过程自动绑定旁聊会话
+// =========================================================================
+console.log('9. 验证目标产出物落盘工件页与执行自动绑定旁聊会话...');
+
+const testUsersDir = path.join(testDataDir, 'users');
+const testArtifactsDir = path.join(testDataDir, 'artifacts');
+const testSessionStore = new SessionStore(testUsersDir);
+const boundGoalStore = new GoalStore(path.join(testDataDir, 'bound_goals.json'), testArtifactsDir);
+const boundEngine = new GoalEngine({
+  store: boundGoalStore,
+  sentinel,
+  tools,
+  sessionStore: testSessionStore,
+  callLLM: async () => ({ content: '默认执行完成' })
+});
+
+const linkedGoal = boundGoalStore.create({
+  title: '线上延迟排查与报告交付',
+  mode: 'delivery',
+  botId: 'muse',
+  userId: 'dev_alice',
+  steps: [
+    { id: 'lg_1', title: '定位慢查询与采样分析' },
+    { id: 'lg_2', title: '输出最终压测与修复报告' }
+  ]
+});
+assert.strictEqual(linkedGoal.sessionId, undefined, '创建阶段尚未执行时可未绑定旁聊');
+
+const step1Exec = await boundEngine.advanceGoal(linkedGoal.id, {
+  mockOutput: '## 慢查询分析结论\n已定位订单表缺少联合索引，P99 预计下降 45%。'
+});
+
+const afterExecGoal = boundGoalStore.get(linkedGoal.id)!;
+assert.strictEqual(afterExecGoal.sessionId, `sess_goal_${linkedGoal.id}`, '执行时必须自动新建并绑定专属旁聊 ID');
+assert.strictEqual(step1Exec.sessionId, afterExecGoal.sessionId);
+
+const boundSession = testSessionStore.get(afterExecGoal.sessionId!, 'dev_alice');
+assert(boundSession, '绑定的旁聊会话必须存在于 SessionStore 中');
+assert.strictEqual(boundSession?.kind, 'side', '目标执行绑定的会话类型必须为 side 旁聊');
+assert(boundSession!.messages.length >= 2, '旁聊必须记录本轮 user 触发与 assistant 执行结果');
+assert(boundSession!.messages[0].content.includes('定位慢查询与采样分析'));
+assert(boundSession!.messages[1].content.includes('已归档交付工件'), '旁聊回复应附带已落盘的工件链接');
+
+// 验证阶段成果已真实落盘至工件目录
+assert.strictEqual(afterExecGoal.artifacts?.length, 1, '步骤完成后阶段成果应自动登记到目标 artifacts');
+const autoArt = afterExecGoal.artifacts![0];
+assert(autoArt.filename && autoArt.url?.startsWith('/api/artifacts/'), '自动成果必须具备 filename 与 /api/artifacts/ URL');
+const autoArtPath = path.join(testArtifactsDir, autoArt.filename!);
+assert(fs.existsSync(autoArtPath), '目标产出工件文件必须真实写入工件目录');
+const autoArtContent = fs.readFileSync(autoArtPath, 'utf-8');
+assert(autoArtContent.includes('已定位订单表缺少联合索引'), '落盘工件文件必须包含执行产出的正文');
+
+// 验证手动登记带 content 的成果同样落盘，并在删除时清理文件
+boundGoalStore.addArtifact(linkedGoal.id, {
+  title: '人工补充复盘结论',
+  kind: 'doc',
+  summary: '验证上线后观察 24 小时无异常',
+  content: '索引上线后接口 P99 稳定在 42ms。'
+});
+const withManualArt = boundGoalStore.get(linkedGoal.id)!;
+assert.strictEqual(withManualArt.artifacts?.length, 2);
+const manualArt = withManualArt.artifacts![1];
+const manualArtPath = path.join(testArtifactsDir, manualArt.filename!);
+assert(fs.existsSync(manualArtPath), '手动登记的带正文成果也必须真实落盘到工件目录');
+
+boundGoalStore.removeArtifact(linkedGoal.id, manualArt.id);
+assert(!fs.existsSync(manualArtPath), '移除目标成果时应清理对应自动生成的工件文件');
+
+await testSessionStore.flush('dev_alice');
+const reloadedSessions = new SessionStore(testUsersDir);
+assert(
+  reloadedSessions.get(afterExecGoal.sessionId!, 'dev_alice')?.messages.length === boundSession!.messages.length,
+  '旁聊会话记录必须可靠持久化落盘'
+);
+
+console.log('  ✅ 目标产出物落盘工件页与执行自动绑定旁聊会话验证 100% 通过\n');
 
 // 清理测试目录
 fs.rmSync(testDataDir, { recursive: true, force: true });

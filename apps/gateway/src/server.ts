@@ -544,6 +544,7 @@ const goalEngine = new GoalEngine({
   callLLM,
   botRegistry,
   botMemory,
+  sessionStore,
   onGoalCheckInCompleted: async (result, goal) => {
     console.log(`[Goals:CheckIn] 目标 "${goal.title}" 阶段推进完成: 步骤 [${result.stepTitle || result.stepId}] -> ${result.status}`);
     feedStore.recordActivity('user_web', {
@@ -1576,28 +1577,82 @@ export function startGatewayServer(defaultPort = 8799) {
     }
 
     // B4. 交付工件与产出物接口 (Artifacts Delivery)
-    const artifactsDir = path.resolve(__dirname, '../data/artifacts');
+    const artifactsDir = goalStore.getArtifactsDir();
     if (req.method === 'GET' && url.pathname === '/api/artifacts') {
       if (!fs.existsSync(artifactsDir)) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify([]));
       }
-      const files = fs.readdirSync(artifactsDir).map((file) => {
-        const stat = fs.statSync(path.join(artifactsDir, file));
-        return {
-          id: file,
-          title: file,
-          name: file,
-          filename: file,
-          path: `/api/artifacts/${file}`,
-          sizeBytes: stat.size,
-          size: stat.size,
-          createdAt: stat.birthtimeMs || stat.mtimeMs,
-          updatedAt: stat.mtimeMs,
-          url: `/api/artifacts/${encodeURIComponent(file)}`,
-          previewUrl: `/api/artifacts/${encodeURIComponent(file)}`
-        };
-      });
+      const targetUserId = currentUser ? currentUser.username : undefined;
+      const goalArtifactIndex = new Map<
+        string,
+        {
+          goalId: string;
+          goalTitle: string;
+          goalMode: string;
+          artifactId: string;
+          artifactTitle: string;
+          kind: string;
+          summary?: string;
+          stepId?: string;
+        }
+      >();
+      for (const g of goalStore.list({ userId: targetUserId })) {
+        for (const art of g.artifacts || []) {
+          const fname =
+            art.filename ||
+            (art.url?.startsWith('/api/artifacts/')
+              ? path.basename(decodeURIComponent(art.url.replace('/api/artifacts/', '')))
+              : undefined);
+          if (fname) {
+            goalArtifactIndex.set(fname, {
+              goalId: g.id,
+              goalTitle: g.title,
+              goalMode: g.mode || 'delivery',
+              artifactId: art.id,
+              artifactTitle: art.title,
+              kind: art.kind,
+              summary: art.summary,
+              stepId: art.stepId
+            });
+          }
+        }
+      }
+
+      const files = fs
+        .readdirSync(artifactsDir)
+        .map((file) => {
+          const fullPath = path.join(artifactsDir, file);
+          const stat = fs.statSync(fullPath);
+          if (!stat.isFile()) return null;
+          const meta = goalArtifactIndex.get(file);
+          return {
+            id: meta?.artifactId || file,
+            title: meta?.artifactTitle || file,
+            name: file,
+            filename: file,
+            path: `/api/artifacts/${file}`,
+            sizeBytes: stat.size,
+            size: stat.size,
+            createdAt: stat.birthtimeMs || stat.mtimeMs,
+            updatedAt: stat.mtimeMs,
+            url: `/api/artifacts/${encodeURIComponent(file)}`,
+            previewUrl: `/api/artifacts/${encodeURIComponent(file)}`,
+            ...(meta
+              ? {
+                  goalId: meta.goalId,
+                  goalTitle: meta.goalTitle,
+                  goalMode: meta.goalMode,
+                  kind: meta.kind,
+                  summary: meta.summary,
+                  stepId: meta.stepId
+                }
+              : {})
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(files));
     }
@@ -3165,7 +3220,7 @@ fi
       const goalId = url.pathname.split('/')[3];
       let body = '';
       for await (const chunk of req) body += chunk;
-      const { title, kind, ref, summary, stepId } = safeParse(body, {});
+      const { title, kind, ref, summary, content, stepId } = safeParse(body, {});
       if (!title) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: 'Field "title" is required' }));
@@ -3175,6 +3230,7 @@ fi
         kind: kind || 'doc',
         ref,
         summary,
+        content,
         stepId
       });
       if (!updated) {

@@ -76,7 +76,14 @@ export interface GoalProvider {
   ) => any;
   addArtifact?: (
     id: string,
-    artifact: { title: string; kind?: 'file' | 'doc' | 'link' | 'note' | 'report'; ref?: string; summary?: string; stepId?: string }
+    artifact: {
+      title: string;
+      kind?: 'file' | 'doc' | 'link' | 'note' | 'report';
+      ref?: string;
+      summary?: string;
+      content?: string;
+      stepId?: string;
+    }
   ) => any;
   removeArtifact?: (id: string, artifactId: string) => any;
   linkRoutine?: (id: string, routineId: string) => any;
@@ -490,6 +497,7 @@ export function createDefaultTools(options?: {
           artifact_kind: { type: 'string', enum: ['file', 'doc', 'link', 'note', 'report'], description: '交付物类型' },
           artifact_ref: { type: 'string', description: '交付物路径或链接' },
           artifact_summary: { type: 'string', description: '交付物要点摘要' },
+          artifact_content: { type: 'string', description: '交付物 Markdown 正文内容（将自动落盘至工件中心）' },
           category: {
             type: 'string',
             description: '领域分类: delivery(项目交付), engineering(研发技术), research(调研分析), operations(业务运营), growth(成长沉淀), other(通用)'
@@ -629,6 +637,7 @@ export function createDefaultTools(options?: {
               kind: (args.artifact_kind as any) || 'doc',
               ref: args.artifact_ref ? String(args.artifact_ref) : undefined,
               summary: args.artifact_summary ? String(args.artifact_summary) : undefined,
+              content: args.artifact_content ? String(args.artifact_content) : undefined,
               stepId: args.step_id ? String(args.step_id) : undefined
             });
             if (!updatedGoal) return { error: `登记交付物失败，未找到目标 ${goalId}` };
