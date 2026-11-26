@@ -1,0 +1,16 @@
+{
+  "name": "@museclaw/runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "museclaw-runner": "./dist/client.js"
+  },
+  "scripts": {
+    "build": "../../node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/node_modules/.bin/esbuild src/cli.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/client.js && cp dist/client.js client.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.332",
+    "ws": "^8.23.0"
+  }
+}

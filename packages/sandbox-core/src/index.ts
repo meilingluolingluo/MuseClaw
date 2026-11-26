@@ -10,11 +10,17 @@ export * from './tools.ts';
 export * from './widget-validator.ts';
 export * from './loop.ts';
 export * from './llm.ts';
-export * from './local-agent-prober.ts';
-export * from './local-agent-runner.ts';
-export * from './runner-mesh.ts';
 export * from './multica-bridge.ts';
 export * from './reasoning.ts';
+export * from './providers/types.ts';
+export * from './providers/executable.ts';
+export * from './providers/async-queue.ts';
+export * from './providers/claude-driver.ts';
+export * from './providers/codex-driver.ts';
+export * from './providers/pi-driver.ts';
+export * from './providers/openai-compat-driver.ts';
+export * from './providers/environment-bridge.ts';
+export * from './providers/registry.ts';
 
 /**
  * SandboxCore
@@ -33,7 +39,6 @@ export class SandboxCore {
    */
   public async ensureRunning(profile: AgentProfile): Promise<string> {
     console.log(`[SandboxCore] Ensuring sandbox active for user: ${this.userId}, Bot profile: ${profile.name}`);
-    // Interacts with local Docker daemon or K8s to check container health and persistent volume mount
     return `sandbox-${this.userId}`;
   }
 

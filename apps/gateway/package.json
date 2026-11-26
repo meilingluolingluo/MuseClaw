@@ -9,9 +9,11 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.76.0",
-    "@museclaw/protocol": "workspace:*"
+    "@museclaw/protocol": "workspace:*",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.2",
     "tsx": "^4.23.15"
   }
 }

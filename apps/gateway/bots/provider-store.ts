@@ -1,732 +1,612 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
-  type ModelProviderConfig,
+  globalProviderRuntime,
+  type EnvironmentInfo,
   type LLMCaller,
-  type LocalAgentProbeOverride,
-  isStdioLocalAgent,
-  createOpenAICompatibleCaller,
-  createLocalAgentCaller,
-  testProviderConnection,
-  probeOllamaModels,
-  resolveApiKey,
-  resolveModelAlias,
-  probeLocalAgents,
-  discoverClaudeModels,
-  discoverCodexModels,
-  discoverPiModels,
-  discoverDuccModels,
-  discoverDucxModels,
-  fetchRemoteModels,
-  globalRunnerMesh
+  type PermissionMode,
+  type ProviderDriverKind,
+  type ProviderInstanceConfig,
+  type ProviderSnapshot,
+  type ProviderTestResult,
+  type ReasoningEffort
 } from '../../../packages/sandbox-core/src/index.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-export interface ModelsConfigFile {
-  activeProviderId: string;
-  providers: ModelProviderConfig[];
+export interface ProviderInstanceRecord extends ProviderInstanceConfig {
+  createdAt?: number;
   updatedAt?: number;
 }
 
-const DEFAULT_PRESETS: ModelProviderConfig[] = [
+export interface ModelProviderStoreConfig {
+  activeInstanceId: string;
+  activeModelId: string;
+  activeEnvironmentId: string;
+  instances: ProviderInstanceRecord[];
+}
+
+export interface PublicProviderEntry extends ProviderInstanceRecord {
+  hasApiKey: boolean;
+  maskedApiKey: string;
+  snapshot?: ProviderSnapshot;
+}
+
+const DEFAULT_INSTANCES: ProviderInstanceRecord[] = [
   {
-    id: 'claude',
-    name: 'Claude Code (本地 Agent)',
-    baseUrl: '',
-    model: 'claude-sonnet-4-6',
-    candidateModels: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5', 'sonnet', 'opus', 'haiku'],
-    isLocalAgent: true,
-    category: 'local_agent',
-    protocol: 'acp-stdio',
-    installCommand: 'npm i -g @anthropic-ai/claude-code',
-    docUrl: 'https://docs.anthropic.com/en/docs/claude-code',
-    description: 'Anthropic 官方本地编码 Agent，支持本机 OAuth 登录或自定义 Anthropic 兼容接口，实时流式输出'
+    instanceId: 'claude',
+    displayName: 'Claude Code',
+    driver: 'claude',
+    environmentId: 'local',
+    model: 'sonnet',
+    permissionMode: 'auto_edits',
+    effort: 'medium',
+    enabled: true,
+    isDefault: true,
+    description: 'Anthropic Claude Code Agent SDK 原生运行时'
   },
   {
-    id: 'codex',
-    name: 'OpenAI Codex (本地 Agent)',
-    baseUrl: 'local://codex',
-    model: 'gpt-5.4',
-    candidateModels: ['gpt-5.4', 'gpt-5.3-codex', 'o3', 'gpt-4o'],
-    isLocalAgent: true,
-    category: 'local_agent',
-    protocol: 'acp-stdio',
-    installCommand: 'npm i -g @openai/codex',
-    docUrl: 'https://github.com/openai/codex',
-    description: '本地 OpenAI Codex 终端编码 Agent，支持 headless stdio 交互'
+    instanceId: 'codex',
+    displayName: 'Codex CLI',
+    driver: 'codex',
+    environmentId: 'local',
+    model: 'gpt-5.3-codex',
+    permissionMode: 'auto_edits',
+    effort: 'medium',
+    enabled: true,
+    isDefault: true,
+    description: 'OpenAI Codex CLI 结构化编程运行时'
   },
   {
-    id: 'pi',
-    name: 'Pi Coding Agent (本地 Agent)',
-    baseUrl: 'local://pi',
+    instanceId: 'pi',
+    displayName: 'Pi Agent',
+    driver: 'pi',
+    environmentId: 'local',
     model: 'anthropic/claude-sonnet-4-6',
-    candidateModels: ['anthropic/claude-sonnet-4-6', 'openai/gpt-5.4', 'deepseek/deepseek-chat'],
-    isLocalAgent: true,
-    category: 'local_agent',
-    protocol: 'json-rpc-stdio',
-    installCommand: 'npm i -g @mariozechner/pi-coding-agent',
-    docUrl: 'https://github.com/badlogic/pi-mono',
-    description: '轻量高性能终端 Coding Agent，支持 stdio JSON-RPC 与多模型驱动'
+    permissionMode: 'auto_edits',
+    enabled: true,
+    isDefault: true,
+    description: 'Pi Coding Agent CLI 运行时'
   },
   {
-    id: 'dsh',
-    name: 'DeepSeek Harness (本地 dsh)',
-    baseUrl: 'local://dsh',
-    model: 'deepseek-official/deepseek-chat',
-    candidateModels: ['deepseek-official/deepseek-chat', 'deepseek-official/deepseek-reasoner'],
-    isLocalAgent: true,
-    category: 'local_agent',
-    protocol: 'acp-stdio',
-    installCommand: 'curl -fsSL https://deepseek.ai/dsh/install.sh | bash',
-    docUrl: 'https://github.com/deepseek-ai/deepseek-harness',
-    description: 'DeepSeek 官方开源本地终端 Harness 编码 Agent，支持 ACP 协议'
+    instanceId: 'ollama',
+    displayName: 'Ollama (本地大模型)',
+    driver: 'ollama',
+    environmentId: 'local',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'qwen2.5-coder',
+    enabled: true,
+    isDefault: true,
+    description: '本地 Ollama OpenAI 兼容服务'
   },
   {
-    id: 'ollama',
-    name: '本地 Ollama (Local)',
-    baseUrl: 'http://localhost:11434/v1/chat/completions',
-    model: 'llama3.2',
-    candidateModels: ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral'],
-    isLocalAgent: true,
-    category: 'local_agent',
-    protocol: 'openai-http',
-    installCommand: 'brew install ollama && ollama serve',
-    docUrl: 'https://ollama.com',
-    description: '无需联网与 API Key，完全在本地硬件私有化运行'
+    instanceId: 'deepseek',
+    displayName: 'DeepSeek',
+    driver: 'openai-compat',
+    environmentId: 'local',
+    baseUrl: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    enabled: true,
+    isDefault: true
   },
   {
-    id: 'deepseek',
-    name: 'DeepSeek 官方',
-    baseUrl: 'https://api.deepseek.com/chat/completions',
-    model: 'deepseek-flash',
-    candidateModels: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
-    category: 'cloud_api',
-    description: '国内原生推理与 Coding 模型，性价比极高'
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI 官方',
-    baseUrl: 'https://api.openai.com/v1/chat/completions',
+    instanceId: 'openai',
+    displayName: 'OpenAI',
+    driver: 'openai-compat',
+    environmentId: 'local',
+    baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o',
-    candidateModels: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o3-mini', 'gpt-4.5-preview'],
-    category: 'cloud_api',
-    description: '行业标准旗舰模型，支持原生 Tool Calling'
+    enabled: true,
+    isDefault: true
   },
   {
-    id: 'siliconflow',
-    name: '硅基流动 (SiliconFlow)',
-    baseUrl: 'https://api.siliconflow.cn/v1/chat/completions',
-    model: 'deepseek-ai/DeepSeek-V3',
-    candidateModels: ['deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1', 'Qwen/Qwen2.5-72B-Instruct'],
-    category: 'cloud_api',
-    description: '高并发 DeepSeek 与开源大模型托管云服务'
+    instanceId: 'siliconflow',
+    displayName: 'SiliconFlow (硅基流动)',
+    driver: 'openai-compat',
+    environmentId: 'local',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    model: 'Qwen/Qwen2.5-72B-Instruct',
+    enabled: true,
+    isDefault: true
   },
   {
-    id: 'moonshot',
-    name: '月之暗面 Kimi',
-    baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
-    model: 'moonshot-v1-32k',
-    candidateModels: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k', 'kimi-latest'],
-    category: 'cloud_api',
-    description: '超长上下文中文原生模型'
+    instanceId: 'moonshot',
+    displayName: 'Moonshot (Kimi)',
+    driver: 'openai-compat',
+    environmentId: 'local',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'moonshot-v1-8k',
+    enabled: true,
+    isDefault: true
   },
   {
-    id: 'qwen',
-    name: '通义千问 (DashScope)',
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    instanceId: 'qwen',
+    displayName: 'Qwen (通义千问)',
+    driver: 'openai-compat',
+    environmentId: 'local',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-plus',
-    candidateModels: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen2.5-72b-instruct'],
-    category: 'cloud_api',
-    description: '阿里云官方模型服务，兼容 OpenAI 协议'
+    enabled: true,
+    isDefault: true
   },
   {
-    id: 'custom',
-    name: '自定义 OpenAI 网关 (Custom)',
-    baseUrl: 'https://api.example.com/v1/chat/completions',
+    instanceId: 'custom',
+    displayName: '自定义 OpenAI 兼容端点',
+    driver: 'openai-compat',
+    environmentId: 'local',
+    baseUrl: '',
     model: '',
-    candidateModels: [],
-    isCustom: true,
-    category: 'cloud_api',
-    description: '支持任意自建代理、中转或私有 OpenAI 兼容大模型网关'
-  },
-  {
-    id: 'ducc',
-    name: 'Baidu CC (内网 ducc)',
-    baseUrl: 'local://ducc',
-    model: 'GLM-5.3-Flash-内部',
-    candidateModels: ['GLM-5.3-Flash-内部', 'Opus 5.5', 'Claude Sonnet 5.5', 'DeepSeek-V4.1-Flash-内部'],
-    isLocalAgent: true,
-    category: 'intranet_agent',
-    protocol: 'acp-stdio',
-    installCommand: 'curl -fsSL http://team-mesh.loop.baidu-int.com:8004/api/tmesh/dist/install.sh | bash',
-    docUrl: 'http://team-mesh.loop.baidu-int.com:8004',
-    description: 'Baidu 内部 Claude Code 编码 Agent，免 Key 直连内网大模型'
-  },
-  {
-    id: 'ducx',
-    name: 'Baidu CX (内网 ducx)',
-    baseUrl: 'local://ducx',
-    model: 'gpt-5.6-sol',
-    candidateModels: ['gpt-5.6-sol', 'gpt-6.1-sol', 'GLM-5.3-Flash', 'DeepSeek-V4-Pro'],
-    isLocalAgent: true,
-    category: 'intranet_agent',
-    protocol: 'acp-stdio',
-    installCommand: 'curl -fsSL http://team-mesh.loop.baidu-int.com:8004/api/tmesh/dist/install.sh | bash',
-    docUrl: 'http://team-mesh.loop.baidu-int.com:8004',
-    description: 'Baidu 内部 Codex 架构高级编码 Agent，支持多模型与高阶推理'
+    enabled: true,
+    isDefault: true
   }
 ];
 
-function inferCategory(p: ModelProviderConfig): 'local_agent' | 'cloud_api' | 'intranet_agent' {
-  if (p.category) return p.category;
-  if (p.id === 'ducc' || p.id === 'ducx') return 'intranet_agent';
-  if (p.isLocalAgent || isStdioLocalAgent(p.id) || p.id === 'ollama') return 'local_agent';
-  return 'cloud_api';
+function maskSecret(secret?: string): string {
+  if (!secret || !secret.trim()) return '';
+  const trimmed = secret.trim();
+  if (trimmed.length <= 8) return '****';
+  return `${trimmed.slice(0, 4)}****${trimmed.slice(-4)}`;
 }
 
+function isValidDriver(value: unknown): value is ProviderDriverKind {
+  return value === 'claude' || value === 'codex' || value === 'pi' || value === 'ollama' || value === 'openai-compat';
+}
+
+function sanitizePermissionMode(value: unknown): PermissionMode | undefined {
+  if (value === 'ask' || value === 'auto_edits' || value === 'full') {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeEffort(value: unknown): ReasoningEffort | undefined {
+  if (value === 'default' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max') {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeCustomModels(value: unknown, existing?: string[]): string[] | undefined {
+  if (value === undefined) return existing;
+  if (!Array.isArray(value)) return existing;
+  return Array.from(new Set(value.map((item) => String(item).trim()).filter(Boolean)));
+}
+
+function sanitizeEnvMap(value: unknown, existing?: Record<string, string>): Record<string, string> | undefined {
+  if (value === undefined) return existing;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return existing;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const key = k.trim();
+    if (key && v !== undefined && v !== null) {
+      out[key] = String(v);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * 多实例模型提供方与环境配置仓储 (ModelProviderStore)
+ * 持久化至 config/providers.json，并与 ProviderRuntimeManager 联动完成探针探测与调用路由。
+ */
 export class ModelProviderStore {
-  private configPath: string;
-  private activeProviderId: string = 'deepseek';
-  private providers: Map<string, ModelProviderConfig> = new Map();
-  private cachedCaller: { providerId: string; caller: LLMCaller } | null = null;
-  private remoteModelsCache = new Map<string, { models: string[]; timestamp: number }>();
+  private readonly filePath: string;
+  private config: ModelProviderStoreConfig;
 
-  public getRemoteModelsCache(providerId: string, baseUrl: string, apiKey: string): string[] | null {
-    const cacheKey = `${providerId}:${baseUrl}:${apiKey.slice(0, 8)}`;
-    const cached = this.remoteModelsCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < 10 * 60 * 1000) {
-      return cached.models;
-    }
-    return null;
+  constructor(configDir = join(process.cwd(), 'config')) {
+    this.filePath = join(configDir, 'providers.json');
+    this.config = this.load();
   }
 
-  public setRemoteModelsCache(providerId: string, baseUrl: string, apiKey: string, models: string[]): void {
-    const cacheKey = `${providerId}:${baseUrl}:${apiKey.slice(0, 8)}`;
-    this.remoteModelsCache.set(cacheKey, { models, timestamp: Date.now() });
+  private createDefaultConfig(): ModelProviderStoreConfig {
+    return {
+      activeInstanceId: 'claude',
+      activeModelId: 'sonnet',
+      activeEnvironmentId: 'local',
+      instances: DEFAULT_INSTANCES.map((inst) => ({ ...inst }))
+    };
   }
 
-  public getProviderConfig(providerId: string): ModelProviderConfig | undefined {
-    return this.providers.get(providerId);
-  }
+  private normalizeInstance(raw: any, existing?: ProviderInstanceRecord): ProviderInstanceRecord {
+    const driver: ProviderDriverKind = isValidDriver(raw?.driver)
+      ? raw.driver
+      : existing?.driver || 'openai-compat';
+    const instanceId = String(raw?.instanceId || existing?.instanceId || `${driver}-${Date.now()}`).trim();
+    const now = Date.now();
 
-  constructor(customPath?: string) {
-    this.configPath = customPath || path.resolve(__dirname, '../../../config/models.json');
-    this.initDefaultPresets();
-    this.load();
-  }
-
-  private initDefaultPresets(): void {
-    for (const preset of DEFAULT_PRESETS) {
-      this.providers.set(preset.id, { ...preset });
-    }
-  }
-
-  public load(): void {
-    if (!fs.existsSync(this.configPath)) {
-      return;
-    }
-    try {
-      const raw = fs.readFileSync(this.configPath, 'utf-8');
-      const data: ModelsConfigFile = JSON.parse(raw);
-      if (data.activeProviderId && (this.providers.has(data.activeProviderId) || data.providers?.some(p => p.id === data.activeProviderId))) {
-        this.activeProviderId = data.activeProviderId;
+    let nextApiKey = existing?.apiKey;
+    if (raw?.clearApiKey) {
+      nextApiKey = undefined;
+    } else if (raw?.apiKey !== undefined) {
+      const candidate = String(raw.apiKey).trim();
+      if (!candidate.includes('****')) {
+        nextApiKey = candidate || undefined;
       }
-      if (Array.isArray(data.providers)) {
-        for (const p of data.providers) {
-          const existing = this.providers.get(p.id);
-          const merged: ModelProviderConfig = {
-            ...existing,
-            ...p,
-            category: existing?.category || p.category || inferCategory(p)
-          };
-          // 兼容旧配置：将空字符串或失效占位清理，同时保留用户显式设置
-          if (p.id === 'claude' && merged.baseUrl === 'local://claude') {
-            merged.baseUrl = '';
-          }
-          this.providers.set(p.id, merged);
+    }
+
+    return {
+      instanceId,
+      displayName: String(raw?.displayName ?? existing?.displayName ?? instanceId).trim() || instanceId,
+      driver,
+      environmentId: String(raw?.environmentId ?? existing?.environmentId ?? 'local').trim() || 'local',
+      model: raw?.model !== undefined ? String(raw.model).trim() : (existing?.model ?? ''),
+      customModels: sanitizeCustomModels(raw?.customModels, existing?.customModels),
+      binaryPath: raw?.binaryPath !== undefined ? String(raw.binaryPath).trim() || undefined : existing?.binaryPath,
+      configDir: raw?.configDir !== undefined ? String(raw.configDir).trim() || undefined : existing?.configDir,
+      cwd: raw?.cwd !== undefined ? String(raw.cwd).trim() || undefined : existing?.cwd,
+      extraArgs: raw?.extraArgs !== undefined ? String(raw.extraArgs) : existing?.extraArgs,
+      baseUrl: raw?.baseUrl !== undefined ? String(raw.baseUrl).trim() : existing?.baseUrl,
+      apiKey: nextApiKey,
+      env: sanitizeEnvMap(raw?.env, existing?.env),
+      permissionMode: sanitizePermissionMode(raw?.permissionMode) ?? existing?.permissionMode,
+      effort: sanitizeEffort(raw?.effort) ?? existing?.effort,
+      description: raw?.description !== undefined ? String(raw.description) : existing?.description,
+      isDefault: raw?.isDefault !== undefined ? Boolean(raw.isDefault) : existing?.isDefault,
+      enabled: raw?.enabled !== undefined ? Boolean(raw.enabled) : (existing?.enabled ?? true),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
+  }
+
+  private load(): ModelProviderStoreConfig {
+    try {
+      if (existsSync(this.filePath)) {
+        const parsed = JSON.parse(readFileSync(this.filePath, 'utf8'));
+        const loadedInstances: ProviderInstanceRecord[] = Array.isArray(parsed?.instances)
+          ? parsed.instances.map((item: any) => this.normalizeInstance(item))
+          : [];
+        const byId = new Map<string, ProviderInstanceRecord>();
+        for (const def of DEFAULT_INSTANCES) {
+          byId.set(def.instanceId, { ...def });
         }
+        for (const item of loadedInstances) {
+          const base = byId.get(item.instanceId);
+          byId.set(item.instanceId, this.normalizeInstance(item, base));
+        }
+        const instances = Array.from(byId.values());
+        const activeId =
+          typeof parsed?.activeInstanceId === 'string' && byId.has(parsed.activeInstanceId)
+            ? parsed.activeInstanceId
+            : instances[0]?.instanceId || 'claude';
+        const active = byId.get(activeId)!;
+        return {
+          activeInstanceId: activeId,
+          activeModelId: String(parsed?.activeModelId || active.model || 'sonnet'),
+          activeEnvironmentId: String(parsed?.activeEnvironmentId || active.environmentId || 'local'),
+          instances
+        };
       }
-    } catch {
-      // 容错处理
+    } catch (err) {
+      console.warn('[ModelProviderStore] Failed to load providers.json, using defaults:', err);
     }
+
+    const defaults = this.createDefaultConfig();
+    this.persist(defaults);
+    return defaults;
   }
 
-  public save(): void {
+  private persist(nextConfig: ModelProviderStoreConfig = this.config): void {
     try {
-      const dir = path.dirname(this.configPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      const data: ModelsConfigFile = {
-        activeProviderId: this.activeProviderId,
-        providers: Array.from(this.providers.values()),
-        updatedAt: Date.now()
-      };
-      fs.writeFileSync(this.configPath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch {
-      // 容错处理
+      mkdirSync(dirname(this.filePath), { recursive: true });
+      writeFileSync(this.filePath, JSON.stringify(nextConfig, null, 2), 'utf8');
+    } catch (err) {
+      console.error('[ModelProviderStore] Failed to persist providers.json:', err);
     }
   }
 
-  public resolveEffectiveLocalModel(provider: ModelProviderConfig, userId?: string): ModelProviderConfig {
-    const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(userId);
-    const remote = remoteAgents.find((r) => r.id === provider.id);
-    const remoteModels = remote?.candidateModels || [];
-    const customModels = provider.customModels || [];
-
-    if (provider.id === 'claude') {
-      const claudeInfo = discoverClaudeModels(provider.configDir, provider.executablePath, customModels);
-      const baseList = remoteModels.length > 0 ? remoteModels : claudeInfo.models;
-      const candidateModels = Array.from(new Set([...baseList, ...customModels]));
-      const effectiveModel = provider.model?.trim()
-        ? provider.model.trim()
-        : (remote?.defaultModel || claudeInfo.defaultModel || candidateModels[0] || 'claude-sonnet-4-6');
-      return {
-        ...provider,
-        model: effectiveModel,
-        candidateModels
-      };
-    }
-
-    if (provider.id === 'codex') {
-      const codexInfo = discoverCodexModels(provider.configDir);
-      const candidateModels = Array.from(new Set([...(remoteModels.length > 0 ? remoteModels : codexInfo.models), ...customModels]));
-      const effectiveModel = customModels.includes(provider.model)
-        ? provider.model
-        : resolveModelAlias(
-            provider.model,
-            candidateModels,
-            remote?.defaultModel || codexInfo.defaultModel || candidateModels[0] || 'gpt-5.4'
-          );
-      return {
-        ...provider,
-        model: effectiveModel,
-        candidateModels
-      };
-    }
-    if (provider.id === 'pi') {
-      const piInfo = discoverPiModels(provider.configDir);
-      const candidateModels = Array.from(new Set([...(remoteModels.length > 0 ? remoteModels : piInfo.models), ...customModels]));
-      const effectiveModel = customModels.includes(provider.model)
-        ? provider.model
-        : resolveModelAlias(
-            provider.model,
-            candidateModels,
-            remote?.defaultModel || piInfo.defaultModel || candidateModels[0] || 'anthropic/claude-sonnet-4-6'
-          );
-      return {
-        ...provider,
-        model: effectiveModel,
-        candidateModels
-      };
-    }
-    if (provider.id === 'ducc') {
-      const duccInfo = discoverDuccModels();
-      const candidateModels = Array.from(new Set([...(remoteModels.length > 0 ? remoteModels : duccInfo.models), ...customModels]));
-      const effectiveModel = customModels.includes(provider.model)
-        ? provider.model
-        : resolveModelAlias(
-            provider.model,
-            candidateModels,
-            remote?.defaultModel || duccInfo.defaultModel || candidateModels[0] || 'GLM-5.3-Flash-内部'
-          );
-      return {
-        ...provider,
-        model: effectiveModel,
-        candidateModels
-      };
-    }
-    if (provider.id === 'ducx') {
-      const ducxInfo = discoverDucxModels();
-      const candidateModels = Array.from(new Set([...(remoteModels.length > 0 ? remoteModels : ducxInfo.models), ...customModels]));
-      const effectiveModel = customModels.includes(provider.model)
-        ? provider.model
-        : resolveModelAlias(
-            provider.model,
-            candidateModels,
-            remote?.defaultModel || ducxInfo.defaultModel || candidateModels[0] || 'gpt-5.6-sol'
-          );
-      return {
-        ...provider,
-        model: effectiveModel,
-        candidateModels
-      };
-    }
-    return provider;
+  private toPublicEntry(inst: ProviderInstanceRecord, snapshot?: ProviderSnapshot): PublicProviderEntry {
+    const rawKey = inst.apiKey?.trim() || '';
+    return {
+      ...inst,
+      apiKey: maskSecret(rawKey),
+      hasApiKey: Boolean(rawKey),
+      maskedApiKey: maskSecret(rawKey),
+      snapshot
+    };
   }
 
-  public getActiveProvider(userId?: string): ModelProviderConfig {
-    const p = this.providers.get(this.activeProviderId);
-    const provider = p || this.providers.get('deepseek') || DEFAULT_PRESETS[0];
-    return this.resolveEffectiveLocalModel(provider, userId);
+  public getInstances(): ProviderInstanceRecord[] {
+    return this.config.instances.map((inst) => ({ ...inst }));
   }
 
-  public getActiveCaller(options?: { userId?: string }): LLMCaller {
-    const active = this.getActiveProvider(options?.userId);
-    if (isStdioLocalAgent(active.id) || (active.isLocalAgent && active.id !== 'ollama')) {
-      if (options?.userId) {
-        return createLocalAgentCaller(active, { userId: options.userId });
-      }
-      if (this.cachedCaller && this.cachedCaller.providerId === active.id) {
-        return this.cachedCaller.caller;
-      }
-      const caller = createLocalAgentCaller(active);
-      this.cachedCaller = { providerId: active.id, caller };
-      return caller;
-    }
-    if (this.cachedCaller && this.cachedCaller.providerId === active.id) {
-      return this.cachedCaller.caller;
-    }
-    const caller = createOpenAICompatibleCaller(active);
-    this.cachedCaller = { providerId: active.id, caller };
-    return caller;
+  public getInstance(instanceId: string): ProviderInstanceRecord | undefined {
+    const found = this.config.instances.find((item) => item.instanceId === instanceId);
+    return found ? { ...found } : undefined;
   }
 
-  public getCallerForBot(botModelConfig?: { providerId?: string; model?: string }): LLMCaller {
-    if (botModelConfig?.providerId && this.providers.has(botModelConfig.providerId)) {
-      const provider = { ...this.providers.get(botModelConfig.providerId)! };
-      if (botModelConfig.model) {
-        provider.model = botModelConfig.model;
-      }
-      if (isStdioLocalAgent(provider.id) || (provider.isLocalAgent && provider.id !== 'ollama')) {
-        return createLocalAgentCaller(this.resolveEffectiveLocalModel(provider));
-      }
-      return createOpenAICompatibleCaller(provider);
-    }
-    return this.getActiveCaller();
+  public getActiveInstance(): ProviderInstanceRecord {
+    const found =
+      this.config.instances.find((item) => item.instanceId === this.config.activeInstanceId) ||
+      this.config.instances[0] ||
+      DEFAULT_INSTANCES[0];
+    return {
+      ...found,
+      model: this.config.activeModelId || found.model || 'sonnet',
+      environmentId: this.config.activeEnvironmentId || found.environmentId || 'local'
+    };
   }
 
-  public maskKey(key?: string): string {
-    if (!key || key.length < 6) return key ? '••••••' : '';
-    return `${key.slice(0, 3)}••••••${key.slice(-3)}`;
-  }
-
-  private redactEnv(env?: Record<string, string>): Record<string, string> | undefined {
-    if (!env) return undefined;
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(env)) {
-      if (/key|token|secret|password/i.test(k)) {
-        out[k] = v ? '••••••••' : '';
-      } else {
-        out[k] = v;
-      }
-    }
-    return out;
+  public getActiveProvider(): ProviderInstanceRecord {
+    return this.getActiveInstance();
   }
 
   public async getPublicConfig(
     userId?: string,
     options?: { forceRefresh?: boolean }
   ): Promise<{
-    activeProviderId: string;
-    providers: Array<ModelProviderConfig & { hasKey: boolean; maskedKey: string }>;
+    activeInstanceId: string;
+    activeModelId: string;
+    activeEnvironmentId: string;
+    environments: EnvironmentInfo[];
+    instances: PublicProviderEntry[];
   }> {
-    const overrides: Record<string, LocalAgentProbeOverride> = {};
-    for (const p of this.providers.values()) {
-      if (p.isLocalAgent || isStdioLocalAgent(p.id) || p.id === 'ollama') {
-        overrides[p.id] = {
-          binaryPath: p.binaryPath,
-          configDir: p.configDir,
-          cwd: p.cwd,
-          baseUrl: p.baseUrl,
-          apiKey: p.apiKey,
-          env: p.env,
-          customModels: p.customModels
-        };
-      }
-    }
+    const forceRefresh = Boolean(options?.forceRefresh);
+    const probeTargets = this.config.instances.filter(
+      (inst) =>
+        inst.enabled !== false &&
+        (inst.driver === 'claude' || inst.driver === 'codex' || inst.driver === 'pi' || inst.driver === 'ollama')
+    );
 
-    let localAgents: any[] = [];
-    try {
-      localAgents = await probeLocalAgents({
-        overrides,
-        userId,
-        forceRefresh: options?.forceRefresh
-      });
-    } catch {
-      // 容错处理
-    }
-    const localMap = new Map(localAgents.map((a) => [a.id, a]));
-
-    const list = await Promise.all(
-      Array.from(this.providers.values()).map(async (p) => {
-        const isLocal = Boolean(p.isLocalAgent || isStdioLocalAgent(p.id) || p.id === 'ollama');
-        const category = inferCategory(p);
-        const localInfo = localMap.get(p.id);
-        const resolved = resolveApiKey(p.apiKey, p.id);
-
-        let candidateModels: string[] = [];
-        const remoteAgents = isLocal ? globalRunnerMesh.getAggregatedRemoteAgents(userId) : [];
-        const remote = remoteAgents.find((r) => r.id === p.id);
-
-        if (p.id === 'ollama') {
-          const detectedModels = localInfo?.candidateModels && localInfo.candidateModels.length > 0 ? localInfo.candidateModels : [];
-          const remoteModels = remote?.candidateModels && remote.candidateModels.length > 0 ? remote.candidateModels : [];
-          candidateModels = Array.from(
-            new Set([
-              ...(remoteModels.length > 0
-                ? remoteModels
-                : (detectedModels.length > 0 ? detectedModels : (p.candidateModels || ['llama3.2', 'qwen2.5-coder', 'deepseek-r1:8b', 'mistral']))),
-              ...(p.customModels || [])
-            ])
-          );
-          p.candidateModels = candidateModels;
-        } else if (isLocal) {
-          let models: string[] = [];
-          if (remote?.candidateModels && remote.candidateModels.length > 0) {
-            models = remote.candidateModels;
-          } else {
-            let dynamicDiscovered: string[] = [];
-            if (p.id === 'claude') dynamicDiscovered = discoverClaudeModels(p.configDir, localInfo?.executablePath, p.customModels).models;
-            else if (p.id === 'codex') dynamicDiscovered = discoverCodexModels(p.configDir).models;
-            else if (p.id === 'pi') dynamicDiscovered = discoverPiModels(p.configDir).models;
-            else if (p.id === 'ducc') dynamicDiscovered = discoverDuccModels().models;
-            else if (p.id === 'ducx') dynamicDiscovered = discoverDucxModels().models;
-
-            models = Array.from(new Set([
-              ...(localInfo?.installed ? (localInfo.candidateModels || []) : []),
-              ...dynamicDiscovered,
-              ...(p.customModels || []),
-              ...(p.candidateModels || [])
-            ]));
-          }
-          candidateModels = Array.from(new Set([...models, ...(p.customModels || [])]));
-          p.candidateModels = candidateModels;
-        } else {
-          const cached = this.getRemoteModelsCache(p.id, p.baseUrl, resolved || '');
-          if (cached && cached.length > 0) {
-            candidateModels = cached;
-          } else if (resolved && p.baseUrl) {
-            try {
-              const res = await fetchRemoteModels(p.baseUrl, resolved, 3000);
-              if (res.ok && res.models.length > 0) {
-                this.setRemoteModelsCache(p.id, p.baseUrl, resolved, res.models);
-                const merged = Array.from(new Set([...res.models, ...(p.candidateModels || [])]));
-                candidateModels = merged;
-                p.candidateModels = merged;
-              }
-            } catch {
-              // 容错处理
-            }
-          }
-          if (candidateModels.length === 0 && p.candidateModels && p.candidateModels.length > 0) {
-            candidateModels = p.candidateModels;
-          }
-          if (p.customModels && p.customModels.length > 0) {
-            candidateModels = Array.from(new Set([...candidateModels, ...p.customModels]));
-          }
+    const snapshotById = new Map<string, ProviderSnapshot>();
+    await Promise.all(
+      probeTargets.map(async (inst) => {
+        try {
+          const snapshot = await globalProviderRuntime.probeInstance(inst, {
+            forceRefresh,
+            userId
+          });
+          snapshotById.set(inst.instanceId, snapshot);
+        } catch (err: any) {
+          snapshotById.set(inst.instanceId, {
+            instanceId: inst.instanceId,
+            driver: inst.driver,
+            displayName: inst.displayName,
+            enabled: inst.enabled,
+            installed: false,
+            status: 'error',
+            version: null,
+            auth: { status: 'unknown' },
+            models: [],
+            checkedAt: Date.now(),
+            environmentId: inst.environmentId || 'local',
+            environmentLabel: inst.environmentId || 'local',
+            message: err?.message || '探测失败'
+          });
         }
-
-        const effectiveModel = p.id === 'claude' && p.model?.trim()
-          ? p.model.trim()
-          : candidateModels.length > 0
-            ? (p.model && candidateModels.includes(p.model) ? p.model : candidateModels[0])
-            : p.model;
-
-        let isInstalled: boolean | undefined = undefined;
-        let isAvailable: boolean | undefined = undefined;
-        let hasKey = false;
-        const effectiveVersion = localInfo?.version || remote?.version || p.version;
-        const effectiveExecutable = localInfo?.executablePath || remote?.executablePath || p.executablePath;
-        let maskedKey = '';
-
-        if (p.id === 'ollama') {
-          const isHttpActive = localInfo?.version === 'HTTP Service Active' || Boolean(remote?.installed);
-          const isBinInstalled = Boolean(localInfo?.installed || remote?.installed);
-          isInstalled = isBinInstalled;
-          isAvailable = isHttpActive;
-          hasKey = isHttpActive;
-          if (isHttpActive) {
-            maskedKey = remote?.installed ? '远程节点已就绪' : '本地服务已就绪';
-          } else if (isBinInstalled) {
-            maskedKey = '服务未运行 (请执行 ollama serve)';
-          } else {
-            maskedKey = '未检测到';
-          }
-        } else if (isLocal) {
-          isInstalled = Boolean(localInfo?.installed || remote?.installed);
-          const remoteReady = remote ? (remote.status ? remote.status === 'ready' : Boolean(remote.installed)) : false;
-          const localReady = localInfo ? (localInfo.isAvailable !== false && localInfo.installed) : false;
-          isAvailable = Boolean(localReady || remoteReady);
-          hasKey = Boolean(resolved || isAvailable);
-          maskedKey = resolved
-            ? this.maskKey(resolved)
-            : isInstalled
-              ? (effectiveVersion || (localInfo?.installed ? '本地就绪' : '远程就绪'))
-              : '未检测到';
-        } else {
-          hasKey = Boolean(resolved);
-          maskedKey = this.maskKey(resolved);
-        }
-
-        return {
-          ...p,
-          category,
-          model: effectiveModel,
-          candidateModels,
-          isLocalAgent: isLocal,
-          installed: isInstalled,
-          isAvailable,
-          status: localInfo?.status || (isAvailable ? 'ready' : isInstalled ? 'warning' : 'not_found'),
-          statusMessage: localInfo?.statusMessage,
-          auth: localInfo?.auth || remote?.auth,
-          source: localInfo?.source || (remote ? 'remote' : 'local'),
-          machineName: localInfo?.machineName || remote?.machineName,
-          installCommand: localInfo?.installCommand || p.installCommand,
-          docUrl: localInfo?.docUrl || p.docUrl,
-          checkedAt: localInfo?.checkedAt,
-          version: effectiveVersion,
-          executablePath: effectiveExecutable,
-          hasKey,
-          maskedKey,
-          env: this.redactEnv(p.env),
-          apiKey: undefined // 安全考虑不向前端明文回传完整 Key
-        };
       })
     );
 
+    const publicInstances = this.config.instances.map((inst) =>
+      this.toPublicEntry(inst, snapshotById.get(inst.instanceId))
+    );
+    const environments = globalProviderRuntime.listEnvironments(userId);
+
     return {
-      activeProviderId: this.activeProviderId,
-      providers: list
+      activeInstanceId: this.config.activeInstanceId,
+      activeModelId: this.config.activeModelId,
+      activeEnvironmentId: this.config.activeEnvironmentId,
+      environments,
+      instances: publicInstances
     };
   }
 
-  public updateConfig(input: {
-    activeProviderId?: string;
-    provider?: Partial<ModelProviderConfig> & { id: string; clearApiKey?: boolean };
-  }): { success: boolean; activeProviderId: string } {
-    if (input.activeProviderId && this.providers.has(input.activeProviderId)) {
-      this.activeProviderId = input.activeProviderId;
-      this.cachedCaller = null;
+  public upsertInstance(input: Partial<ProviderInstanceRecord> & { instanceId?: string }): ProviderInstanceRecord {
+    const instanceId = String(input.instanceId || `${input.driver || 'custom'}-${Date.now()}`).trim();
+    const index = this.config.instances.findIndex((item) => item.instanceId === instanceId);
+    const existing = index >= 0 ? this.config.instances[index] : undefined;
+    const normalized = this.normalizeInstance({ ...input, instanceId }, existing);
+
+    if (index >= 0) {
+      this.config.instances[index] = normalized;
+    } else {
+      this.config.instances.push(normalized);
     }
 
-    if (input.provider && input.provider.id) {
-      const existing = this.providers.get(input.provider.id) || {
-        id: input.provider.id,
-        name: input.provider.name || input.provider.id,
-        baseUrl: input.provider.baseUrl || '',
-        model: input.provider.model || '',
-        isCustom: true
-      };
-
-      let updatedKey = existing.apiKey;
-      if (input.provider.clearApiKey) {
-        updatedKey = undefined;
-      } else if (input.provider.apiKey !== undefined && input.provider.apiKey.trim() !== '') {
-        updatedKey = input.provider.apiKey.trim();
+    if (this.config.activeInstanceId === instanceId) {
+      if (normalized.model) {
+        this.config.activeModelId = normalized.model;
       }
-
-      let updatedEnv = existing.env;
-      if (input.provider.env !== undefined) {
-        const nextEnv: Record<string, string> = {};
-        for (const [k, v] of Object.entries(input.provider.env)) {
-          if (v === '••••••••' && existing.env?.[k]) {
-            nextEnv[k] = existing.env[k];
-          } else if (typeof v === 'string' && v.trim() !== '') {
-            nextEnv[k] = v.trim();
-          }
-        }
-        updatedEnv = Object.keys(nextEnv).length > 0 ? nextEnv : undefined;
+      if (normalized.environmentId) {
+        this.config.activeEnvironmentId = normalized.environmentId;
       }
-
-      const nextCustomModels = input.provider.customModels !== undefined
-        ? Array.from(new Set(input.provider.customModels.map((m) => m.trim()).filter(Boolean)))
-        : existing.customModels;
-
-      const { clearApiKey: _clear, ...cleanInput } = input.provider;
-      this.providers.set(input.provider.id, {
-        ...existing,
-        ...cleanInput,
-        apiKey: updatedKey,
-        env: updatedEnv,
-        customModels: nextCustomModels
-      });
-
-      this.cachedCaller = null;
     }
 
-    this.save();
-    return { success: true, activeProviderId: this.activeProviderId };
+    this.persist();
+    return { ...normalized };
   }
 
-  public async testProvider(config: ModelProviderConfig & { providerId?: string; userId?: string }) {
-    const id = config.id || config.providerId || '';
-    const existing = this.providers.get(id);
-    const mergedEnv = config.env !== undefined ? { ...(existing?.env || {}), ...config.env } : existing?.env;
-    if (mergedEnv) {
-      for (const [k, v] of Object.entries(mergedEnv)) {
-        if (v === '••••••••' && existing?.env?.[k]) {
-          mergedEnv[k] = existing.env[k];
-        }
-      }
+  public removeInstance(instanceId: string): { removed: boolean; reason?: string } {
+    if (this.config.instances.length <= 1) {
+      return { removed: false, reason: '至少保留一个模型提供方实例' };
     }
-    const merged: ModelProviderConfig & { userId?: string } = {
-      ...existing,
-      ...config,
-      id,
-      apiKey: config.apiKey && config.apiKey.trim() !== '' ? config.apiKey.trim() : existing?.apiKey,
-      baseUrl: config.baseUrl !== undefined ? config.baseUrl : (existing?.baseUrl || ''),
-      binaryPath: config.binaryPath !== undefined ? config.binaryPath : existing?.binaryPath,
-      configDir: config.configDir !== undefined ? config.configDir : existing?.configDir,
-      cwd: config.cwd !== undefined ? config.cwd : existing?.cwd,
-      extraArgs: config.extraArgs !== undefined ? config.extraArgs : existing?.extraArgs,
-      env: mergedEnv
+    const index = this.config.instances.findIndex((item) => item.instanceId === instanceId);
+    if (index < 0) {
+      return { removed: false, reason: `未找到实例: ${instanceId}` };
+    }
+    const target = this.config.instances[index];
+    if (target.isDefault) {
+      return { removed: false, reason: '默认内置提供方实例不可删除，可通过启用开关停用' };
+    }
+
+    this.config.instances.splice(index, 1);
+    if (this.config.activeInstanceId === instanceId) {
+      const fallback = this.config.instances[0];
+      this.config.activeInstanceId = fallback.instanceId;
+      this.config.activeModelId = fallback.model || 'sonnet';
+      this.config.activeEnvironmentId = fallback.environmentId || 'local';
+    }
+    this.persist();
+    return { removed: true };
+  }
+
+  public setActiveInstance(instanceId: string, modelId?: string, environmentId?: string): ModelProviderStoreConfig {
+    const target = this.config.instances.find((item) => item.instanceId === instanceId);
+    if (!target) {
+      throw new Error(`未找到提供方实例: ${instanceId}`);
+    }
+    this.config.activeInstanceId = target.instanceId;
+    if (modelId !== undefined && modelId.trim()) {
+      target.model = modelId.trim();
+      this.config.activeModelId = modelId.trim();
+    } else {
+      this.config.activeModelId = target.model || 'sonnet';
+    }
+    if (environmentId !== undefined && environmentId.trim()) {
+      target.environmentId = environmentId.trim();
+      this.config.activeEnvironmentId = environmentId.trim();
+    } else {
+      this.config.activeEnvironmentId = target.environmentId || 'local';
+    }
+    target.updatedAt = Date.now();
+    this.persist();
+    return {
+      ...this.config,
+      instances: this.getInstances()
     };
-    return testProviderConnection(merged);
   }
 
-  public async probeOllama(baseUrl?: string) {
-    return probeOllamaModels(baseUrl);
+  public updateConfig(data: {
+    activeInstanceId?: string;
+    activeModelId?: string;
+    activeEnvironmentId?: string;
+    instance?: Partial<ProviderInstanceRecord>;
+    instances?: Array<Partial<ProviderInstanceRecord>>;
+  }): { ok: boolean; activeInstanceId: string; activeModelId: string; activeEnvironmentId: string } {
+    if (Array.isArray(data.instances)) {
+      for (const item of data.instances) {
+        if (item && (item.instanceId || item.driver)) {
+          this.upsertInstance(item);
+        }
+      }
+    }
+
+    if (data.instance && (data.instance.instanceId || data.instance.driver)) {
+      this.upsertInstance(data.instance);
+    }
+
+    if (data.activeInstanceId) {
+      this.setActiveInstance(data.activeInstanceId, data.activeModelId, data.activeEnvironmentId);
+    } else {
+      const current = this.getActiveInstance();
+      if (data.activeModelId !== undefined || data.activeEnvironmentId !== undefined) {
+        this.setActiveInstance(current.instanceId, data.activeModelId, data.activeEnvironmentId);
+      }
+    }
+
+    return {
+      ok: true,
+      activeInstanceId: this.config.activeInstanceId,
+      activeModelId: this.config.activeModelId,
+      activeEnvironmentId: this.config.activeEnvironmentId
+    };
   }
 
-  public async fetchModelsForProvider(input: {
-    providerId?: string;
+  public async testProvider(data: {
+    instanceId?: string;
+    driver?: ProviderDriverKind;
+    environmentId?: string;
+    displayName?: string;
+    model?: string;
     baseUrl?: string;
     apiKey?: string;
-  }): Promise<{ ok: boolean; models: string[]; error?: string }> {
-    const providerId = input.providerId;
-    const provider = providerId ? this.providers.get(providerId) : undefined;
+    binaryPath?: string;
+    extraArgs?: string;
+    cwd?: string;
+    permissionMode?: PermissionMode;
+    effort?: ReasoningEffort;
+  }): Promise<ProviderTestResult> {
+    const existing = data.instanceId ? this.getInstance(data.instanceId) : undefined;
+    const merged = this.normalizeInstance(
+      {
+        instanceId: data.instanceId || existing?.instanceId || `test-${Date.now()}`,
+        displayName: data.displayName || existing?.displayName || '测试实例',
+        driver: data.driver || existing?.driver || 'openai-compat',
+        environmentId: data.environmentId || existing?.environmentId || 'local',
+        model: data.model ?? existing?.model ?? '',
+        baseUrl: data.baseUrl ?? existing?.baseUrl,
+        apiKey: data.apiKey ?? existing?.apiKey,
+        binaryPath: data.binaryPath ?? existing?.binaryPath,
+        extraArgs: data.extraArgs ?? existing?.extraArgs,
+        cwd: data.cwd ?? existing?.cwd,
+        permissionMode: data.permissionMode ?? existing?.permissionMode,
+        effort: data.effort ?? existing?.effort
+      },
+      existing
+    );
+    return globalProviderRuntime.testInstance(merged);
+  }
 
-    if (providerId && isStdioLocalAgent(providerId)) {
-      let localModels: string[] = [];
-      if (providerId === 'claude') localModels = discoverClaudeModels(provider?.configDir, provider?.executablePath, provider?.customModels).models;
-      else if (providerId === 'codex') localModels = discoverCodexModels(provider?.configDir).models;
-      else if (providerId === 'pi') localModels = discoverPiModels(provider?.configDir).models;
-      else if (providerId === 'ducc') localModels = discoverDuccModels().models;
-      else if (providerId === 'ducx') localModels = discoverDucxModels().models;
+  public async probeOllama(baseUrl = 'http://127.0.0.1:11434/v1'): Promise<ProviderSnapshot> {
+    const base = this.getInstance('ollama') || DEFAULT_INSTANCES.find((i) => i.instanceId === 'ollama')!;
+    return globalProviderRuntime.probeInstance(
+      {
+        ...base,
+        baseUrl
+      },
+      { forceRefresh: true }
+    );
+  }
 
-      const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents();
-      const remote = remoteAgents.find((r) => r.id === providerId);
-      const combined = Array.from(new Set([...(remote?.candidateModels || []), ...localModels, ...(provider?.customModels || [])]));
-      if (provider && combined.length > 0) {
-        provider.candidateModels = combined;
-        this.save();
+  public async fetchModelsForProvider(data: {
+    instanceId?: string;
+    driver?: ProviderDriverKind;
+    environmentId?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    binaryPath?: string;
+    extraArgs?: string;
+    userId?: string;
+  }): Promise<{ ok: boolean; snapshot: ProviderSnapshot; models: ProviderSnapshot['models'] }> {
+    const existing = data.instanceId ? this.getInstance(data.instanceId) : undefined;
+    const target = this.normalizeInstance(
+      {
+        instanceId: data.instanceId || existing?.instanceId || 'custom',
+        displayName: existing?.displayName || '探测实例',
+        driver: data.driver || existing?.driver || 'openai-compat',
+        environmentId: data.environmentId || existing?.environmentId || 'local',
+        baseUrl: data.baseUrl ?? existing?.baseUrl,
+        apiKey: data.apiKey ?? existing?.apiKey,
+        binaryPath: data.binaryPath ?? existing?.binaryPath,
+        extraArgs: data.extraArgs ?? existing?.extraArgs
+      },
+      existing
+    );
+    const snapshot = await globalProviderRuntime.probeInstance(target, {
+      forceRefresh: true,
+      userId: data.userId
+    });
+    return {
+      ok: snapshot.status === 'ready' || snapshot.status === 'warning',
+      snapshot,
+      models: snapshot.models
+    };
+  }
+
+  public getActiveCaller(opts?: { userId?: string; instanceId?: string }): LLMCaller {
+    const inst = opts?.instanceId
+      ? (this.getInstance(opts.instanceId) || this.getActiveInstance())
+      : this.getActiveInstance();
+    const scopeKey = `${opts?.userId || 'default'}:${inst.instanceId}`;
+    return globalProviderRuntime.createLLMCaller(inst, scopeKey);
+  }
+
+  public getCallerForBot(modelSpec?: string, opts?: { userId?: string }): LLMCaller {
+    if (modelSpec && modelSpec.trim()) {
+      const raw = modelSpec.trim();
+      const colonIdx = raw.indexOf(':');
+      const idCandidate = colonIdx > 0 ? raw.slice(0, colonIdx).trim() : raw;
+      const modelOverride = colonIdx > 0 ? raw.slice(colonIdx + 1).trim() : '';
+      const matched = this.config.instances.find(
+        (item) => item.instanceId === idCandidate || item.driver === idCandidate
+      );
+      if (matched) {
+        const overridden: ProviderInstanceRecord = {
+          ...matched,
+          model: modelOverride || matched.model
+        };
+        const scopeKey = `${opts?.userId || 'default'}:${overridden.instanceId}:${overridden.model || 'default'}`;
+        return globalProviderRuntime.createLLMCaller(overridden, scopeKey);
       }
-      return { ok: true, models: combined };
     }
-    if (providerId === 'ollama') {
-      return this.probeOllama(input.baseUrl || provider?.baseUrl);
-    }
-
-    const baseUrl = input.baseUrl || provider?.baseUrl || '';
-    const rawKey = input.apiKey || provider?.apiKey;
-    const effectiveKey = resolveApiKey(rawKey, providerId);
-
-    const res = await fetchRemoteModels(baseUrl, effectiveKey, 6000);
-    if (res.ok && res.models.length > 0) {
-      if (provider) {
-        provider.candidateModels = res.models;
-        if (!provider.model || !res.models.includes(provider.model)) {
-          provider.model = res.models[0];
-        }
-        this.save();
-      }
-      this.setRemoteModelsCache(providerId || baseUrl, baseUrl, effectiveKey || '', res.models);
-    }
-    return res;
+    return this.getActiveCaller(opts);
   }
 }
 

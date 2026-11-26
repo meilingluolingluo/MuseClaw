@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
 import { runAgentLoop, type LLMMessage, type LLMCaller, type SentinelHook } from '../../../packages/sandbox-core/src/loop.ts';
 import { createDefaultTools } from '../../../packages/sandbox-core/src/tools.ts';
 import { createDeepSeekCaller } from '../../../packages/sandbox-core/src/llm.ts';
@@ -11,8 +12,8 @@ import {
   MicroSandbox,
   CHANNEL_RANK,
   CHANNEL_DETAILS,
-  probeLocalAgents,
-  globalRunnerMesh,
+  NATIVE_AGENT_DRIVERS,
+  globalProviderRuntime,
   globalMulticaBridge,
   Attachment,
   formatAttachmentNote,
@@ -716,9 +717,8 @@ export function startGatewayServer(defaultPort = 8799) {
       '/runner/client.js',
       '/runner/install.sh',
       '/runner/install.ps1',
-      '/api/runner/register',
-      '/api/runner/poll',
-      '/api/runner/machines'
+      '/api/environments',
+      '/api/environments/local/probe'
     ].includes(url.pathname) ||
     url.pathname.startsWith('/runner') ||
     url.pathname === '/api/avatar' ||
@@ -730,8 +730,7 @@ export function startGatewayServer(defaultPort = 8799) {
     url.pathname === '/api/channels/feishu/webhook' ||
     url.pathname === '/api/channels/infoflow/webhook' ||
     url.pathname.startsWith('/api/bots') ||
-    (req.method === 'GET' && url.pathname === '/api/models/config') ||
-    (req.method === 'GET' && url.pathname === '/api/models/local-agents');
+    (req.method === 'GET' && url.pathname === '/api/models/config');
 
     if (!currentUser && url.pathname.startsWith('/api/') && !isPublicPath) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -2519,9 +2518,14 @@ export function startGatewayServer(defaultPort = 8799) {
     if (req.method === 'POST' && url.pathname.match(/^\/api\/sessions\/[^/]+\/clear$/)) {
       const id = decodeURIComponent(url.pathname.replace('/api/sessions/', '').replace('/clear', ''));
       const targetUserId = currentUser ? currentUser.username : 'user_web';
+      const existingBeforeClear = sessionStore.get(id, targetUserId);
+      const envIdToClose = existingBeforeClear?.providerRuntime?.instanceId
+        ? globalModelStore.getInstance(existingBeforeClear.providerRuntime.instanceId)?.environmentId
+        : undefined;
       const success = sessionStore.clear(id, targetUserId);
       if (success) {
         gatewaySandbox.clearSessionTmp(id);
+        await globalProviderRuntime.closeSession(`${targetUserId}:${id}`, envIdToClose);
       }
       res.writeHead(success ? 200 : 404, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success, id, cleared: true }));
@@ -2678,7 +2682,13 @@ export function startGatewayServer(defaultPort = 8799) {
 
       // 操作人严格绑定当前已登录用户
       const operator = currentUser.username;
-      const success = sentinel.resolveApproval(approvalId, Boolean(approved), scope || 'once', operator);
+      let success = sentinel.resolveApproval(approvalId, Boolean(approved), scope || 'once', operator);
+      if (!success) {
+        success = await globalProviderRuntime.respondApproval(approvalId, {
+          approved: Boolean(approved),
+          message: approved ? undefined : `Rejected by ${operator}`
+        });
+      }
 
       // 持久化审批决策到对应会话消息
       if (success) {
@@ -2742,24 +2752,12 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ success: true, policy: sentinel.getPolicyConfig() }));
     }
 
-    // D1.4 AI 大模型提供商与服务接入接口 (AI Model Providers API)
+    // D1.4 AI 大模型与本地 Agent 运行时管理接口
     if (req.method === 'GET' && url.pathname === '/api/models/config') {
       const forceRefresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
       const config = await globalModelStore.getPublicConfig(currentUser?.username, { forceRefresh });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(config));
-    }
-
-    if (req.method === 'GET' && url.pathname === '/api/models/local-agents') {
-      const forceRefresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
-      const agents = await probeLocalAgents({ userId: currentUser?.username, forceRefresh });
-      const remoteAgents = globalRunnerMesh.getAggregatedRemoteAgents(currentUser?.username);
-      const mergedMap = new Map(agents.map((a) => [a.id, a]));
-      for (const ra of remoteAgents) {
-        if (!mergedMap.has(ra.id)) mergedMap.set(ra.id, ra);
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true, agents: Array.from(mergedMap.values()) }));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/models/config') {
@@ -2775,26 +2773,46 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify(result));
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/providers/instances') {
+      if (!currentUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
+      }
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const data = JSON.parse(body || '{}');
+      const instance = globalModelStore.upsertInstance(data);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, instance }));
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/providers/instances/')) {
+      if (!currentUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'Unauthorized', code: 401 }));
+      }
+      const instanceId = decodeURIComponent(url.pathname.replace('/api/providers/instances/', ''));
+      const result = globalModelStore.removeInstance(instanceId);
+      res.writeHead(result.removed ? 200 : 400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: result.removed, ...result }));
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/models/test') {
       let body = '';
       for await (const chunk of req) body += chunk;
       const data = JSON.parse(body || '{}');
-      if (currentUser?.username && !data.userId) {
-        data.userId = currentUser.username;
-      }
       const result = await globalModelStore.testProvider(data);
       const isSuccess = Boolean(result.ok);
       const responsePayload = {
         ok: isSuccess,
         success: isSuccess,
         latencyMs: result.latencyMs,
-        latency: result.latencyMs,
+        snapshot: result.snapshot,
         model: result.model,
         version: result.version,
         auth: result.auth,
         replyPreview: result.replyPreview,
         diagnosticCode: result.diagnosticCode,
-        models: result.models,
         error: result.error,
         message: result.error || (isSuccess ? '连通性测试通过' : '连接超时或未响应')
       };
@@ -2813,17 +2831,20 @@ export function startGatewayServer(defaultPort = 8799) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const data = JSON.parse(body || '{}');
-      const result = await globalModelStore.fetchModelsForProvider(data);
+      const result = await globalModelStore.fetchModelsForProvider({
+        ...data,
+        userId: currentUser?.username
+      });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(result));
     }
 
-    // D1.5 远程计算节点 Mesh 伴侣接口 (Remote Runner Mesh API)
-    if (req.method === 'GET' && url.pathname === '/api/runner/machines') {
+    // D1.5 计算环境桥接查询接口 (Local + WebSocket Connected Remote Environments)
+    if (req.method === 'GET' && url.pathname === '/api/environments') {
       const targetUserId = currentUser ? currentUser.username : undefined;
-      const machines = globalRunnerMesh.listMachines(targetUserId);
+      const environments = globalProviderRuntime.listEnvironments(targetUserId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true, machines }));
+      return res.end(JSON.stringify({ ok: true, environments }));
     }
 
     if (req.method === 'GET' && url.pathname === '/api/multica/status') {
@@ -2832,66 +2853,13 @@ export function startGatewayServer(defaultPort = 8799) {
       return res.end(JSON.stringify({ ok: true, multica: status }));
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/runner/register') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const data = JSON.parse(body || '{}');
-      const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
-      const result = globalRunnerMesh.registerMachine({ ...data, ip });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(result));
-    }
-
-    if (req.method === 'POST' && url.pathname === '/api/runner/poll') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const data = JSON.parse(body || '{}');
-      const machineId = data.machineId || req.headers['x-runner-machine-id']?.toString();
-      if (!machineId) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Missing machineId' }));
-      }
-      const existing = globalRunnerMesh.getMachine(machineId);
-      if (!existing) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ needRegister: true }));
-      }
-      if (data.token && (!existing.userId || existing.userId === 'default-mesh-token')) {
-        existing.userId = data.token.trim();
-        existing.token = data.token.trim();
-      }
-      const task = await globalRunnerMesh.pollTask(machineId, 25000);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify(task || { hasTask: false }));
-    }
-
-    if (req.method === 'POST' && url.pathname.startsWith('/api/runner/tasks/') && url.pathname.endsWith('/stream')) {
-      const taskId = url.pathname.replace('/api/runner/tasks/', '').replace('/stream', '');
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const data = JSON.parse(body || '{}');
-      globalRunnerMesh.streamTaskChunk(taskId, data.chunk || '', data.reasoning);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true }));
-    }
-
-    if (req.method === 'POST' && url.pathname.startsWith('/api/runner/tasks/') && url.pathname.endsWith('/complete')) {
-      const taskId = url.pathname.replace('/api/runner/tasks/', '').replace('/complete', '');
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const data = JSON.parse(body || '{}');
-      globalRunnerMesh.completeTask(taskId, data);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true }));
-    }
-
     if (req.method === 'GET' && url.pathname === '/runner/install.sh') {
       const host = req.headers.host || 'localhost:8799';
       const defaultToken = url.searchParams.get('token') || currentUser?.username || '';
       const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0].trim() || 'http';
       const script = `#!/usr/bin/env bash
 set -e
-# MuseClaw Remote Mesh Runner 一键接入守护脚本
+# MuseClaw Environment Daemon 一键接入守护脚本
 SERVER_URL="\${MUSECLAW_SERVER_URL:-${proto}://${host}}"
 TOKEN="\${MUSECLAW_TOKEN:-${defaultToken}}"
 INSTALL_DAEMON=1
@@ -2907,7 +2875,7 @@ while [[ \$# -gt 0 ]]; do
 done
 
 echo "==========================================================="
-echo "🐾 正在配置 MuseClaw 远程计算节点 (Mesh Runner)..."
+echo "🐾 正在配置 MuseClaw 本地计算环境守护进程..."
 echo "🌐 接入网关: \$SERVER_URL"
 echo "🔑 认证令牌: \$TOKEN"
 echo "==========================================================="
@@ -2921,7 +2889,22 @@ MUSECLAW_DIR="\$HOME/.museclaw"
 mkdir -p "\$MUSECLAW_DIR"
 CLIENT_JS="\$MUSECLAW_DIR/client.js"
 
-echo "📥 正在同步最新的 Runner 伴侣核心脚本..."
+if [ ! -f "\$MUSECLAW_DIR/package.json" ]; then
+  cat > "\$MUSECLAW_DIR/package.json" << 'EOF'
+{
+  "name": "museclaw-environment-daemon",
+  "private": true,
+  "type": "module"
+}
+EOF
+fi
+
+if [ ! -d "\$MUSECLAW_DIR/node_modules/ws" ] || [ ! -d "\$MUSECLAW_DIR/node_modules/@anthropic-ai/claude-agent-sdk" ]; then
+  echo "📦 正在安装轻量运行时依赖 (ws, @anthropic-ai/claude-agent-sdk)..."
+  npm --prefix "\$MUSECLAW_DIR" install --no-save --silent ws @anthropic-ai/claude-agent-sdk
+fi
+
+echo "📥 正在同步最新的 Environment Daemon 核心脚本..."
 curl -fsSL "\$SERVER_URL/runner/client.js" -o "\$CLIENT_JS"
 
 export MUSECLAW_SERVER_URL="\$SERVER_URL"
@@ -2931,7 +2914,7 @@ if [ "\$INSTALL_DAEMON" -eq 1 ]; then
   echo "⚙️  正在安装为系统开机自启常驻后台服务..."
   node "\$CLIENT_JS" --install-service --server "\$SERVER_URL" --token "\$TOKEN"
 else
-  echo "🚀 正在以前台交互模式启动 Runner (按 Ctrl+C 可停止)..."
+  echo "🚀 正在以前台交互模式启动守护进程 (按 Ctrl+C 可停止)..."
   node "\$CLIENT_JS" --server "\$SERVER_URL" --token "\$TOKEN"
 fi
 `;
@@ -2946,7 +2929,7 @@ fi
       const host = req.headers.host || 'localhost:8799';
       const defaultToken = url.searchParams.get('token') || currentUser?.username || '';
       const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0].trim() || 'http';
-      const psScript = `# MuseClaw Remote Mesh Runner Windows PowerShell Installer
+      const psScript = `# MuseClaw Environment Daemon Windows PowerShell Installer
 $ErrorActionPreference = "Stop"
 $ServerUrl = if ($env:MUSECLAW_SERVER_URL) { $env:MUSECLAW_SERVER_URL } else { "${proto}://${host}" }
 $Token = if ($env:MUSECLAW_TOKEN) { $env:MUSECLAW_TOKEN } else { "${defaultToken}" }
@@ -2958,12 +2941,23 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 
 $MuseDir = Join-Path $HOME ".museclaw"
 New-Item -ItemType Directory -Force -Path $MuseDir | Out-Null
-$ClientJs = Join-Path $MuseDir "client.js"
+$PkgJson = Join-Path $MuseDir "package.json"
+if (-not (Test-Path $PkgJson)) {
+  '{"name":"museclaw-environment-daemon","private":true,"type":"module"}' | Set-Content -Path $PkgJson -Encoding UTF8
+}
 
-Write-Host "Downloading MuseClaw Runner client from $ServerUrl/runner/client.js ..."
+$WsMod = Join-Path $MuseDir "node_modules\\ws"
+$SdkMod = Join-Path $MuseDir "node_modules\\@anthropic-ai\\claude-agent-sdk"
+if (-not ((Test-Path $WsMod) -and (Test-Path $SdkMod))) {
+  Write-Host "Installing runtime packages (ws, @anthropic-ai/claude-agent-sdk)..."
+  & npm --prefix $MuseDir install --no-save --silent ws @anthropic-ai/claude-agent-sdk
+}
+
+$ClientJs = Join-Path $MuseDir "client.js"
+Write-Host "Downloading MuseClaw Environment Daemon from $ServerUrl/runner/client.js ..."
 Invoke-WebRequest -Uri "$ServerUrl/runner/client.js" -OutFile $ClientJs -UseBasicParsing
 
-Write-Host "Starting MuseClaw Runner..."
+Write-Host "Starting MuseClaw Environment Daemon..."
 & node $ClientJs --server $ServerUrl --token $Token
 `;
       res.writeHead(200, {
@@ -3803,7 +3797,21 @@ Write-Host "Starting MuseClaw Runner..."
       }
 
       const activeProvider = globalModelStore.getActiveProvider();
-      const currentModelName = bot.model || activeProvider?.model || 'deepseek-flash';
+      let effectiveInstance = activeProvider;
+      let resolvedModelOverride = '';
+      if (bot.model && bot.model.trim()) {
+        const rawSpec = bot.model.trim();
+        const colonIdx = rawSpec.indexOf(':');
+        const candidateId = colonIdx > 0 ? rawSpec.slice(0, colonIdx).trim() : rawSpec;
+        const matched = globalModelStore.getInstance(candidateId);
+        if (matched) {
+          effectiveInstance = matched;
+          resolvedModelOverride = colonIdx > 0 ? rawSpec.slice(colonIdx + 1).trim() : '';
+        } else {
+          resolvedModelOverride = rawSpec;
+        }
+      }
+      const currentModelName = resolvedModelOverride || effectiveInstance?.model || activeProvider?.model || 'sonnet';
 
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -3823,7 +3831,9 @@ Write-Host "Starting MuseClaw Runner..."
         botName: bot.name,
         title: session.title,
         mentionName: mention_name,
-        model: currentModelName
+        model: currentModelName,
+        providerInstanceId: effectiveInstance.instanceId,
+        providerDriver: effectiveInstance.driver
       })}\n\n`);
 
       // 形象工坊对话拦截：若存在处于 choose 状态的会话，且用户输入属于选项/重新生成/取消
@@ -3955,23 +3965,151 @@ Write-Host "Starting MuseClaw Runner..."
         ? buildMultimodalContent(userTextWithNote, imagePaths, true)
         : userTextWithNote;
 
-      const loop = runAgentLoop(
-        bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
-        typeof userGoal === 'string' ? resolveSkillPrompt(userGoal) : userGoal,
-        refreshTools(bot.id),
-        sentinel,
-        userScopedCaller,
-        {
-          sessionId: session.id,
-          userId,
-          botId: bot.id,
-          profile: botWithMemory,
-          maxSteps: 15,
-          skills: getBotSkills(bot.id),
-          historyMessages,
-          triggeredIntents
+      const nativeSessionKey = `${userId}:${session.id}`;
+      const nativeAbortController = new AbortController();
+      const useNativeAgentRuntime = NATIVE_AGENT_DRIVERS.has(effectiveInstance.driver);
+
+      async function* runNativeRuntimeStream(): AsyncGenerator<any, void, void> {
+        yield { type: 'agent:state', botId: bot.id, bot_id: bot.id, session_id: session.id, state: 'running' };
+        const resumeSessionId =
+          session.providerRuntime?.instanceId === effectiveInstance.instanceId
+            ? session.providerRuntime.providerSessionId
+            : undefined;
+        const promptBody = typeof userGoal === 'string' ? resolveSkillPrompt(userGoal) : userTextWithNote;
+        const historyContext =
+          !resumeSessionId && historyMessages.length > 0
+            ? `${historyMessages
+                .slice(-8)
+                .map((m) => `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
+                .join('\n\n')}\n\n[User]: ${promptBody}`
+            : promptBody;
+
+        const systemParts = [
+          bot.system_prompt || '你是一个严谨、高效的软件工程与协作数字员工。',
+          botWithMemory.memory ? `相关背景记忆：\n${botWithMemory.memory}` : ''
+        ].filter(Boolean);
+
+        const runtimeStream = globalProviderRuntime.runTurn({
+          sessionKey: nativeSessionKey,
+          instance: {
+            ...effectiveInstance,
+            model: currentModelName
+          },
+          prompt: historyContext,
+          systemPrompt: systemParts.join('\n\n'),
+          cwd: effectiveInstance.cwd || workspaceRoot,
+          model: currentModelName,
+          effort: effectiveInstance.effort,
+          permissionMode: effectiveInstance.permissionMode || 'auto_edits',
+          resumeSessionId,
+          signal: nativeAbortController.signal
+        });
+
+        for await (const evt of runtimeStream) {
+          if (evt.type === 'session.started') {
+            session.providerRuntime = {
+              instanceId: effectiveInstance.instanceId,
+              driver: effectiveInstance.driver,
+              providerSessionId: evt.providerSessionId,
+              model: evt.model || currentModelName,
+              cwd: effectiveInstance.cwd || workspaceRoot
+            };
+            sessionStore.save(session, userId);
+            yield {
+              type: 'session:provider-runtime',
+              bot_id: bot.id,
+              session_id: session.id,
+              runtime: session.providerRuntime
+            };
+          } else if (evt.type === 'text.delta') {
+            yield { type: 'stream:text-delta', text: evt.text, bot_id: bot.id, session_id: session.id };
+          } else if (evt.type === 'reasoning.delta') {
+            yield { type: 'stream:reasoning-delta', text: evt.text, bot_id: bot.id, session_id: session.id };
+          } else if (evt.type === 'tool.start') {
+            yield {
+              type: 'tool:call_start',
+              toolName: evt.toolName,
+              input: evt.input,
+              toolCallId: evt.toolCallId,
+              bot_id: bot.id,
+              session_id: session.id
+            };
+          } else if (evt.type === 'tool.end') {
+            yield {
+              type: 'tool:call_end',
+              toolName: evt.toolName,
+              output: evt.output,
+              isError: evt.isError,
+              durationMs: evt.durationMs,
+              toolCallId: evt.toolCallId,
+              bot_id: bot.id,
+              session_id: session.id
+            };
+          } else if (evt.type === 'approval.request') {
+            yield {
+              type: 'sentinel:approval_needed',
+              bot_id: bot.id,
+              session_id: session.id,
+              request: {
+                approvalId: evt.requestId,
+                sessionId: session.id,
+                botId: bot.id,
+                toolName: evt.toolName,
+                actionSummary: evt.summary,
+                targetDetails: {
+                  tool: evt.toolName,
+                  command: typeof (evt.input as any)?.command === 'string' ? (evt.input as any).command : undefined,
+                  parameters: evt.input
+                },
+                riskLevel: 'high',
+                status: 'pending',
+                createdAt: Date.now()
+              }
+            };
+          } else if (evt.type === 'turn.completed') {
+            if (evt.providerSessionId) {
+              session.providerRuntime = {
+                instanceId: effectiveInstance.instanceId,
+                driver: effectiveInstance.driver,
+                providerSessionId: evt.providerSessionId,
+                model: currentModelName,
+                cwd: effectiveInstance.cwd || workspaceRoot
+              };
+            }
+          } else if (evt.type === 'turn.failed') {
+            yield {
+              type: 'error',
+              message: evt.error,
+              code: evt.code,
+              retryable: evt.retryable,
+              bot_id: bot.id,
+              session_id: session.id
+            };
+          }
         }
-      );
+
+        yield { type: 'agent:state', botId: bot.id, bot_id: bot.id, session_id: session.id, state: 'idle' };
+      }
+
+      const loop = useNativeAgentRuntime
+        ? runNativeRuntimeStream()
+        : runAgentLoop(
+            bot.system_prompt || '你是一个企业内部严谨、高效的自动化数字员工。',
+            typeof userGoal === 'string' ? resolveSkillPrompt(userGoal) : userGoal,
+            refreshTools(bot.id),
+            sentinel,
+            userScopedCaller,
+            {
+              sessionId: session.id,
+              userId,
+              botId: bot.id,
+              profile: botWithMemory,
+              maxSteps: 15,
+              skills: getBotSkills(bot.id),
+              historyMessages,
+              triggeredIntents
+            }
+          );
 
       let fullAssistantText = '';
       let reasoningText = '';
@@ -3985,10 +4123,14 @@ Write-Host "Starting MuseClaw Runner..."
       let clientGone = false;
       let finished = false;
 
-      // 用户点「停止」或关掉页面：终结这一轮，并自动失效待处理的审批项
+      // 用户点「停止」或关掉页面：终结这一轮，中断原生运行时或自动失效待处理的审批项
       res.on('close', () => {
         if (finished) return;
         clientGone = true;
+        nativeAbortController.abort();
+        if (useNativeAgentRuntime) {
+          void globalProviderRuntime.interruptTurn(nativeSessionKey);
+        }
         sentinel.cancelPendingForSession(session.id);
         if (session.messages) {
           let updated = false;
@@ -4384,6 +4526,41 @@ Write-Host "Starting MuseClaw Runner..."
     }
   }
 });
+
+  const envWss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (req, socket, head) => {
+    try {
+      const upgradeUrl = new URL(req.url || '/', 'http://localhost');
+      if (upgradeUrl.pathname !== '/ws/environment') {
+        socket.destroy();
+        return;
+      }
+      const userId = upgradeUrl.searchParams.get('token')?.trim() || 'user_web';
+      const environmentId = upgradeUrl.searchParams.get('environmentId')?.trim() || undefined;
+      const hostName = upgradeUrl.searchParams.get('hostname')?.trim() || undefined;
+      const platform = upgradeUrl.searchParams.get('platform')?.trim() || undefined;
+      const arch = upgradeUrl.searchParams.get('arch')?.trim() || undefined;
+
+      envWss.handleUpgrade(req, socket, head, (ws) => {
+        globalProviderRuntime.getEnvironmentBridge().handleConnection(ws, {
+          environmentId,
+          userId,
+          hostname: hostName,
+          platform,
+          arch
+        });
+      });
+    } catch {
+      socket.destroy();
+    }
+  });
+
+  server.on('close', () => {
+    try {
+      envWss.close();
+    } catch {}
+    void globalProviderRuntime.disposeAll();
+  });
 
   server.listen(port, async () => {
     console.log(`🐾 MuseClaw Gateway & Web UI 运行在: http://localhost:${port}`);

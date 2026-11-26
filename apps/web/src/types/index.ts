@@ -412,76 +412,108 @@ export interface LocalAgentAuthInfo {
   endpoint?: string;
 }
 
-export interface ModelProvider {
-  id: string;
+export type ProviderDriverKind = 'claude' | 'codex' | 'pi' | 'ollama' | 'openai-compat';
+export type PermissionMode = 'ask' | 'auto_edits' | 'full';
+export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type ProviderStatus = 'ready' | 'unauthenticated' | 'warning' | 'error' | 'not_found' | 'disabled';
+
+export interface ProviderModelDescriptor {
+  slug: string;
   name: string;
-  baseUrl?: string;
+  isCustom?: boolean;
+  supportsEffort?: boolean;
+  supportedEffortLevels?: string[];
+  contextWindow?: number;
+}
+
+export interface ProviderAuthSnapshot {
+  status: 'authenticated' | 'unauthenticated' | 'unknown';
+  method?: string;
+  label?: string;
+  email?: string;
+  subscriptionType?: string;
   endpoint?: string;
-  apiKey?: string;
-  clearApiKey?: boolean;
-  model?: string;
-  modelId?: string;
-  candidateModels?: string[];
-  supportedModels?: string[];
-  customModels?: string[];
-  description?: string;
-  isLocalAgent?: boolean;
-  category?: 'local_agent' | 'cloud_api' | 'intranet_agent';
-  installed?: boolean;
-  isAvailable?: boolean;
-  protocol?: string;
-  status?: 'ready' | 'unauthenticated' | 'warning' | 'error' | 'not_found';
-  statusMessage?: string;
-  auth?: LocalAgentAuthInfo;
+}
+
+export interface ProviderSnapshot {
+  instanceId: string;
+  driver: ProviderDriverKind;
+  displayName: string;
+  enabled: boolean;
+  installed: boolean;
+  status: ProviderStatus;
+  version: string | null;
   executablePath?: string;
-  cliPath?: string;
+  auth: ProviderAuthSnapshot;
+  models: ProviderModelDescriptor[];
+  slashCommands?: string[];
+  checkedAt: number;
+  environmentId: string;
+  environmentLabel: string;
+  message?: string;
+  installCommand?: string;
+}
+
+export interface EnvironmentInfo {
+  environmentId: string;
+  label: string;
+  kind: 'local' | 'remote';
+  hostname: string;
+  platform: string;
+  arch: string;
+  status: 'online' | 'offline';
+  connectedAt?: number;
+  lastSeenAt?: number;
+  snapshots?: ProviderSnapshot[];
+}
+
+export interface ProviderInstance {
+  instanceId: string;
+  driver: ProviderDriverKind;
+  displayName: string;
+  enabled: boolean;
+  environmentId: string;
+  model: string;
+  customModels?: string[];
   binaryPath?: string;
   configDir?: string;
   cwd?: string;
   extraArgs?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
   env?: Record<string, string>;
-  version?: string;
-  detectedVersion?: string;
-  hasKey?: boolean;
-  maskedKey?: string;
-  custom?: boolean;
-  source?: 'local' | 'remote';
-  machineName?: string;
-  installCommand?: string;
-  docUrl?: string;
-  checkedAt?: number;
-}
-
-export interface RunnerMachineRuntime {
-  id: string;
-  name: string;
-  version?: string;
-  executablePath?: string;
-  models: string[];
-  defaultModel: string;
-  protocol?: string;
-  status?: 'ready' | 'unauthenticated' | 'warning' | 'error' | 'not_found';
-  statusMessage?: string;
-  auth?: LocalAgentAuthInfo;
-}
-
-export interface RunnerMachine {
-  id: string;
-  hostname: string;
-  platform: string;
-  arch: string;
-  ip?: string;
-  userId?: string;
-  status: 'online' | 'offline';
-  registeredAt: number;
-  lastHeartbeat: number;
-  runtimes: RunnerMachineRuntime[];
-  activeTaskCount: number;
+  permissionMode?: PermissionMode;
+  effort?: ReasoningEffort;
+  description?: string;
+  isDefault?: boolean;
+  hasApiKey?: boolean;
+  maskedApiKey?: string;
+  snapshot?: ProviderSnapshot;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface ModelsConfig {
-  activeProviderId: string;
-  providers: ModelProvider[];
+  activeInstanceId: string;
+  activeModelId: string;
+  activeEnvironmentId: string;
+  environments: EnvironmentInfo[];
+  instances: ProviderInstance[];
+}
+
+export interface ProviderTestResult {
+  ok: boolean;
+  success?: boolean;
+  latencyMs: number;
+  snapshot?: ProviderSnapshot;
+  model?: string;
+  version?: string | null;
+  auth?: ProviderAuthSnapshot;
+  replyPreview?: string;
+  diagnosticCode: 'ready' | 'not_found' | 'unauthenticated' | 'execution_failed' | 'disabled';
+  error?: string;
+  message?: string;
 }
 
 export interface FeedPost {

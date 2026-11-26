@@ -167,6 +167,14 @@ export interface AgentProfile {
   };
 }
 
+export interface SessionProviderRuntime {
+  instanceId: string;
+  driver: string;
+  providerSessionId?: string;
+  model?: string;
+  cwd?: string;
+}
+
 // 1.1 Session 数据模型 (会话强从属于单一 Bot)
 export interface Session {
   id: string;
@@ -175,6 +183,7 @@ export interface Session {
   userId?: string;                // 归属用户 ID
   title?: string;
   kind?: 'main' | 'side';         // 会话类型：'main' 主聊 (常驻核心对话) | 'side' 旁聊 (独立隔离任务)
+  providerRuntime?: SessionProviderRuntime;
   created_at?: number;
   updated_at: number;
   messages?: Array<{
@@ -268,6 +277,8 @@ export interface ApprovalRequest {
 export type MuseEvent =
   | { type: 'agent:state'; botId: string; bot_id?: string; session_id?: string; state: 'idle' | 'running' | 'paused' | 'error' }
   | { type: 'stream:text-delta'; text: string; bot_id?: string; session_id?: string }
+  | { type: 'stream:reasoning-delta'; text: string; bot_id?: string; session_id?: string }
+  | { type: 'session:provider-runtime'; runtime: SessionProviderRuntime; bot_id?: string; session_id?: string }
   | { type: 'task:plan'; steps: Array<{ id: string; description: string; status: 'pending' | 'in_progress' | 'done' | 'failed' }>; bot_id?: string; session_id?: string }
   | { type: 'tool:call_start'; toolName: string; input: Record<string, unknown>; bot_id?: string; session_id?: string }
   | { type: 'tool:call_end'; toolName: string; output: unknown; durationMs: number; bot_id?: string; session_id?: string }

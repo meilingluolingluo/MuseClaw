@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal } from '../common/Modal';
 import { copyToClipboard } from '../../utils/clipboard';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
-import type { RunnerMachine } from '../../types';
-import { Copy, Laptop, CheckCircle2, AlertTriangle, RotateCcw, Terminal, Monitor } from 'lucide-react';
+import type { EnvironmentInfo } from '../../types';
+import { AlertTriangle, CheckCircle2, Copy, Laptop, Monitor, RotateCcw, Terminal } from 'lucide-react';
 
 type PlatformTab = 'unix' | 'windows';
 
@@ -21,7 +21,7 @@ export const AddMachineModal: React.FC = () => {
 
   const [platformTab, setPlatformTab] = useState<PlatformTab>('unix');
   const [includeNoProxy, setIncludeNoProxy] = useState(false);
-  const [machines, setMachines] = useState<RunnerMachine[]>([]);
+  const [environments, setEnvironments] = useState<EnvironmentInfo[]>([]);
   const [pollError, setPollError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
@@ -29,10 +29,10 @@ export const AddMachineModal: React.FC = () => {
   const token = user?.username || '';
 
   const unixCmd = includeNoProxy
-    ? `# 1. 如在企业内网环境，可按需放行局域网直连\nexport NO_PROXY="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,localhost,127.0.0.1"\nexport no_proxy="$NO_PROXY"\n\n# 2. 启动 MuseClaw 本地计算节点伴侣（自动识别 Claude Code、Codex、Pi 等）\ncurl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | bash`
-    : `# 在终端执行以下命令，自动接入本机 Claude Code / Codex / Pi 等本地 Agent\ncurl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | bash`;
+    ? `# 1. 局域网直连免代理\nexport NO_PROXY="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,localhost,127.0.0.1"\nexport no_proxy="$NO_PROXY"\n\n# 2. 启动 MuseClaw Environment Daemon (WebSocket 长连接)\ncurl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | bash`
+    : `# 在本机终端执行，通过 WebSocket 长连接接入 Claude Code / Codex / Pi / Ollama\ncurl -fsSL "${origin}/runner/install.sh?token=${encodeURIComponent(token)}" | bash`;
 
-  const winCmd = `# 在 Windows PowerShell 中执行以下命令启动计算节点伴侣\n$env:MUSECLAW_SERVER_URL="${origin}"\n$env:MUSECLAW_TOKEN="${token}"\nirm "${origin}/runner/install.ps1?token=${encodeURIComponent(token)}" | iex`;
+  const winCmd = `# 在 Windows PowerShell 中执行，启动 MuseClaw Environment Daemon\n$env:MUSECLAW_SERVER_URL="${origin}"\n$env:MUSECLAW_TOKEN="${token}"\nirm "${origin}/runner/install.ps1?token=${encodeURIComponent(token)}" | iex`;
 
   const installCmd = platformTab === 'unix' ? unixCmd : winCmd;
 
@@ -41,109 +41,105 @@ export const AddMachineModal: React.FC = () => {
     setPollError(null);
     let failCount = 0;
 
-    const pollMachines = async () => {
+    const pollEnvironments = async () => {
       try {
-        const data = await api.getRunnerMachines(token);
+        const data = await api.getEnvironments();
         failCount = 0;
         setPollError(null);
-        setMachines(data.machines || []);
+        setEnvironments(data.environments || []);
       } catch (err: any) {
         if (String(err?.message || '').includes('401')) {
-          setPollError('登录状态已过期，请重新登录以完成计算节点接入');
+          setPollError('登录状态已过期，请重新登录以完成计算环境接入');
           return;
         }
         failCount++;
-        if (failCount >= 5) {
-          setPollError('检测计算节点服务异常，请检查网络或网关状态');
+        if (failCount >= 3) {
+          setPollError('暂时无法获取环境列表，请检查网关服务状态');
         }
       }
     };
 
-    void pollMachines();
-    const timer = setInterval(() => {
-      void pollMachines();
-    }, 2500);
+    void pollEnvironments();
+    const timer = setInterval(pollEnvironments, 3000);
     return () => clearInterval(timer);
   }, [isAddMachineModalOpen, token, retryKey]);
 
-  const onlineMachines = machines.filter((m) => m.status === 'online');
+  const remoteEnvs = environments.filter((env) => env.kind === 'remote');
+  const onlineRemoteEnvs = remoteEnvs.filter((env) => env.status === 'online');
 
   const handleCopy = async () => {
-    if (!user) {
-      showToast('请先登录账号后再复制接入命令', 'warning');
-      setIsAuthModalOpen(true);
-      return;
-    }
-    const success = await copyToClipboard(installCmd);
-    if (success) {
-      showToast('已复制接入命令到剪贴板！', 'success');
+    const ok = await copyToClipboard(installCmd);
+    if (ok) {
+      showToast('接入命令已复制到剪贴板', 'success');
     } else {
-      const preEl = document.querySelector('.add-machine-cmd-pre');
-      if (preEl) {
-        const selection = window.getSelection();
-        const range = document.createRange();
-        range.selectNodeContents(preEl);
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-      }
-      showToast('已全选接入命令，可直接按 Cmd+C / Ctrl+C 复制', 'info');
+      showToast('复制失败，请手动选中命令复制', 'warning');
     }
   };
 
-  const handleClose = () => {
+  const handleComplete = async () => {
+    await loadModelsConfig(true);
     setIsAddMachineModalOpen(false);
-    void loadModelsConfig(true);
     setIsModelModalOpen(true);
+    showToast('已同步远程计算环境清单', 'success');
   };
 
   return (
     <Modal
       isOpen={isAddMachineModalOpen}
-      onClose={handleClose}
-      title="接入个人电脑计算节点 · 本地 Agent 桥接"
-      icon={<Laptop size={18} />}
-      maxWidth="680px"
-      zIndex={1100}
+      onClose={() => setIsAddMachineModalOpen(false)}
+      title="连接我的电脑 / 远程计算环境 (WebSocket 桥接)"
+      maxWidth="640px"
       footer={
-        <div className="modal-actions-bar modal-actions-right">
-          <button type="button" className="btn-primary" onClick={handleClose}>
-            完成并返回配置中心
+        <>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setIsAddMachineModalOpen(false)}
+          >
+            关闭
           </button>
-        </div>
-      }
-    >
-      {!user ? (
-        <div className="add-machine-login-prompt">
-          <AlertTriangle size={24} className="add-machine-login-icon" />
-          <h3 className="add-machine-login-title">尚未登录账号</h3>
-          <p className="add-machine-login-desc">
-            接入的计算节点将绑定至你的个人隔离空间。请先登录账号后再获取接入命令。
-          </p>
           <button
             type="button"
             className="btn-primary"
+            onClick={handleComplete}
+            disabled={onlineRemoteEnvs.length === 0}
+          >
+            完成并返回模型配置 ({onlineRemoteEnvs.length} 台在线)
+          </button>
+        </>
+      }
+    >
+      <p className="add-machine-desc">
+        在您自己的电脑上运行轻量级 Environment Daemon，通过加密双向 WebSocket 长连接实时汇报本地
+        Claude Code、Codex、Pi 与 Ollama 运行状态，并在网页端安全触发对话、工具调用与审批控制。
+      </p>
+
+      {!token ? (
+        <div className="add-machine-status-box is-waiting">
+          <AlertTriangle size={16} className="model-test-icon is-warning" />
+          <span className="add-machine-status-text is-waiting">
+            请先登录员工身份，再生成绑定的 WebSocket 环境接入凭证。
+          </span>
+          <button
+            type="button"
+            className="btn-primary btn-xs"
             onClick={() => {
               setIsAddMachineModalOpen(false);
               setIsAuthModalOpen(true);
             }}
           >
-            立即登录 / 注册
+            前往登录
           </button>
         </div>
       ) : (
         <>
-          <div className="add-machine-desc">
-            如果 Web 网关部署在远端服务器，只需在你的个人电脑终端运行一次伴侣脚本，即可将本机的{' '}
-            <code>Claude Code</code>、<code>Codex</code>、<code>Pi</code> 等本地 Agent 安全桥接到当前 Web 工作台。
-          </div>
-
           <div className="add-machine-platform-bar">
-            <div className="add-machine-platform-tabs" role="tablist">
+            <div className="add-machine-platform-tabs" role="tablist" aria-label="目标系统平台">
               <button
                 type="button"
                 role="tab"
                 aria-selected={platformTab === 'unix'}
-                className={`add-machine-platform-tab ${platformTab === 'unix' ? 'is-active' : ''}`}
+                className={`add-machine-platform-tab${platformTab === 'unix' ? ' is-active' : ''}`}
                 onClick={() => setPlatformTab('unix')}
               >
                 <Terminal size={13} />
@@ -153,11 +149,11 @@ export const AddMachineModal: React.FC = () => {
                 type="button"
                 role="tab"
                 aria-selected={platformTab === 'windows'}
-                className={`add-machine-platform-tab ${platformTab === 'windows' ? 'is-active' : ''}`}
+                className={`add-machine-platform-tab${platformTab === 'windows' ? ' is-active' : ''}`}
                 onClick={() => setPlatformTab('windows')}
               >
                 <Monitor size={13} />
-                <span>Windows (PowerShell)</span>
+                <span>Windows PowerShell</span>
               </button>
             </div>
 
@@ -168,103 +164,93 @@ export const AddMachineModal: React.FC = () => {
                   checked={includeNoProxy}
                   onChange={(e) => setIncludeNoProxy(e.target.checked)}
                 />
-                <span>附加内网 NO_PROXY</span>
+                <span>内网免代理 (NO_PROXY)</span>
               </label>
             )}
           </div>
 
           <div className="add-machine-cmd-section">
             <div className="add-machine-cmd-header">
-              <div className="add-machine-cmd-title">
-                终端接入命令{' '}
-                <span className="add-machine-cmd-sub">
-                  (绑定用户: {user.displayName || user.username})
-                </span>
-              </div>
+              <span className="add-machine-cmd-title">
+                一键安装与上线命令
+                <span className="add-machine-cmd-sub"> · 自动安装 ws 与官方 SDK 依赖</span>
+              </span>
               <button
                 type="button"
                 className="btn-secondary add-machine-copy-btn"
                 onClick={handleCopy}
               >
-                <Copy size={11} /> <span>一键复制命令</span>
+                <Copy size={12} />
+                <span>复制命令</span>
               </button>
             </div>
-
-            <pre
-              className="add-machine-cmd-pre"
-              title="点击可全选命令文本"
-              onClick={(e) => {
-                const selection = window.getSelection();
-                const range = document.createRange();
-                range.selectNodeContents(e.currentTarget);
-                selection?.removeAllRanges();
-                selection?.addRange(range);
-              }}
-            >
-              {installCmd}
-            </pre>
+            <pre className="add-machine-cmd-pre">{installCmd}</pre>
           </div>
 
-          {onlineMachines.length > 0 ? (
-            <div className="add-machine-nodes-list">
-              <div className="add-machine-nodes-header">
-                <CheckCircle2 size={15} className="add-machine-status-icon is-online" />
-                <span>已在线计算节点 ({onlineMachines.length})</span>
-              </div>
-              {onlineMachines.map((m) => (
-                <div key={m.id} className="add-machine-node-card">
-                  <div className="add-machine-node-top">
-                    <div className="add-machine-node-name">
-                      <span className="add-machine-node-dot" />
-                      <span>{m.hostname}</span>
-                    </div>
-                    <span className="add-machine-node-platform">
-                      {m.platform} / {m.arch}
-                    </span>
-                  </div>
-                  <div className="add-machine-node-runtimes">
-                    {m.runtimes && m.runtimes.length > 0 ? (
-                      m.runtimes.map((rt) => (
-                        <span
-                          key={rt.id}
-                          className={`add-machine-runtime-pill ${rt.status === 'unauthenticated' ? 'is-warning' : 'is-ready'}`}
-                        >
-                          <span>{rt.id}</span>
-                          {rt.version ? <span className="add-machine-runtime-ver">{rt.version.split(' ')[0]}</span> : null}
-                          {rt.status === 'unauthenticated' ? <span>· 需认证</span> : null}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="add-machine-node-empty">暂未检测到本地 Agent</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+          {pollError ? (
+            <div className="add-machine-status-box is-waiting">
+              <AlertTriangle size={15} className="model-test-icon is-warning" />
+              <span className="add-machine-status-text is-waiting">{pollError}</span>
+              <button
+                type="button"
+                className="btn-secondary btn-xs"
+                onClick={() => setRetryKey((k) => k + 1)}
+              >
+                <RotateCcw size={12} />
+                <span>重试</span>
+              </button>
+            </div>
+          ) : onlineRemoteEnvs.length === 0 ? (
+            <div className="add-machine-status-box is-waiting">
+              <span className="add-machine-spinner" aria-hidden="true" />
+              <span className="add-machine-status-text is-waiting">
+                正在等待您的设备通过 WebSocket 上线连接（每 3 秒自动刷新）…
+              </span>
             </div>
           ) : (
-            <div className={`add-machine-status-box ${pollError ? 'is-failed' : 'is-waiting'}`}>
-              {pollError ? (
-                <>
-                  <AlertTriangle size={16} className="add-machine-status-icon is-failed" />
-                  <div className="add-machine-status-text is-failed">
-                    <span>{pollError}</span>
-                    <button
-                      type="button"
-                      className="btn-secondary add-machine-retry-btn"
-                      onClick={() => setRetryKey((k) => k + 1)}
-                    >
-                      <RotateCcw size={11} /> 重试
-                    </button>
+            <div className="add-machine-nodes-list">
+              <div className="model-test-heading">
+                <CheckCircle2 size={14} className="model-test-icon is-success" />
+                <span>已连接的计算环境 ({onlineRemoteEnvs.length})</span>
+              </div>
+              {onlineRemoteEnvs.map((env) => (
+                <div key={env.environmentId} className="add-machine-node-card">
+                  <div className="add-machine-node-top">
+                    <span className="add-machine-node-name">
+                      <span className="add-machine-node-dot" />
+                      <Laptop size={14} />
+                      <span>{env.label || env.hostname}</span>
+                    </span>
+                    <span className="add-machine-node-platform">
+                      {env.platform}/{env.arch} · {env.environmentId}
+                    </span>
                   </div>
-                </>
-              ) : (
-                <>
-                  <span className="add-machine-spinner" />
-                  <div className="add-machine-status-text is-waiting">
-                    正在等待个人电脑计算节点上线...（请在终端运行上方命令）
-                  </div>
-                </>
-              )}
+                  {env.snapshots && env.snapshots.length > 0 ? (
+                    <div className="add-machine-node-runtimes">
+                      {env.snapshots.map((snap) => (
+                        <span
+                          key={snap.instanceId}
+                          className={`add-machine-runtime-pill ${
+                            snap.status === 'ready'
+                              ? 'is-ready'
+                              : snap.installed
+                              ? 'is-warning'
+                              : ''
+                          }`}
+                        >
+                          <span>{snap.displayName}</span>
+                          {snap.version && (
+                            <span className="add-machine-runtime-ver">{snap.version}</span>
+                          )}
+                          <span>· {snap.status}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="add-machine-node-empty">等待环境上报已安装的 CLI 运行时…</div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </>

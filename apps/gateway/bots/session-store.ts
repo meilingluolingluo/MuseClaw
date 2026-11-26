@@ -374,6 +374,7 @@ export class SessionStore {
     const existing = sessionMap.get(id);
     if (!existing) return false;
     existing.messages = [];
+    existing.providerRuntime = undefined;
     existing.updated_at = Date.now();
     this.saveUser(sanitized);
     return true;
@@ -390,6 +391,7 @@ export class SessionStore {
     const existing = sessionMap.get(id);
     if (!existing) return false;
     existing.messages = (existing.messages || []).slice(0, keepCount);
+    existing.providerRuntime = undefined;
     existing.updated_at = Date.now();
     this.saveUser(sanitized);
     return true;

@@ -307,10 +307,10 @@ export const RoutinesView: React.FC = () => {
 
   const modelChoices = useMemo(() => {
     const names = new Set<string>();
-    for (const p of modelsConfig?.providers || []) {
+    for (const p of modelsConfig?.instances || []) {
       if (p.model) names.add(p.model);
-      if (p.modelId) names.add(p.modelId);
-      for (const m of p.candidateModels || []) names.add(m);
+      for (const m of p.snapshot?.models || []) names.add(m.slug);
+      for (const m of p.customModels || []) names.add(m);
     }
     return Array.from(names).filter(Boolean);
   }, [modelsConfig]);

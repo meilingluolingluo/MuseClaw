@@ -13464,6 +13464,143 @@ html[data-theme="dark"] .cat-pill.is-active { color: var(--om-ink-fg); }
   color: var(--om-muted);
 }
 
+/* ── 多环境与多实例增强控件 (ModelSettingsModal v2) ──────── */
+.model-env-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.model-env-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--om-border);
+  background: var(--om-surface);
+  color: var(--om-muted);
+  font-size: 11px;
+}
+
+.model-env-chip.is-selected {
+  border-color: var(--om-accent);
+  color: var(--om-fg);
+}
+
+.model-env-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--om-muted);
+}
+
+.model-env-dot.is-online {
+  background: var(--accent-green);
+}
+
+.model-env-dot.is-offline {
+  background: var(--accent-amber);
+}
+
+.model-env-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.model-rail-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.model-rail-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.model-new-instance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 9px;
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+}
+
+.model-new-instance-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.model-header-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.model-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-red);
+}
+
+.model-probe-meta-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--om-border);
+}
+
+.model-auth-chip {
+  font-size: 11.5px;
+  color: var(--om-muted);
+}
+
+.model-guidance-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.model-fetch-inline-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-candidates-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.model-cap-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  border-radius: 9999px;
+  background: var(--om-surface-2);
+  color: var(--om-muted);
+  border: 1px solid var(--om-border);
+}
+
 /* ── 智能体设定抽屉 (AgentProfileDrawer) ─────────────── */
 .agent-drawer-avatar-wrap {
   position: relative;

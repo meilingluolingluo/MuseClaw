@@ -7,13 +7,6 @@ import { saysNoImages, withoutImages } from './vision.ts';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import {
-  isStdioLocalAgent,
-  type LocalAgentAuthInfo,
-  type LocalAgentStatus
-} from './local-agent-prober.ts';
-import { testLocalAgent } from './local-agent-runner.ts';
-
 export interface ModelProviderConfig {
   id: string;
   name: string;
@@ -21,30 +14,9 @@ export interface ModelProviderConfig {
   apiKey?: string;
   model: string;
   candidateModels?: string[];
-  customModels?: string[];
   enabled?: boolean;
   isCustom?: boolean;
-  isLocalAgent?: boolean;
-  category?: 'local_agent' | 'cloud_api' | 'intranet_agent';
-  installed?: boolean;
-  isAvailable?: boolean;
-  status?: LocalAgentStatus;
-  statusMessage?: string;
-  auth?: LocalAgentAuthInfo;
-  version?: string;
-  executablePath?: string;
-  binaryPath?: string;
-  configDir?: string;
-  cwd?: string;
-  extraArgs?: string;
-  env?: Record<string, string>;
-  protocol?: string;
   description?: string;
-  source?: 'local' | 'remote';
-  machineName?: string;
-  installCommand?: string;
-  docUrl?: string;
-  checkedAt?: number;
 }
 
 export interface DeepSeekOptions {
@@ -478,41 +450,15 @@ export function createOpenAICompatibleCaller(config: ModelProviderConfig): LLMCa
 }
 
 /**
- * 测试模型服务连通性探针 (Ping / Test Connection)
+ * 测试 OpenAI 兼容模型服务连通性探针 (Ping / Test Connection)
  */
-export async function testProviderConnection(config: ModelProviderConfig & { userId?: string }): Promise<{
+export async function testProviderConnection(config: ModelProviderConfig): Promise<{
   ok: boolean;
   latencyMs: number;
   model?: string;
-  version?: string;
-  auth?: LocalAgentAuthInfo;
-  replyPreview?: string;
-  diagnosticCode?: string;
   models?: string[];
   error?: string;
 }> {
-  if ((config.isLocalAgent && config.id !== 'ollama') || isStdioLocalAgent(config.id)) {
-    const res = await testLocalAgent(config.id, config.model, config.userId, {
-      binaryPath: config.binaryPath,
-      configDir: config.configDir,
-      cwd: config.cwd,
-      extraArgs: config.extraArgs,
-      env: config.env,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey
-    });
-    return {
-      ok: res.ok,
-      latencyMs: res.latencyMs,
-      model: res.version || config.model,
-      version: res.version,
-      auth: res.auth,
-      replyPreview: res.replyPreview,
-      diagnosticCode: res.diagnosticCode,
-      error: res.error
-    };
-  }
-
   if (config.id === 'ollama') {
     const probe = await probeOllamaModels(config.baseUrl || 'http://localhost:11434');
     if (!probe.ok) {

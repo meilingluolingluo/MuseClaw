@@ -27,7 +27,7 @@ export const NavRail: React.FC = () => {
     { id: 'artifacts', label: '工件', icon: <Package size={20} /> },
   ];
 
-  const hasConfiguredModel = Boolean(modelsConfig?.activeProviderId);
+  const hasConfiguredModel = Boolean(modelsConfig?.activeInstanceId);
 
   return (
     <nav className="nav-rail" aria-label="主工作台导航">

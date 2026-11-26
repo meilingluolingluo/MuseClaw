@@ -77,26 +77,6 @@ export const ProviderIcon: React.FC<{ providerId: string; size?: number }> = ({ 
       </svg>
     );
   }
-  if (p === 'ducc') {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-        <rect width="20" height="20" x="2" y="2" rx="6" fill="#2563EB" />
-        <text x="12" y="15" fill="#FFFFFF" fontSize="9" fontFamily="sans-serif" fontWeight="800" textAnchor="middle">
-          CC
-        </text>
-      </svg>
-    );
-  }
-  if (p === 'ducx') {
-    return (
-      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-        <rect width="20" height="20" x="2" y="2" rx="6" fill="#059669" />
-        <text x="12" y="15" fill="#FFFFFF" fontSize="9" fontFamily="sans-serif" fontWeight="800" textAnchor="middle">
-          CX
-        </text>
-      </svg>
-    );
-  }
   if (p === 'siliconflow') {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

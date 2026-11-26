@@ -48,10 +48,10 @@ export const TopBar: React.FC = () => {
     }
   }, []);
 
-  const hasConfiguredModel = Boolean(modelsConfig?.activeProviderId);
-  const activeProvider = modelsConfig?.providers?.find(
-    (p) => p.id === modelsConfig.activeProviderId
-  ) || { id: 'none', name: '未配置模型' };
+  const hasConfiguredModel = Boolean(modelsConfig?.activeInstanceId);
+  const activeProvider = modelsConfig?.instances?.find(
+    (p) => p.instanceId === modelsConfig.activeInstanceId
+  );
 
   const tabTitles: Record<string, { title: string; icon: React.ReactNode }> = {
     chat: { title: '对话工作台', icon: null },
@@ -142,9 +142,11 @@ export const TopBar: React.FC = () => {
           aria-label="AI 大模型服务配置"
         >
           <span className="model-status-icon">
-            <ProviderIcon providerId={activeProvider.id} size={15} />
+            <ProviderIcon providerId={activeProvider?.driver || activeProvider?.instanceId || 'claude'} size={15} />
           </span>
-          <span className="model-status-name">{hasConfiguredModel ? activeProvider.name : '未配置模型'}</span>
+          <span className="model-status-name">
+            {hasConfiguredModel && activeProvider ? activeProvider.displayName : '未配置模型'}
+          </span>
           <span className={`model-status-dot ${hasConfiguredModel ? 'online' : 'offline'}`} aria-hidden="true" />
         </button>
 

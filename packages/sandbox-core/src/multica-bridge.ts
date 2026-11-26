@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { findExecutableInPath, getAugmentedPath } from './local-agent-prober.ts';
+import { findExecutableInPath, getAugmentedPath } from './providers/executable.ts';
 
 export interface MulticaRuntimeInfo {
   id: string;

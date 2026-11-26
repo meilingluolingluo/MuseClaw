@@ -17,8 +17,11 @@ import type {
   AuditLog,
   Grant,
   ModelsConfig,
-  ModelProvider,
-  RunnerMachine,
+  ProviderInstance,
+  ProviderTestResult,
+  EnvironmentInfo,
+  ProviderSnapshot,
+  ProviderModelDescriptor,
   AvatarStudioView,
   AvatarSession,
   AvatarPreset,
@@ -159,57 +162,73 @@ export const api = {
       body: JSON.stringify({ approved: decision === 'APPROVE', scope: 'once', operator: 'web' }),
     }),
 
-  // Models
+  // Models & Local Agent Runtimes
   getModelsConfig: (forceRefresh = false) =>
     request<ModelsConfig>(`/api/models/config${forceRefresh ? '?refresh=1' : ''}`),
-  saveModelsConfig: (data: { activeProviderId?: string; provider?: Partial<ModelProvider> & { id: string } }) =>
-    request<{ success: boolean }>('/api/models/config', { method: 'POST', body: JSON.stringify(data) }),
-  testModel: (
-    providerId: string,
-    modelId?: string,
-    overrides?: Partial<ModelProvider>
-  ) =>
+  saveModelsConfig: (data: {
+    activeInstanceId?: string;
+    activeModelId?: string;
+    activeEnvironmentId?: string;
+    instance?: Partial<ProviderInstance> & { instanceId?: string };
+    instances?: Array<Partial<ProviderInstance>>;
+  }) =>
     request<{
-      success?: boolean;
-      ok?: boolean;
-      latency?: number;
-      latencyMs?: number;
-      version?: string;
-      auth?: ModelProvider['auth'];
-      replyPreview?: string;
-      diagnosticCode?: string;
-      models?: string[];
-      message?: string;
-      error?: string;
-    }>('/api/models/test', {
+      ok: boolean;
+      activeInstanceId: string;
+      activeModelId: string;
+      activeEnvironmentId: string;
+    }>('/api/models/config', { method: 'POST', body: JSON.stringify(data) }),
+  upsertProviderInstance: (instance: Partial<ProviderInstance> & { driver: ProviderInstance['driver'] }) =>
+    request<{ ok: boolean; instance: ProviderInstance }>('/api/providers/instances', {
       method: 'POST',
-      timeoutMs: 35000,
-      body: JSON.stringify({
-        ...overrides,
-        providerId,
-        id: providerId,
-        model: modelId
-      }),
+      body: JSON.stringify(instance),
     }),
-  probeOllama: (url?: string) =>
-    request<{ ok: boolean; models: string[]; error?: string }>(
-      `/api/models/ollama/probe${url ? `?url=${encodeURIComponent(url)}` : ''}`
+  deleteProviderInstance: (instanceId: string) =>
+    request<{ ok: boolean; removed?: boolean; reason?: string }>(
+      `/api/providers/instances/${encodeURIComponent(instanceId)}`,
+      { method: 'DELETE' }
     ),
-  fetchProviderModels: (data: { providerId: string; baseUrl?: string; apiKey?: string }) =>
-    request<{ ok: boolean; models: string[]; error?: string }>('/api/models/fetch-models', {
+  testModelProvider: (data: {
+    instanceId?: string;
+    driver?: ProviderInstance['driver'];
+    environmentId?: string;
+    displayName?: string;
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    binaryPath?: string;
+    extraArgs?: string;
+    cwd?: string;
+    permissionMode?: ProviderInstance['permissionMode'];
+    effort?: ProviderInstance['effort'];
+  }) =>
+    request<ProviderTestResult>('/api/models/test', {
       method: 'POST',
+      timeoutMs: 45000,
       body: JSON.stringify(data),
     }),
-  probeCli: (cliName: string) =>
-    request<{ available: boolean; version?: string; path?: string }>('/api/models/probe-cli', {
-      method: 'POST',
-      body: JSON.stringify({ cliName }),
-    }),
-  getMeshNodes: () => request<any[]>('/api/mesh/nodes'),
-  getRunnerMachines: (userId?: string) =>
-    request<{ ok: boolean; machines: RunnerMachine[] }>(
-      `/api/runner/machines${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`
+  probeOllama: (url?: string) =>
+    request<ProviderSnapshot>(
+      `/api/models/ollama/probe${url ? `?url=${encodeURIComponent(url)}` : ''}`
     ),
+  fetchProviderModels: (data: {
+    instanceId?: string;
+    driver?: ProviderInstance['driver'];
+    environmentId?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    binaryPath?: string;
+    extraArgs?: string;
+  }) =>
+    request<{ ok: boolean; snapshot: ProviderSnapshot; models: ProviderModelDescriptor[]; error?: string }>(
+      '/api/models/fetch-models',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
+  getEnvironments: () =>
+    request<{ ok: boolean; environments: EnvironmentInfo[] }>('/api/environments'),
 
   // Image Generation Models (独立生图模型管理)
   getImageModelsConfig: () =>

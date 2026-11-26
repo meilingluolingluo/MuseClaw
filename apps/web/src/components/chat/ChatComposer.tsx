@@ -350,21 +350,23 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
     APPROVAL_MODE_OPTIONS.find((opt) => opt.mode === rawApprovalMode) || APPROVAL_MODE_OPTIONS[0];
 
   const activeProvider = useMemo(() => {
-    if (!modelsConfig?.providers?.length) return null;
+    if (!modelsConfig?.instances?.length) return null;
     return (
-      modelsConfig.providers.find((p) => p.id === modelsConfig.activeProviderId) ||
-      modelsConfig.providers[0]
+      modelsConfig.instances.find((p) => p.instanceId === modelsConfig.activeInstanceId) ||
+      modelsConfig.instances[0]
     );
   }, [modelsConfig]);
 
-  const currentModelDisplay = activeBot?.model || activeProvider?.model || activeProvider?.name || '未配置模型';
+  const currentModelDisplay =
+    activeBot?.model || activeProvider?.model || activeProvider?.displayName || '未配置模型';
 
-  const handleQuickSwitchModel = async (providerId: string, modelName: string) => {
+  const handleQuickSwitchModel = async (instanceId: string, modelName: string) => {
     setIsModelPopoverOpen(false);
     try {
       await api.saveModelsConfig({
-        activeProviderId: providerId,
-        provider: { id: providerId, model: modelName },
+        activeInstanceId: instanceId,
+        activeModelId: modelName,
+        instance: { instanceId, model: modelName },
       });
       await loadModelsConfig();
       showToast(`已切换模型为 ${modelName}`, 'success');
@@ -983,25 +985,37 @@ export const ChatComposer: React.FC<ChatComposerProps> = ({
                 <div className="composer-popover composer-model-popover" role="dialog" aria-label="快捷切换模型">
                   <div className="composer-popover-header">切换当前对话模型</div>
                   <div className="composer-model-list">
-                    {(modelsConfig?.providers || [])
-                      .filter((p) => p.hasKey || p.isLocalAgent || p.id === modelsConfig?.activeProviderId)
+                    {(modelsConfig?.instances || [])
+                      .filter(
+                        (p) =>
+                          p.enabled !== false &&
+                          (p.hasApiKey ||
+                            p.driver === 'claude' ||
+                            p.driver === 'codex' ||
+                            p.driver === 'pi' ||
+                            p.driver === 'ollama' ||
+                            p.instanceId === modelsConfig?.activeInstanceId)
+                      )
                       .slice(0, 6)
                       .map((provider) => {
+                        const snapshotSlugs = (provider.snapshot?.models || []).map((m) => m.slug);
                         const candidates = Array.from(
-                          new Set([provider.model, ...(provider.candidateModels || [])].filter(Boolean))
+                          new Set([provider.model, ...snapshotSlugs, ...(provider.customModels || [])].filter(Boolean))
                         ).slice(0, 5) as string[];
-                        const isActiveProvider = provider.id === modelsConfig?.activeProviderId;
+                        const isActiveProvider = provider.instanceId === modelsConfig?.activeInstanceId;
                         return (
-                          <div key={provider.id} className="composer-model-group">
-                            <div className="composer-model-provider-title">{provider.name}</div>
+                          <div key={provider.instanceId} className="composer-model-group">
+                            <div className="composer-model-provider-title">{provider.displayName}</div>
                             {candidates.map((m) => {
-                              const selected = isActiveProvider && (provider.model === m);
+                              const selected =
+                                isActiveProvider &&
+                                ((modelsConfig?.activeModelId || provider.model) === m);
                               return (
                                 <button
-                                  key={`${provider.id}:${m}`}
+                                  key={`${provider.instanceId}:${m}`}
                                   type="button"
                                   className={`composer-model-item${selected ? ' is-selected' : ''}`}
-                                  onClick={() => handleQuickSwitchModel(provider.id, m)}
+                                  onClick={() => handleQuickSwitchModel(provider.instanceId, m)}
                                 >
                                   <span className="composer-model-item-name">{m}</span>
                                   {selected && <Check size={13} />}

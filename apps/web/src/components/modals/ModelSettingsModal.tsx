@@ -3,85 +3,97 @@ import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import { ProviderIcon } from '../../utils/icons';
 import { copyToClipboard } from '../../utils/clipboard';
+import { api } from '../../services/api';
+import type {
+  EnvironmentInfo,
+  PermissionMode,
+  ProviderDriverKind,
+  ProviderInstance,
+  ProviderModelDescriptor,
+  ProviderTestResult,
+  ReasoningEffort,
+} from '../../types';
 import {
-  Cpu,
-  Laptop,
   AlertCircle,
-  Palette,
-  RefreshCw,
   CheckCircle2,
-  KeyRound,
-  Terminal,
-  Plus,
-  X,
   ChevronDown,
   ChevronRight,
   Copy,
-  Cloud,
-  ShieldAlert,
+  Cpu,
+  KeyRound,
+  Laptop,
+  Palette,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Terminal,
+  Trash2,
+  X,
 } from 'lucide-react';
-import { api } from '../../services/api';
-import type { ModelProvider } from '../../types';
 
-type ProviderScopeTab = 'local' | 'cloud';
+const NATIVE_DRIVERS: ProviderDriverKind[] = ['claude', 'codex', 'pi', 'ollama'];
 
-function isLocalProvider(p: ModelProvider): boolean {
-  return Boolean(
-    p.isLocalAgent ||
-      p.category === 'local_agent' ||
-      p.category === 'intranet_agent' ||
-      ['claude', 'codex', 'pi', 'dsh', 'ollama', 'ducc', 'ducx'].includes(p.id)
-  );
+function isNativeRuntime(driver: ProviderDriverKind): boolean {
+  return NATIVE_DRIVERS.includes(driver);
 }
 
-function isIntranetProvider(p: ModelProvider): boolean {
-  return p.category === 'intranet_agent' || p.id === 'ducc' || p.id === 'ducx';
+function isAgentCliDriver(driver: ProviderDriverKind): boolean {
+  return driver === 'claude' || driver === 'codex' || driver === 'pi';
 }
 
-function getProviderBadgeInfo(
-  p: ModelProvider,
+function getRailBadgeInfo(
+  inst: ProviderInstance,
   isActive: boolean
 ): { text: string; tone: 'active' | 'ready' | 'warning' | 'muted' } {
   if (isActive) {
     return { text: '使用中', tone: 'active' };
   }
-  if (isLocalProvider(p)) {
-    if (p.status === 'ready' || (p.installed && p.isAvailable !== false && p.status !== 'unauthenticated')) {
-      return { text: p.source === 'remote' ? '远程就绪' : '已就绪', tone: 'ready' };
+  if (inst.enabled === false) {
+    return { text: '已停用', tone: 'muted' };
+  }
+  const snap = inst.snapshot;
+  if (isNativeRuntime(inst.driver)) {
+    if (snap?.status === 'ready') {
+      return { text: inst.environmentId !== 'local' ? '远程就绪' : '已就绪', tone: 'ready' };
     }
-    if (p.status === 'unauthenticated') {
-      return { text: '需认证', tone: 'warning' };
+    if (snap?.status === 'unauthenticated' || snap?.status === 'warning') {
+      return { text: '需登录', tone: 'warning' };
     }
-    if (p.installed && p.isAvailable === false) {
-      return { text: '未运行', tone: 'warning' };
+    if (snap?.status === 'error') {
+      return { text: '异常', tone: 'warning' };
     }
     return { text: '未检测到', tone: 'muted' };
   }
-  if (p.hasKey || p.apiKey || p.isAvailable) {
+  if (inst.hasApiKey || inst.apiKey) {
     return { text: '已就绪', tone: 'ready' };
   }
   return { text: '待配置', tone: 'muted' };
 }
 
-function getStatusPillText(p: ModelProvider, isLocal: boolean): { text: string; tone: 'ready' | 'warning' | 'muted' } {
-  if (!isLocal) {
-    return p.hasKey || p.apiKey || p.isAvailable
-      ? { text: '凭证已就绪', tone: 'ready' }
-      : { text: '待配置 Key', tone: 'muted' };
+function getDetailStatusPill(inst: ProviderInstance): { text: string; tone: 'ready' | 'warning' | 'muted' } {
+  if (inst.enabled === false) {
+    return { text: '已停用', tone: 'muted' };
   }
-  if (p.status === 'ready' || (p.installed && p.isAvailable !== false && p.status !== 'unauthenticated')) {
-    return {
-      text: p.source === 'remote' ? `远程节点就绪 (${p.machineName || 'Node'})` : '本地环境就绪',
-      tone: 'ready',
-    };
+  const snap = inst.snapshot;
+  if (isNativeRuntime(inst.driver)) {
+    if (snap?.status === 'ready') {
+      return {
+        text: snap.version ? `已就绪 · ${snap.version}` : '已就绪',
+        tone: 'ready',
+      };
+    }
+    if (snap?.status === 'unauthenticated') {
+      return { text: '未登录或缺少凭证', tone: 'warning' };
+    }
+    if (snap?.status === 'warning' || snap?.status === 'error') {
+      return { text: snap.message || '运行异常', tone: 'warning' };
+    }
+    return { text: '未检测到本地运行时', tone: 'muted' };
   }
-  if (p.status === 'unauthenticated') {
-    return { text: '已安装 · 待认证', tone: 'warning' };
+  if (inst.hasApiKey || inst.apiKey) {
+    return { text: 'API Key 已配置', tone: 'ready' };
   }
-  if (p.installed && p.isAvailable === false) {
-    return { text: '已安装 · 服务未启动', tone: 'warning' };
-  }
-  return { text: '未检测到', tone: 'muted' };
+  return { text: '待填写 API Key', tone: 'muted' };
 }
 
 export const ModelSettingsModal: React.FC = () => {
@@ -95,294 +107,399 @@ export const ModelSettingsModal: React.FC = () => {
     showToast,
   } = useApp();
 
-  const [scopeTab, setScopeTab] = useState<ProviderScopeTab>('local');
-  const [selectedProviderId, setSelectedProviderId] = useState<string>('claude');
-  const [modelId, setModelId] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [clearApiKey, setClearApiKey] = useState(false);
-  const [endpoint, setEndpoint] = useState('');
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string>('claude');
+  const [displayName, setDisplayName] = useState('');
+  const [environmentId, setEnvironmentId] = useState('local');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [modelName, setModelName] = useState('');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto_edits');
+  const [effort, setEffort] = useState<ReasoningEffort>('medium');
   const [binaryPath, setBinaryPath] = useState('');
-  const [configDir, setConfigDir] = useState('');
   const [cwd, setCwd] = useState('');
   const [extraArgs, setExtraArgs] = useState('');
   const [customModels, setCustomModels] = useState<string[]>([]);
-  const [newCustomModel, setNewCustomModel] = useState('');
-
+  const [newCustomModelInput, setNewCustomModelInput] = useState('');
+  const [fetchedModels, setFetchedModels] = useState<ProviderModelDescriptor[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showIntranet, setShowIntranet] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    latency?: number;
-    version?: string;
-    authLabel?: string;
-    replyPreview?: string;
-    message?: string;
-  } | null>(null);
 
-  const syncFormFromProvider = (p: ModelProvider) => {
-    setSelectedProviderId(p.id);
-    setModelId(p.model || p.modelId || p.candidateModels?.[0] || p.supportedModels?.[0] || '');
-    setApiKey('');
-    setClearApiKey(false);
-    const rawEndpoint = p.baseUrl || p.endpoint || '';
-    setEndpoint(rawEndpoint.startsWith('local://') ? '' : rawEndpoint);
-    setBinaryPath(p.binaryPath || '');
-    setConfigDir(p.configDir || '');
-    setCwd(p.cwd || '');
-    setExtraArgs(p.extraArgs || '');
-    setCustomModels(p.customModels || []);
-    setNewCustomModel('');
+  const [showNewInstanceForm, setShowNewInstanceForm] = useState(false);
+  const [newInstanceDriver, setNewInstanceDriver] = useState<ProviderDriverKind>('claude');
+  const [newInstanceName, setNewInstanceName] = useState('');
+  const [newInstanceEnv, setNewInstanceEnv] = useState('local');
+  const [creatingInstance, setCreatingInstance] = useState(false);
+
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
+
+  const instances = modelsConfig?.instances || [];
+  const environments: EnvironmentInfo[] = modelsConfig?.environments || [];
+
+  const selectedInstance = useMemo(() => {
+    return (
+      instances.find((inst) => inst.instanceId === selectedInstanceId) ||
+      instances.find((inst) => inst.instanceId === modelsConfig?.activeInstanceId) ||
+      instances[0]
+    );
+  }, [instances, selectedInstanceId, modelsConfig?.activeInstanceId]);
+
+  const syncFormFromInstance = (inst: ProviderInstance) => {
+    setDisplayName(inst.displayName || inst.instanceId);
+    setEnvironmentId(inst.environmentId || 'local');
+    setBaseUrl(inst.baseUrl || '');
+    setApiKeyInput('');
+    setModelName(
+      inst.model ||
+        inst.snapshot?.models?.[0]?.slug ||
+        ''
+    );
+    setPermissionMode(inst.permissionMode || 'auto_edits');
+    setEffort(inst.effort || 'medium');
+    setBinaryPath(inst.binaryPath || '');
+    setCwd(inst.cwd || '');
+    setExtraArgs(inst.extraArgs || '');
+    setCustomModels(inst.customModels || []);
+    setFetchedModels(inst.snapshot?.models || []);
+    setNewCustomModelInput('');
     setTestResult(null);
   };
 
   useEffect(() => {
-    if (!modelsConfig) return;
-    const currentStillExists = modelsConfig.providers.find((p) => p.id === selectedProviderId);
-    const activeId = modelsConfig.activeProviderId || 'claude';
-    const target =
-      (isModelModalOpen && currentStillExists ? currentStillExists : undefined) ||
-      modelsConfig.providers.find((p) => p.id === activeId) ||
-      modelsConfig.providers[0];
-    if (target) {
-      syncFormFromProvider(target);
-      setScopeTab(isLocalProvider(target) ? 'local' : 'cloud');
-      const hasAnyIntranetReady = modelsConfig.providers.some(
-        (p) => isIntranetProvider(p) && (p.installed || p.id === activeId)
-      );
-      setShowIntranet(hasAnyIntranetReady);
+    if (!isModelModalOpen) return;
+    void loadModelsConfig(false);
+  }, [isModelModalOpen, loadModelsConfig]);
+
+  useEffect(() => {
+    if (!isModelModalOpen || !modelsConfig?.instances?.length) return;
+    const activeId = modelsConfig.activeInstanceId || modelsConfig.instances[0].instanceId;
+    setSelectedInstanceId((prev) => {
+      const stillExists = modelsConfig.instances.some((inst) => inst.instanceId === prev);
+      return stillExists ? prev : activeId;
+    });
+  }, [isModelModalOpen, modelsConfig]);
+
+  useEffect(() => {
+    if (!selectedInstance) return;
+    syncFormFromInstance(selectedInstance);
+  }, [selectedInstance?.instanceId]);
+
+  const nativeInstances = useMemo(
+    () => instances.filter((inst) => isNativeRuntime(inst.driver)),
+    [instances]
+  );
+
+  const cloudInstances = useMemo(
+    () => instances.filter((inst) => !isNativeRuntime(inst.driver)),
+    [instances]
+  );
+
+  const mergedModelDescriptors = useMemo(() => {
+    const bySlug = new Map<string, ProviderModelDescriptor>();
+    for (const m of fetchedModels) {
+      bySlug.set(m.slug, m);
     }
-  }, [modelsConfig, isModelModalOpen]);
-
-  const providers = modelsConfig?.providers || [];
-  const localProviders = useMemo(
-    () => providers.filter((p) => isLocalProvider(p) && !isIntranetProvider(p)),
-    [providers]
-  );
-  const intranetProviders = useMemo(
-    () => providers.filter((p) => isIntranetProvider(p)),
-    [providers]
-  );
-  const cloudProviders = useMemo(
-    () => providers.filter((p) => !isLocalProvider(p)),
-    [providers]
-  );
-
-  const readyLocalCount = useMemo(
-    () =>
-      providers.filter(
-        (p) =>
-          isLocalProvider(p) &&
-          (p.status === 'ready' || (p.installed && p.isAvailable !== false && p.status !== 'unauthenticated'))
-      ).length,
-    [providers]
-  );
-
-  const currentProvider: ModelProvider = useMemo(
-    () =>
-      providers.find((p) => p.id === selectedProviderId) || {
-        id: selectedProviderId,
-        name: selectedProviderId,
-        description: 'AI 交互推理引擎',
-        candidateModels: ['default'],
-      },
-    [providers, selectedProviderId]
-  );
-
-  const isLocalAgent = isLocalProvider(currentProvider);
-  const isClaude = currentProvider.id === 'claude';
-  const isOllama = currentProvider.id === 'ollama';
-
-  const candidateModels = useMemo(() => {
-    const base =
-      currentProvider.candidateModels && currentProvider.candidateModels.length > 0
-        ? currentProvider.candidateModels
-        : currentProvider.supportedModels && currentProvider.supportedModels.length > 0
-          ? currentProvider.supportedModels
-          : [];
-    return Array.from(new Set([...base, ...customModels, ...(modelId ? [modelId] : [])])).filter(Boolean);
-  }, [currentProvider, customModels, modelId]);
-
-  const handleSelectScope = (nextScope: ProviderScopeTab) => {
-    setScopeTab(nextScope);
-    const targetList = nextScope === 'local' ? [...localProviders, ...intranetProviders] : cloudProviders;
-    if (targetList.length > 0 && !targetList.some((p) => p.id === selectedProviderId)) {
-      const activeInScope = targetList.find((p) => p.id === modelsConfig?.activeProviderId);
-      const readyInScope = targetList.find((p) => p.status === 'ready' || p.hasKey);
-      syncFormFromProvider(activeInScope || readyInScope || targetList[0]);
+    for (const cm of customModels) {
+      if (!bySlug.has(cm)) {
+        bySlug.set(cm, { slug: cm, name: cm, isCustom: true });
+      }
     }
-  };
+    if (modelName.trim() && !bySlug.has(modelName.trim())) {
+      bySlug.set(modelName.trim(), { slug: modelName.trim(), name: modelName.trim(), isCustom: true });
+    }
+    return Array.from(bySlug.values());
+  }, [fetchedModels, customModels, modelName]);
 
-  const handleRefreshProbe = async () => {
-    setIsRefreshing(true);
+  const activeModelDescriptor = useMemo(
+    () => mergedModelDescriptors.find((m) => m.slug === modelName.trim()),
+    [mergedModelDescriptors, modelName]
+  );
+
+  const handleRefreshAll = async () => {
+    setRefreshing(true);
     try {
       await loadModelsConfig(true);
-      showToast('已刷新本机与远程节点运行时状态', 'success');
+      showToast('已重新探测本机及远程环境运行状态', 'success');
     } catch (err: any) {
-      showToast(`刷新失败: ${err.message}`, 'error');
+      showToast(`重新探测失败: ${err?.message || err}`, 'error');
     } finally {
-      setIsRefreshing(false);
+      setRefreshing(false);
     }
   };
 
-  const handleAddCustomModel = () => {
-    const slug = newCustomModel.trim();
-    if (!slug) return;
-    if (!customModels.includes(slug)) {
-      setCustomModels((prev) => [...prev, slug]);
-    }
-    setModelId(slug);
-    setNewCustomModel('');
-  };
-
-  const handleRemoveCustomModel = (slug: string) => {
-    setCustomModels((prev) => prev.filter((m) => m !== slug));
-    if (modelId === slug) {
-      const remaining = candidateModels.filter((m) => m !== slug);
-      setModelId(remaining[0] || '');
-    }
-  };
-
-  const handleCopyCommand = async (cmd: string, label: string) => {
-    const ok = await copyToClipboard(cmd);
-    if (ok) {
-      showToast(`已复制 ${label}`, 'success');
-    } else {
-      showToast('复制失败，请手动选中命令文本复制', 'info');
+  const handleFetchModels = async () => {
+    if (!selectedInstance) return;
+    setFetchingModels(true);
+    try {
+      const res = await api.fetchProviderModels({
+        instanceId: selectedInstance.instanceId,
+        driver: selectedInstance.driver,
+        environmentId,
+        baseUrl: baseUrl.trim() || undefined,
+        apiKey: apiKeyInput.trim() || undefined,
+        binaryPath: binaryPath.trim() || undefined,
+        extraArgs: extraArgs.trim() || undefined,
+      });
+      if (res.models?.length) {
+        setFetchedModels(res.models);
+        if (!modelName.trim()) {
+          setModelName(res.models[0].slug);
+        }
+        showToast(`已发现 ${res.models.length} 个可用模型`, 'success');
+      } else {
+        showToast(res.snapshot?.message || res.error || '暂未拉取到模型列表', 'warning');
+      }
+    } catch (err: any) {
+      showToast(`拉取模型失败: ${err?.message || err}`, 'error');
+    } finally {
+      setFetchingModels(false);
     }
   };
 
   const handleTest = async () => {
-    setIsTesting(true);
+    if (!selectedInstance) return;
+    setTesting(true);
     setTestResult(null);
     try {
-      const res = await api.testModel(currentProvider.id, modelId, {
-        baseUrl: isClaude || isOllama || !isLocalAgent ? endpoint.trim() : currentProvider.baseUrl,
-        apiKey: clearApiKey ? '' : apiKey.trim() || undefined,
+      const res = await api.testModelProvider({
+        instanceId: selectedInstance.instanceId,
+        driver: selectedInstance.driver,
+        environmentId,
+        displayName,
+        model: modelName.trim() || undefined,
+        baseUrl: baseUrl.trim() || undefined,
+        apiKey: apiKeyInput.trim() || undefined,
         binaryPath: binaryPath.trim() || undefined,
-        configDir: configDir.trim() || undefined,
-        cwd: cwd.trim() || undefined,
         extraArgs: extraArgs.trim() || undefined,
+        cwd: cwd.trim() || undefined,
+        permissionMode,
+        effort,
       });
-      const isOk = Boolean(res.success || res.ok);
-      const latency = res.latency ?? res.latencyMs ?? 0;
-      const message = res.message || res.error || (isOk ? '连通性验证通过' : '连接超时或未响应');
-      setTestResult({
-        success: isOk,
-        latency,
-        version: res.version,
-        authLabel: res.auth?.label,
-        replyPreview: res.replyPreview,
-        message,
-      });
-      if (isOk) {
-        showToast(`连通性测试成功 (${latency}ms)`, 'success');
+      setTestResult(res);
+      if (res.ok) {
+        showToast(`连通性测试通过 (${res.latencyMs}ms)`, 'success');
       } else {
-        showToast(`测试未通过: ${message}`, 'error');
+        showToast(res.error || '连通性测试失败', 'warning');
       }
     } catch (err: any) {
-      setTestResult({ success: false, message: err.message });
-      showToast(`测试失败: ${err.message}`, 'error');
+      setTestResult({
+        ok: false,
+        latencyMs: 0,
+        diagnosticCode: 'execution_failed',
+        error: err?.message || '测试请求失败',
+      });
     } finally {
-      setIsTesting(false);
+      setTesting(false);
     }
   };
 
-  const handleSave = async () => {
-    if (!modelsConfig) return;
+  const handleSaveAndActivate = async () => {
+    if (!selectedInstance) return;
     setSaving(true);
     try {
-      const resolvedBaseUrl = isClaude || isOllama || !isLocalAgent ? endpoint.trim() : currentProvider.baseUrl;
-      await api.saveModelsConfig({
-        activeProviderId: selectedProviderId,
-        provider: {
-          id: selectedProviderId,
-          model: modelId.trim(),
-          baseUrl: resolvedBaseUrl,
-          apiKey: apiKey.trim() || undefined,
-          clearApiKey: clearApiKey || undefined,
-          binaryPath: binaryPath.trim() || undefined,
-          configDir: configDir.trim() || undefined,
-          cwd: cwd.trim() || undefined,
-          extraArgs: extraArgs.trim() || undefined,
-          customModels,
-        },
-      });
+      const payloadInstance: Partial<ProviderInstance> & { instanceId: string } = {
+        instanceId: selectedInstance.instanceId,
+        displayName: displayName.trim() || selectedInstance.displayName,
+        driver: selectedInstance.driver,
+        environmentId: environmentId || 'local',
+        model: modelName.trim() || selectedInstance.model || 'default',
+        customModels,
+        enabled: true,
+      };
 
-      await loadModelsConfig(true);
-      showToast(`已成功将 ${currentProvider.name} 设为全局激活引擎`, 'success');
+      if (isAgentCliDriver(selectedInstance.driver)) {
+        payloadInstance.permissionMode = permissionMode;
+        payloadInstance.effort = effort;
+        payloadInstance.binaryPath = binaryPath.trim() || undefined;
+        payloadInstance.cwd = cwd.trim() || undefined;
+        payloadInstance.extraArgs = extraArgs.trim() || undefined;
+      } else {
+        payloadInstance.baseUrl = baseUrl.trim();
+        if (apiKeyInput.trim()) {
+          payloadInstance.apiKey = apiKeyInput.trim();
+        }
+      }
+
+      await api.saveModelsConfig({
+        activeInstanceId: selectedInstance.instanceId,
+        activeModelId: payloadInstance.model,
+        activeEnvironmentId: payloadInstance.environmentId,
+        instance: payloadInstance,
+      });
+      await loadModelsConfig(false);
+      showToast(`已启用 ${payloadInstance.displayName} (${payloadInstance.model})`, 'success');
       setIsModelModalOpen(false);
     } catch (err: any) {
-      showToast(`保存失败: ${err.message}`, 'error');
+      showToast(`保存配置失败: ${err?.message || err}`, 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  const isCurrentActive = selectedProviderId === modelsConfig?.activeProviderId;
-  const statusPill = getStatusPillText(currentProvider, isLocalAgent);
-  const hasSavedKey = Boolean(
-    !clearApiKey && (isClaude ? currentProvider.maskedKey?.includes('••••') : currentProvider.hasKey)
-  );
+  const handleClearKey = async () => {
+    if (!selectedInstance) return;
+    try {
+      await api.upsertProviderInstance({
+        instanceId: selectedInstance.instanceId,
+        driver: selectedInstance.driver,
+        clearApiKey: true,
+      });
+      setApiKeyInput('');
+      await loadModelsConfig(false);
+      showToast('已清除保存的 API Key', 'success');
+    } catch (err: any) {
+      showToast(`清除失败: ${err?.message || err}`, 'error');
+    }
+  };
+
+  const handleAddCustomModel = () => {
+    const trimmed = newCustomModelInput.trim();
+    if (!trimmed) return;
+    if (!customModels.includes(trimmed)) {
+      setCustomModels((prev) => [...prev, trimmed]);
+    }
+    setModelName(trimmed);
+    setNewCustomModelInput('');
+  };
+
+  const handleRemoveCustomModel = (slug: string) => {
+    setCustomModels((prev) => prev.filter((item) => item !== slug));
+    if (modelName === slug) {
+      setModelName(fetchedModels[0]?.slug || '');
+    }
+  };
+
+  const handleCreateInstance = async () => {
+    const trimmedName = newInstanceName.trim();
+    if (!trimmedName) {
+      showToast('请输入新实例名称', 'warning');
+      return;
+    }
+    setCreatingInstance(true);
+    try {
+      const slugBase = trimmedName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') || newInstanceDriver;
+      const instanceId = `${newInstanceDriver}-${slugBase}-${Date.now().toString(36).slice(-4)}`;
+      const res = await api.upsertProviderInstance({
+        instanceId,
+        driver: newInstanceDriver,
+        displayName: trimmedName,
+        environmentId: newInstanceEnv || 'local',
+        enabled: true,
+        model: newInstanceDriver === 'claude' ? 'sonnet' : newInstanceDriver === 'codex' ? 'gpt-5.3-codex' : '',
+        permissionMode: isAgentCliDriver(newInstanceDriver) ? 'auto_edits' : undefined,
+        effort: isAgentCliDriver(newInstanceDriver) ? 'medium' : undefined,
+        baseUrl: newInstanceDriver === 'ollama' ? 'http://127.0.0.1:11434/v1' : undefined,
+      });
+      await loadModelsConfig(true);
+      setSelectedInstanceId(res.instance.instanceId);
+      setShowNewInstanceForm(false);
+      setNewInstanceName('');
+      showToast(`已创建实例 ${res.instance.displayName}`, 'success');
+    } catch (err: any) {
+      showToast(`创建实例失败: ${err?.message || err}`, 'error');
+    } finally {
+      setCreatingInstance(false);
+    }
+  };
+
+  const handleDeleteInstance = async (inst: ProviderInstance) => {
+    if (inst.isDefault) return;
+    try {
+      const res = await api.deleteProviderInstance(inst.instanceId);
+      if (res.ok) {
+        await loadModelsConfig(false);
+        showToast(`已删除实例 ${inst.displayName}`, 'success');
+      } else {
+        showToast(res.reason || '无法删除该实例', 'warning');
+      }
+    } catch (err: any) {
+      showToast(`删除失败: ${err?.message || err}`, 'error');
+    }
+  };
+
+  const statusPill = selectedInstance ? getDetailStatusPill(selectedInstance) : { text: '', tone: 'muted' as const };
+  const isCurrentActive = selectedInstance?.instanceId === modelsConfig?.activeInstanceId;
 
   return (
     <Modal
       isOpen={isModelModalOpen}
       onClose={() => setIsModelModalOpen(false)}
-      title="AI 引擎与本地 Agent 配置中心"
+      title="模型与本地 Agent 运行时配置中心"
       icon={<Cpu size={18} />}
       maxWidth="920px"
-      zIndex={1000}
-    >
-      {/* 顶部模式切换与操作栏 */}
-      <div className="model-center-topbar">
-        <div className="model-center-tabs" role="tablist" aria-label="引擎类别">
+      footer={
+        <>
           <button
             type="button"
-            role="tab"
-            aria-selected={scopeTab === 'local'}
-            className={`model-center-tab ${scopeTab === 'local' ? 'is-active' : ''}`}
-            onClick={() => handleSelectScope('local')}
-          >
-            <Terminal size={14} />
-            <span>本地 Agent</span>
-            <span className="model-center-tab-count">{readyLocalCount}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={scopeTab === 'cloud'}
-            className={`model-center-tab ${scopeTab === 'cloud' ? 'is-active' : ''}`}
-            onClick={() => handleSelectScope('cloud')}
-          >
-            <Cloud size={14} />
-            <span>云端 API</span>
-          </button>
-          <button
-            type="button"
-            className="model-center-tab"
+            className="btn-secondary"
             onClick={() => {
               setIsModelModalOpen(false);
               setIsImageModelModalOpen(true);
             }}
           >
             <Palette size={14} />
-            <span>图像模型</span>
+            <span>生图模型设置</span>
           </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setIsModelModalOpen(false)}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleTest}
+            disabled={!selectedInstance || testing}
+          >
+            {testing ? <RefreshCw size={14} className="model-spin-icon" /> : <ShieldCheck size={14} />}
+            <span>{testing ? '测试中…' : '连通性测试'}</span>
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handleSaveAndActivate}
+            disabled={!selectedInstance || saving}
+          >
+            {saving ? '保存中…' : isCurrentActive ? '保存当前配置' : '保存并设为当前模型'}
+          </button>
+        </>
+      }
+    >
+      {/* 顶部执行环境总览与远程接入栏 */}
+      <div className="model-compute-banner">
+        <div className="model-compute-banner-info">
+          <Laptop size={18} className="model-compute-banner-icon" />
+          <div>
+            <div className="model-compute-banner-title">
+              计算环境 ({environments.length} 个环境在线)
+            </div>
+            <div className="model-env-chips">
+              {environments.map((env) => (
+                <span
+                  key={env.environmentId}
+                  className={`model-env-chip${env.environmentId === environmentId ? ' is-selected' : ''}`}
+                  title={`${env.hostname} (${env.platform}/${env.arch})`}
+                >
+                  <span className={`model-env-dot ${env.status === 'online' ? 'is-online' : 'is-offline'}`} />
+                  <span>{env.label}</span>
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
-
-        <div className="model-center-top-actions">
+        <div className="model-env-actions">
           <button
             type="button"
             className="btn-secondary model-top-action-btn"
-            onClick={handleRefreshProbe}
-            disabled={isRefreshing}
-            title="重新探测本机 CLI 与远程计算节点"
+            onClick={handleRefreshAll}
+            disabled={refreshing}
           >
-            <RefreshCw size={13} className={isRefreshing ? 'model-spin-icon' : ''} />
-            <span>{isRefreshing ? '探测中...' : '刷新探测'}</span>
+            <RefreshCw size={13} className={refreshing ? 'model-spin-icon' : ''} />
+            <span>{refreshing ? '探测中…' : '重新探测'}</span>
           </button>
           <button
             type="button"
@@ -393,561 +510,491 @@ export const ModelSettingsModal: React.FC = () => {
             }}
           >
             <Laptop size={13} />
-            <span>接入个人电脑</span>
+            <span>连接新电脑</span>
           </button>
         </div>
       </div>
 
-      {/* 主从两栏配置工作区 */}
       <div className="model-center-layout">
-        {/* 左侧供应商轨道 */}
-        <aside className="model-provider-rail" aria-label="可选模型引擎列表">
-          {scopeTab === 'local' ? (
-            <>
-              <div className="model-rail-section-title">通用本地编码 Agent</div>
-              <div className="model-rail-list">
-                {localProviders.map((p) => {
-                  const isSelected = p.id === selectedProviderId;
-                  const isActive = p.id === modelsConfig?.activeProviderId;
-                  const badge = getProviderBadgeInfo(p, isActive);
-                  return (
+        {/* 左侧提供方与实例列表 */}
+        <aside className="model-provider-rail" aria-label="模型与本地运行时实例列表">
+          <div className="model-rail-header-row">
+            <span className="model-rail-section-title">本地 Agent 运行时</span>
+            <button
+              type="button"
+              className="btn-secondary model-rail-add-btn"
+              onClick={() => setShowNewInstanceForm((prev) => !prev)}
+              title="新建自定义提供方实例"
+            >
+              <Plus size={12} />
+              <span>新建</span>
+            </button>
+          </div>
+
+          {showNewInstanceForm && (
+            <div className="model-new-instance-card">
+              <div className="model-field">
+                <label className="model-field-label">驱动类型</label>
+                <select
+                  className="om-input"
+                  value={newInstanceDriver}
+                  onChange={(e) => setNewInstanceDriver(e.target.value as ProviderDriverKind)}
+                >
+                  <option value="claude">Claude Code SDK</option>
+                  <option value="codex">Codex CLI</option>
+                  <option value="pi">Pi Coding Agent</option>
+                  <option value="ollama">Ollama 本地服务</option>
+                  <option value="openai-compat">OpenAI 兼容网关</option>
+                </select>
+              </div>
+              <div className="model-field">
+                <label className="model-field-label">实例名称</label>
+                <input
+                  type="text"
+                  className="om-input"
+                  placeholder="例如：我的 Claude Worktree"
+                  value={newInstanceName}
+                  onChange={(e) => setNewInstanceName(e.target.value)}
+                />
+              </div>
+              <div className="model-field">
+                <label className="model-field-label">目标执行环境</label>
+                <select
+                  className="om-input"
+                  value={newInstanceEnv}
+                  onChange={(e) => setNewInstanceEnv(e.target.value)}
+                >
+                  {environments.map((env) => (
+                    <option key={env.environmentId} value={env.environmentId}>
+                      {env.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="model-new-instance-actions">
+                <button
+                  type="button"
+                  className="btn-secondary btn-xs"
+                  onClick={() => setShowNewInstanceForm(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary btn-xs"
+                  onClick={handleCreateInstance}
+                  disabled={creatingInstance}
+                >
+                  {creatingInstance ? '创建中…' : '确认创建'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="model-rail-list">
+            {nativeInstances.map((inst) => {
+              const active = inst.instanceId === modelsConfig?.activeInstanceId;
+              const selected = inst.instanceId === selectedInstance?.instanceId;
+              const badge = getRailBadgeInfo(inst, active);
+              return (
+                <button
+                  key={inst.instanceId}
+                  type="button"
+                  className={`model-rail-item${selected ? ' is-selected' : ''}`}
+                  onClick={() => setSelectedInstanceId(inst.instanceId)}
+                >
+                  <span className="model-rail-item-icon">
+                    <ProviderIcon providerId={inst.driver} size={18} />
+                  </span>
+                  <span className="model-rail-item-meta">
+                    <span className="model-rail-item-name">{inst.displayName}</span>
+                    <span className="model-rail-item-sub">
+                      {inst.snapshot?.version || inst.model || inst.driver}
+                    </span>
+                  </span>
+                  <span className={`model-rail-badge tone-${badge.tone}`}>{badge.text}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="model-rail-intranet-group">
+            <div className="model-rail-section-title">云端 / 兼容 API</div>
+            <div className="model-rail-list">
+              {cloudInstances.map((inst) => {
+                const active = inst.instanceId === modelsConfig?.activeInstanceId;
+                const selected = inst.instanceId === selectedInstance?.instanceId;
+                const badge = getRailBadgeInfo(inst, active);
+                return (
+                  <button
+                    key={inst.instanceId}
+                    type="button"
+                    className={`model-rail-item${selected ? ' is-selected' : ''}`}
+                    onClick={() => setSelectedInstanceId(inst.instanceId)}
+                  >
+                    <span className="model-rail-item-icon">
+                      <ProviderIcon providerId={inst.instanceId} size={18} />
+                    </span>
+                    <span className="model-rail-item-meta">
+                      <span className="model-rail-item-name">{inst.displayName}</span>
+                      <span className="model-rail-item-sub">{inst.model || '未选择模型'}</span>
+                    </span>
+                    <span className={`model-rail-badge tone-${badge.tone}`}>{badge.text}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+
+        {/* 右侧详细配置表单 */}
+        {selectedInstance && (
+          <section className="model-detail-pane" aria-label="实例配置详情">
+            <div className="model-detail-header-card">
+              <div className="model-detail-header-top">
+                <div className="model-config-title-group">
+                  <ProviderIcon
+                    providerId={
+                      isNativeRuntime(selectedInstance.driver)
+                        ? selectedInstance.driver
+                        : selectedInstance.instanceId
+                    }
+                    size={22}
+                  />
+                  <div>
+                    <div className="model-config-title">{selectedInstance.displayName}</div>
+                    <div className="model-detail-subtitle">
+                      {selectedInstance.description ||
+                        (isAgentCliDriver(selectedInstance.driver)
+                          ? '原生 Agent 运行时驱动，支持工作区工具调用、会话断点恢复与权限控制'
+                          : '标准 OpenAI 兼容模型服务端点')}
+                    </div>
+                  </div>
+                </div>
+                <div className="model-header-right-actions">
+                  <span className={`model-status-pill tone-${statusPill.tone}`}>{statusPill.text}</span>
+                  {!selectedInstance.isDefault && (
                     <button
-                      key={p.id}
                       type="button"
-                      className={`model-rail-item ${isSelected ? 'is-selected' : ''}`}
-                      onClick={() => syncFormFromProvider(p)}
+                      className="btn-secondary btn-xs model-delete-btn"
+                      onClick={() => handleDeleteInstance(selectedInstance)}
+                      title="删除此自定义实例"
                     >
-                      <span className="model-rail-item-icon">
-                        <ProviderIcon providerId={p.id} size={20} />
-                      </span>
-                      <span className="model-rail-item-meta">
-                        <span className="model-rail-item-name">{p.name}</span>
-                        <span className="model-rail-item-sub">
-                          {p.version ? p.version.split(' ')[0] : p.protocol || 'local'}
-                        </span>
-                      </span>
-                      <span className={`model-rail-badge tone-${badge.tone}`}>{badge.text}</span>
+                      <Trash2 size={12} />
+                      <span>删除</span>
                     </button>
-                  );
-                })}
+                  )}
+                </div>
               </div>
 
-              {intranetProviders.length > 0 && (
-                <div className="model-rail-intranet-group">
-                  <button
-                    type="button"
-                    className="model-rail-collapse-btn"
-                    onClick={() => setShowIntranet((v) => !v)}
-                  >
-                    {showIntranet ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    <span>企业内网 Agent ({intranetProviders.length})</span>
-                  </button>
-                  {showIntranet && (
-                    <div className="model-rail-list">
-                      {intranetProviders.map((p) => {
-                        const isSelected = p.id === selectedProviderId;
-                        const isActive = p.id === modelsConfig?.activeProviderId;
-                        const badge = getProviderBadgeInfo(p, isActive);
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className={`model-rail-item ${isSelected ? 'is-selected' : ''}`}
-                            onClick={() => syncFormFromProvider(p)}
-                          >
-                            <span className="model-rail-item-icon">
-                              <ProviderIcon providerId={p.id} size={20} />
-                            </span>
-                            <span className="model-rail-item-meta">
-                              <span className="model-rail-item-name">{p.name}</span>
-                              <span className="model-rail-item-sub">{p.version || 'intranet'}</span>
-                            </span>
-                            <span className={`model-rail-badge tone-${badge.tone}`}>{badge.text}</span>
-                          </button>
-                        );
-                      })}
+              {selectedInstance.snapshot?.executablePath && (
+                <div className="model-probe-meta-strip">
+                  <div className="model-probe-version is-ready">
+                    可执行程序: <code>{selectedInstance.snapshot.executablePath}</code>
+                  </div>
+                  {selectedInstance.snapshot.auth?.label && (
+                    <div className="model-auth-chip">
+                      <span>认证方式: {selectedInstance.snapshot.auth.label}</span>
+                      {selectedInstance.snapshot.auth.endpoint && (
+                        <code> · {selectedInstance.snapshot.auth.endpoint}</code>
+                      )}
                     </div>
                   )}
                 </div>
               )}
-            </>
-          ) : (
-            <>
-              <div className="model-rail-section-title">云端与自建网关</div>
-              <div className="model-rail-list">
-                {cloudProviders.map((p) => {
-                  const isSelected = p.id === selectedProviderId;
-                  const isActive = p.id === modelsConfig?.activeProviderId;
-                  const badge = getProviderBadgeInfo(p, isActive);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`model-rail-item ${isSelected ? 'is-selected' : ''}`}
-                      onClick={() => syncFormFromProvider(p)}
-                    >
-                      <span className="model-rail-item-icon">
-                        <ProviderIcon providerId={p.id} size={20} />
-                      </span>
-                      <span className="model-rail-item-meta">
-                        <span className="model-rail-item-name">{p.name}</span>
-                        <span className="model-rail-item-sub">{p.model || 'OpenAI Compatible'}</span>
-                      </span>
-                      <span className={`model-rail-badge tone-${badge.tone}`}>{badge.text}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </aside>
 
-        {/* 右侧详细配置区 */}
-        <div className="model-detail-pane">
-          {/* 头部状态卡片 */}
-          <div className="model-detail-header-card">
-            <div className="model-detail-header-top">
-              <div className="model-config-title-group">
-                <ProviderIcon providerId={currentProvider.id} size={24} />
-                <div>
-                  <div className="model-config-title">{currentProvider.name}</div>
-                  <div className="model-detail-subtitle">
-                    {currentProvider.description || 'AI 交互推理服务'}
+              {selectedInstance.snapshot?.status === 'not_found' && selectedInstance.snapshot.installCommand && (
+                <div className="model-guidance-box">
+                  <div className="model-probe-box is-missing">
+                    {selectedInstance.snapshot.message || '尚未在目标环境中检测到可执行程序'}
                   </div>
-                </div>
-              </div>
-              <span className={`model-status-pill tone-${statusPill.tone}`}>
-                {statusPill.text}
-              </span>
-            </div>
-
-            {isLocalAgent && (
-              <div className="model-meta-grid">
-                <div className="model-meta-cell">
-                  <span className="model-meta-label">版本</span>
-                  <span className="model-meta-value">
-                    {currentProvider.version || currentProvider.detectedVersion || '未探测到'}
-                  </span>
-                </div>
-                <div className="model-meta-cell">
-                  <span className="model-meta-label">认证状态</span>
-                  <span className="model-meta-value">
-                    {currentProvider.auth?.label ||
-                      (currentProvider.isAvailable ? '就绪可用' : '未就绪')}
-                    {currentProvider.auth?.email ? ` (${currentProvider.auth.email})` : ''}
-                  </span>
-                </div>
-                <div className="model-meta-cell model-meta-cell-wide">
-                  <span className="model-meta-label">可执行路径 / 来源</span>
-                  <span className="model-meta-value model-meta-mono">
-                    {currentProvider.executablePath ||
-                      currentProvider.cliPath ||
-                      (currentProvider.source === 'remote'
-                        ? `远程计算节点 (${currentProvider.machineName || 'Node'})`
-                        : '未在系统 PATH 中发现')}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 引导横幅：未安装或待认证 */}
-          {isLocalAgent && currentProvider.status === 'unauthenticated' && (
-            <div className="model-guidance-box is-warning">
-              <ShieldAlert size={16} className="model-guidance-icon" />
-              <div className="model-guidance-body">
-                <div className="model-guidance-title">检测到 {currentProvider.name}，但尚未完成认证</div>
-                <div className="model-guidance-desc">
-                  你可以直接在个人终端运行登录命令，或在下方填写自定义 Anthropic 兼容 Base URL 与 API Key 立即启用：
-                </div>
-                {isClaude && (
                   <div className="model-guidance-cmd-row">
-                    <code>claude auth login</code>
+                    <code>{selectedInstance.snapshot.installCommand}</code>
                     <button
                       type="button"
                       className="btn-secondary model-mini-copy-btn"
-                      onClick={() => handleCopyCommand('claude auth login', '登录命令')}
-                    >
-                      <Copy size={11} />
-                      <span>复制</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {isLocalAgent && !currentProvider.installed && (
-            <div className="model-guidance-box is-muted">
-              <AlertCircle size={16} className="model-guidance-icon" />
-              <div className="model-guidance-body">
-                <div className="model-guidance-title">未在本机或在线节点中检测到 {currentProvider.name}</div>
-                <div className="model-guidance-desc">
-                  如果该 Agent 安装在你的个人电脑上，请点击右上角「接入个人电脑」连接伴侣；或在本机安装后点击「刷新探测」：
-                </div>
-                {currentProvider.installCommand && (
-                  <div className="model-guidance-cmd-row">
-                    <code>{currentProvider.installCommand}</code>
-                    <button
-                      type="button"
-                      className="btn-secondary model-mini-copy-btn"
-                      onClick={() => handleCopyCommand(currentProvider.installCommand!, '安装命令')}
-                    >
-                      <Copy size={11} />
-                      <span>复制</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* 模型选择与自定义模型 */}
-          <div className="model-form-card">
-            <div className="model-field">
-              <label htmlFor="provider-model-select" className="model-field-label">
-                当前默认模型 (Model ID)
-              </label>
-              {isLocalAgent && candidateModels.length > 0 ? (
-                <select
-                  id="provider-model-select"
-                  className="form-control model-select"
-                  value={modelId}
-                  onChange={(e) => setModelId(e.target.value)}
-                >
-                  {candidateModels.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  id="provider-model-select"
-                  type="text"
-                  className="form-control model-input"
-                  value={modelId}
-                  onChange={(e) => setModelId(e.target.value)}
-                  placeholder="输入模型 ID，例如 claude-sonnet-4-6 或 gpt-4o"
-                />
-              )}
-
-              {candidateModels.length > 0 && (
-                <div className="model-candidate-tags">
-                  {candidateModels.map((m) => {
-                    const isCustomTag = customModels.includes(m);
-                    return (
-                      <span
-                        key={m}
-                        className={`model-candidate-chip ${m === modelId ? 'is-selected' : ''}`}
-                      >
-                        <button
-                          type="button"
-                          className="model-candidate-chip-btn"
-                          onClick={() => setModelId(m)}
-                        >
-                          {m}
-                        </button>
-                        {isCustomTag && (
-                          <button
-                            type="button"
-                            className="model-candidate-chip-remove"
-                            onClick={() => handleRemoveCustomModel(m)}
-                            title="移除自定义模型"
-                            aria-label={`移除 ${m}`}
-                          >
-                            <X size={10} />
-                          </button>
-                        )}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-
-              <div className="model-custom-add-row">
-                <input
-                  type="text"
-                  className="form-control model-custom-add-input"
-                  value={newCustomModel}
-                  onChange={(e) => setNewCustomModel(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddCustomModel();
-                    }
-                  }}
-                  placeholder="添加自定义模型 slug（回车或点击添加）"
-                />
-                <button
-                  type="button"
-                  className="btn-secondary model-custom-add-btn"
-                  onClick={handleAddCustomModel}
-                  disabled={!newCustomModel.trim()}
-                >
-                  <Plus size={13} />
-                  <span>添加模型</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Claude 专属认证与自定义网关 / Ollama Endpoint / 云端 API Key */}
-            {isClaude && (
-              <div className="model-subsection">
-                <div className="model-subsection-title">
-                  <KeyRound size={13} />
-                  <span>认证与自定义 API 网关（选填，留空则使用本机 claude auth login 登录态）</span>
-                </div>
-                <div className="model-two-col">
-                  <div className="model-field">
-                    <label htmlFor="claude-base-url" className="model-field-label">
-                      ANTHROPIC_BASE_URL
-                    </label>
-                    <input
-                      id="claude-base-url"
-                      type="text"
-                      className="form-control model-input"
-                      placeholder="https://api.anthropic.com 或中转网关地址"
-                      value={endpoint}
-                      onChange={(e) => setEndpoint(e.target.value)}
-                    />
-                  </div>
-                  <div className="model-field">
-                    <label htmlFor="claude-api-key" className="model-field-label">
-                      API Key / Auth Token
-                    </label>
-                    <div className="model-key-input-wrap">
-                      <input
-                        id="claude-api-key"
-                        type="password"
-                        className="form-control model-input"
-                        placeholder={
-                          hasSavedKey
-                            ? currentProvider.maskedKey || '已配置密钥 (留空保持不变)'
-                            : 'sk-ant-... (选填)'
+                      onClick={async () => {
+                        if (selectedInstance.snapshot?.installCommand) {
+                          const ok = await copyToClipboard(selectedInstance.snapshot.installCommand);
+                          showToast(ok ? '已复制安装命令' : '复制失败', ok ? 'success' : 'warning');
                         }
-                        value={apiKey}
-                        onChange={(e) => {
-                          setApiKey(e.target.value);
-                          if (e.target.value) setClearApiKey(false);
-                        }}
-                      />
-                      {hasSavedKey && (
-                        <button
-                          type="button"
-                          className="btn-secondary model-clear-key-btn"
-                          onClick={() => {
-                            setClearApiKey(true);
-                            setApiKey('');
-                          }}
-                        >
-                          清除
-                        </button>
-                      )}
-                    </div>
+                      }}
+                    >
+                      <Copy size={11} />
+                      <span>复制</span>
+                    </button>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            {isOllama && (
-              <div className="model-field">
-                <label htmlFor="local-endpoint-input" className="model-field-label">
-                  Ollama 服务接入点 (Base URL)
-                </label>
-                <input
-                  id="local-endpoint-input"
-                  type="text"
-                  className="form-control model-input"
-                  placeholder="http://127.0.0.1:11434"
-                  value={endpoint}
-                  onChange={(e) => setEndpoint(e.target.value)}
-                />
-              </div>
-            )}
-
-            {!isLocalAgent && (
+            <div className="model-form-card">
               <div className="model-two-col">
                 <div className="model-field">
-                  <label htmlFor="remote-api-key" className="model-field-label">
-                    API Key
-                  </label>
-                  <div className="model-key-input-wrap">
+                  <label className="model-field-label">实例显示名称</label>
+                  <input
+                    type="text"
+                    className="om-input model-input"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                  />
+                </div>
+
+                <div className="model-field">
+                  <label className="model-field-label">执行环境 (Environment)</label>
+                  <select
+                    className="om-input model-select"
+                    value={environmentId}
+                    onChange={(e) => setEnvironmentId(e.target.value)}
+                  >
+                    {environments.map((env) => (
+                      <option key={env.environmentId} value={env.environmentId}>
+                        {env.label} ({env.status === 'online' ? '在线' : '离线'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {!isAgentCliDriver(selectedInstance.driver) && (
+                <div className="model-form-stack">
+                  <div className="model-field">
+                    <label className="model-field-label">接口 Base URL</label>
                     <input
-                      id="remote-api-key"
-                      type="password"
-                      className="form-control model-input"
-                      placeholder={
-                        currentProvider.hasKey && !clearApiKey
-                          ? currentProvider.maskedKey || '已配置密钥 (留空保持不变)'
-                          : 'sk-...'
-                      }
-                      value={apiKey}
-                      onChange={(e) => {
-                        setApiKey(e.target.value);
-                        if (e.target.value) setClearApiKey(false);
-                      }}
+                      type="text"
+                      className="om-input model-input"
+                      placeholder="https://api.openai.com/v1"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
                     />
-                    {currentProvider.hasKey && !clearApiKey && (
-                      <button
-                        type="button"
-                        className="btn-secondary model-clear-key-btn"
-                        onClick={() => {
-                          setClearApiKey(true);
-                          setApiKey('');
-                        }}
+                  </div>
+                  {selectedInstance.driver !== 'ollama' && (
+                    <div className="model-field">
+                      <label className="model-field-label">API Key</label>
+                      <div className="model-key-input-wrap">
+                        <input
+                          type="password"
+                          className="om-input model-input"
+                          placeholder={
+                            selectedInstance.hasApiKey
+                              ? `已保存 (${selectedInstance.maskedApiKey || '****'})，留空保持不变`
+                              : '输入 API Key (sk-...)'
+                          }
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                        />
+                        {selectedInstance.hasApiKey && (
+                          <button
+                            type="button"
+                            className="btn-secondary model-clear-key-btn"
+                            onClick={handleClearKey}
+                          >
+                            <KeyRound size={12} />
+                            <span>清除</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 模型选择与实时探测能力展示 */}
+              <div className="model-subsection">
+                <div className="model-subsection-title">
+                  <Terminal size={13} />
+                  <span>默认模型与已发现能力</span>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-xs model-fetch-inline-btn"
+                    onClick={handleFetchModels}
+                    disabled={fetchingModels}
+                  >
+                    <RefreshCw size={11} className={fetchingModels ? 'model-spin-icon' : ''} />
+                    <span>{fetchingModels ? '拉取中…' : '刷新模型列表'}</span>
+                  </button>
+                </div>
+
+                <div className="model-field">
+                  <input
+                    type="text"
+                    className="om-input model-input"
+                    placeholder="输入或选择下方模型 ID"
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                  />
+                </div>
+
+                {mergedModelDescriptors.length > 0 && (
+                  <div className="model-candidates-wrap">
+                    {mergedModelDescriptors.map((desc) => {
+                      const isSelected = modelName.trim() === desc.slug;
+                      const isRemovable = Boolean(desc.isCustom && customModels.includes(desc.slug));
+                      return (
+                        <span
+                          key={desc.slug}
+                          className={`model-candidate-chip${isSelected ? ' is-selected' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className="model-candidate-chip-btn"
+                            onClick={() => setModelName(desc.slug)}
+                            title={desc.name !== desc.slug ? `${desc.name} (${desc.slug})` : desc.slug}
+                          >
+                            {desc.name || desc.slug}
+                          </button>
+                          {desc.supportsEffort && <span className="model-cap-tag">思考强度</span>}
+                          {isRemovable && (
+                            <button
+                              type="button"
+                              className="model-candidate-chip-remove"
+                              onClick={() => handleRemoveCustomModel(desc.slug)}
+                              aria-label={`移除自定义模型 ${desc.slug}`}
+                            >
+                              <X size={11} />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="model-custom-add-row">
+                  <input
+                    type="text"
+                    className="om-input model-custom-add-input"
+                    placeholder="添加自定义模型名称 (如 deepseek/deepseek-flash[1m])"
+                    value={newCustomModelInput}
+                    onChange={(e) => setNewCustomModelInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomModel();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary model-custom-add-btn"
+                    onClick={handleAddCustomModel}
+                  >
+                    <Plus size={12} />
+                    <span>添加</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 原生 Agent 权限模式与推理深度 */}
+              {isAgentCliDriver(selectedInstance.driver) && (
+                <div className="model-subsection">
+                  <div className="model-two-col">
+                    <div className="model-field">
+                      <label className="model-field-label">工具审批与权限策略</label>
+                      <select
+                        className="om-input model-select"
+                        value={permissionMode}
+                        onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
                       >
-                        清除
-                      </button>
+                        <option value="ask">每次询问确认 (Ask)</option>
+                        <option value="auto_edits">自动批准文件编辑 (Auto Edits)</option>
+                        <option value="full">完全免确认执行 (Full Access)</option>
+                      </select>
+                    </div>
+
+                    <div className="model-field">
+                      <label className="model-field-label">
+                        推理强度 (Effort)
+                        {activeModelDescriptor?.supportsEffort ? ' · 当前模型支持' : ''}
+                      </label>
+                      <select
+                        className="om-input model-select"
+                        value={effort}
+                        onChange={(e) => setEffort(e.target.value as ReasoningEffort)}
+                      >
+                        <option value="default">跟随默认</option>
+                        <option value="low">Low (快速)</option>
+                        <option value="medium">Medium (均衡)</option>
+                        <option value="high">High (深度思考)</option>
+                        <option value="xhigh">XHigh</option>
+                        <option value="max">Max (极限推理)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="model-advanced-block">
+                    <button
+                      type="button"
+                      className="model-advanced-toggle"
+                      onClick={() => setShowAdvanced((prev) => !prev)}
+                    >
+                      {showAdvanced ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      <span>高级 CLI 路径与工作目录覆写</span>
+                    </button>
+
+                    {showAdvanced && (
+                      <div className="model-advanced-grid">
+                        <div className="model-field">
+                          <label className="model-field-label">自定义可执行文件路径 (binaryPath)</label>
+                          <input
+                            type="text"
+                            className="om-input model-input"
+                            placeholder="留空自动探测"
+                            value={binaryPath}
+                            onChange={(e) => setBinaryPath(e.target.value)}
+                          />
+                        </div>
+                        <div className="model-field">
+                          <label className="model-field-label">默认工作目录 (cwd)</label>
+                          <input
+                            type="text"
+                            className="om-input model-input"
+                            placeholder="留空使用网关工作区根目录"
+                            value={cwd}
+                            onChange={(e) => setCwd(e.target.value)}
+                          />
+                        </div>
+                        <div className="model-field">
+                          <label className="model-field-label">附加 CLI 参数 (extraArgs)</label>
+                          <input
+                            type="text"
+                            className="om-input model-input"
+                            placeholder="例如：--verbose"
+                            value={extraArgs}
+                            onChange={(e) => setExtraArgs(e.target.value)}
+                          />
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
-                <div className="model-field">
-                  <label htmlFor="remote-endpoint-input" className="model-field-label">
-                    Base URL / Endpoint
-                  </label>
-                  <input
-                    id="remote-endpoint-input"
-                    type="text"
-                    className="form-control model-input"
-                    placeholder={currentProvider.baseUrl || 'https://api.openai.com/v1'}
-                    value={endpoint}
-                    onChange={(e) => setEndpoint(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* 高级运行时配置（本地 Agent 专属可折叠面板） */}
-            {isLocalAgent && !isOllama && (
-              <div className="model-advanced-block">
-                <button
-                  type="button"
-                  className="model-advanced-toggle"
-                  onClick={() => setShowAdvanced((v) => !v)}
-                >
-                  {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  <span>高级运行时配置（自定义路径、工作目录、CLI 参数）</span>
-                </button>
-                {showAdvanced && (
-                  <div className="model-advanced-grid">
-                    <div className="model-field">
-                      <label htmlFor="adv-binary-path" className="model-field-label">
-                        可执行文件路径覆盖 (Binary Path)
-                      </label>
-                      <input
-                        id="adv-binary-path"
-                        type="text"
-                        className="form-control model-input"
-                        placeholder={currentProvider.executablePath || `自动探测 ${currentProvider.id}`}
-                        value={binaryPath}
-                        onChange={(e) => setBinaryPath(e.target.value)}
-                      />
-                    </div>
-                    <div className="model-field">
-                      <label htmlFor="adv-config-dir" className="model-field-label">
-                        独立配置目录 (Config Dir)
-                      </label>
-                      <input
-                        id="adv-config-dir"
-                        type="text"
-                        className="form-control model-input"
-                        placeholder={isClaude ? '~/.claude (留空用默认)' : '默认配置目录'}
-                        value={configDir}
-                        onChange={(e) => setConfigDir(e.target.value)}
-                      />
-                    </div>
-                    <div className="model-field">
-                      <label htmlFor="adv-cwd" className="model-field-label">
-                        默认工作目录 (Working Directory)
-                      </label>
-                      <input
-                        id="adv-cwd"
-                        type="text"
-                        className="form-control model-input"
-                        placeholder="留空使用当前工作区目录"
-                        value={cwd}
-                        onChange={(e) => setCwd(e.target.value)}
-                      />
-                    </div>
-                    <div className="model-field">
-                      <label htmlFor="adv-extra-args" className="model-field-label">
-                        附加启动参数 (Extra CLI Args)
-                      </label>
-                      <input
-                        id="adv-extra-args"
-                        type="text"
-                        className="form-control model-input"
-                        placeholder="例如 --max-turns 5"
-                        value={extraArgs}
-                        onChange={(e) => setExtraArgs(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 连通性测试反馈横幅 */}
-          {testResult && (
-            <div className={`model-test-banner ${testResult.success ? 'is-success' : 'is-error'}`}>
-              {testResult.success ? (
-                <CheckCircle2 size={16} className="model-test-icon is-success" />
-              ) : (
-                <AlertCircle size={16} className="model-test-icon is-error" />
               )}
-              <div className="model-test-content">
-                <div className={`model-test-heading ${testResult.success ? 'is-success' : 'is-error'}`}>
-                  {testResult.success
-                    ? `连通性验证通过 (${testResult.latency || 0}ms)`
-                    : '连通性测试未通过'}
+
+              {/* 连通性测试结果条 */}
+              {testResult && (
+                <div className={`model-test-banner ${testResult.ok ? 'is-success' : 'is-error'}`}>
+                  {testResult.ok ? (
+                    <CheckCircle2 size={16} className="model-test-icon is-success" />
+                  ) : (
+                    <AlertCircle size={16} className="model-test-icon is-error" />
+                  )}
+                  <div className="model-test-content">
+                    <div className="model-test-heading">
+                      {testResult.ok
+                        ? `连通性测试通过 · ${testResult.latencyMs}ms${testResult.version ? ` · ${testResult.version}` : ''}`
+                        : `测试失败 (${testResult.diagnosticCode}): ${testResult.error || '请检查环境配置'}`}
+                    </div>
+                    {testResult.replyPreview && (
+                      <div className="model-detail-subtitle">
+                        实测响应预览: {testResult.replyPreview}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="model-test-detail">
-                  {testResult.success
-                    ? [
-                        testResult.version ? `版本: ${testResult.version}` : '',
-                        testResult.authLabel ? `认证: ${testResult.authLabel}` : '',
-                        testResult.replyPreview ? `响应预览: "${testResult.replyPreview}"` : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || testResult.message
-                    : testResult.message}
-                </div>
-              </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* 底部操作栏 */}
-      <div className="model-actions-bar">
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={handleTest}
-          disabled={isTesting}
-        >
-          {isTesting ? '正在验证运行与连通性...' : '测试连通性'}
-        </button>
-
-        <div className="model-actions-right">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => setIsModelModalOpen(false)}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? '保存中...' : isCurrentActive ? '保存配置' : '设为激活引擎并保存'}
-          </button>
-        </div>
+          </section>
+        )}
       </div>
     </Modal>
   );
